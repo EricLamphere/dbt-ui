@@ -1,0 +1,111 @@
+version: '3'
+
+vars:
+  BACKEND_DIR: backend
+  FRONTEND_DIR: frontend
+
+tasks:
+  # ---- Docker (production) ----
+
+  up:
+    desc: Build and start the full stack via Docker Compose
+    cmds:
+      - docker compose up --build -d
+      - echo "dbt-ui running at http://localhost:8000"
+
+  down:
+    desc: Stop and remove containers
+    cmds:
+      - docker compose down
+
+  logs:
+    desc: Tail container logs
+    cmds:
+      - docker compose logs -f
+
+  build:
+    desc: Build the Docker image without starting
+    cmds:
+      - docker compose build
+
+  # ---- Local development ----
+
+  dev:backend:
+    desc: Start the FastAPI backend in dev mode (hot reload)
+    dir: "{{.BACKEND_DIR}}"
+    cmds:
+      - mkdir -p "{{.ROOT_DIR}}/data"
+      - .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
+    env:
+      DBT_UI_WORKSPACE: "{{.ROOT_DIR}}/workspace"
+      DBT_UI_DATA_DIR: "{{.ROOT_DIR}}/data"
+      DBT_UI_FRONTEND_DIST: "{{.ROOT_DIR}}/frontend/dist"
+
+  dev:frontend:
+    desc: Start the Vite dev server
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm run dev
+
+  start:
+    desc: Start backend and frontend dev servers in parallel
+    deps:
+      - task: dev:backend
+      - task: dev:frontend
+
+  # ---- Install ----
+
+  install:backend:
+    desc: Install Python dependencies into a virtualenv
+    dir: "{{.BACKEND_DIR}}"
+    cmds:
+      - python -m venv .venv
+      - .venv/bin/pip install -e ".[dev]"
+
+  install:frontend:
+    desc: Install Node dependencies
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm install
+
+  install:
+    desc: Install all dependencies
+    cmds:
+      - task: install:backend
+      - task: install:frontend
+
+  # ---- Tests ----
+
+  test:backend:
+    desc: Run the backend pytest suite
+    dir: "{{.BACKEND_DIR}}"
+    cmds:
+      - .venv/bin/pytest --cov=app --cov-report=term-missing -q
+
+  test:frontend:
+    desc: Type-check and build the frontend
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm run build
+
+  test:
+    desc: Run all tests
+    cmds:
+      - task: test:backend
+      - task: test:frontend
+
+  # ---- Lint ----
+
+  lint:
+    desc: Run ruff on the backend
+    dir: "{{.BACKEND_DIR}}"
+    cmds:
+      - .venv/bin/ruff check app tests
+
+  # ---- Data ----
+
+  db:reset:
+    desc: Delete the local SQLite database (dev only)
+    cmds:
+      - rm -f data/dbt_ui.sqlite
+      - echo "Database reset."

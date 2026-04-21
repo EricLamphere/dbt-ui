@@ -1,0 +1,133 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Surface layers */
+  --bg-app:      26  29  33;   /* #1a1d21 — darkest layer */
+  --bg-panel:    34  38  43;   /* #22262b — panels, sidebars */
+  --bg-elevated: 42  47  53;   /* #2a2f35 — cards, dropdowns */
+
+  /* Teal accent ramp */
+  --brand-50:  240 253 250;
+  --brand-100: 204 251 241;
+  --brand-200: 153 246 228;
+  --brand-300: 94  234 212;
+  --brand-400: 45  212 191;
+  --brand-500: 20  184 166;
+  --brand-600: 13  148 136;
+  --brand-700: 15  118 110;
+  --brand-800: 17  94  89;
+  --brand-900: 19  78  74;
+  --brand-950: 4   47  46;
+}
+
+@layer base {
+  html {
+    font-size: 17px;
+  }
+
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  body {
+    background-color: rgb(var(--bg-app));
+    @apply text-gray-100 font-sans antialiased;
+    margin: 0;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background-color: rgb(var(--bg-panel));
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply bg-gray-600 rounded;
+  }
+}
+
+/* README markdown styles */
+.prose-readme {
+  color: rgb(209 213 219); /* gray-300 */
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+.prose-readme h1, .prose-readme h2, .prose-readme h3,
+.prose-readme h4, .prose-readme h5, .prose-readme h6 {
+  color: rgb(243 244 246); /* gray-100 */
+  font-weight: 600;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+.prose-readme h1 { font-size: 1.25rem; }
+.prose-readme h2 { font-size: 1.125rem; }
+.prose-readme h3 { font-size: 1rem; }
+.prose-readme p { margin-bottom: 0.75em; }
+/* .prose-readme a — defined below in React Flow overrides section */
+.prose-readme code {
+  background: rgb(31 41 55); /* gray-800 */
+  color: rgb(167 243 208); /* emerald-200 */
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+  font-size: 0.8em;
+  font-family: 'Menlo', 'Monaco', monospace;
+}
+.prose-readme pre {
+  background: rgb(17 24 39); /* gray-900 */
+  border: 1px solid rgb(55 65 81); /* gray-700 */
+  border-radius: 6px;
+  padding: 1em;
+  overflow-x: auto;
+  margin-bottom: 1em;
+}
+.prose-readme pre code {
+  background: none;
+  padding: 0;
+  font-size: 0.8rem;
+}
+.prose-readme ul, .prose-readme ol {
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+.prose-readme li { margin-bottom: 0.25em; }
+/* .prose-readme blockquote — defined below in React Flow overrides section */
+.prose-readme hr {
+  border-color: rgb(55 65 81); /* gray-700 */
+  margin: 1.5em 0;
+}
+.prose-readme table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 1em;
+  font-size: 0.8rem;
+}
+.prose-readme th, .prose-readme td {
+  border: 1px solid rgb(55 65 81);
+  padding: 0.4em 0.75em;
+  text-align: left;
+}
+.prose-readme th { background: rgb(31 41 55); color: rgb(243 244 246); }
+
+/* React Flow overrides */
+.react-flow__background {
+  background-color: rgb(var(--bg-app)) !important;
+}
+.react-flow__edge-path {
+  stroke: rgb(var(--brand-600) / 0.6) !important;
+  stroke-width: 2px;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: rgb(var(--brand-400) / 1) !important;
+}
+
+/* README prose — update accent from indigo to teal */
+.prose-readme a { color: rgb(var(--brand-300)); text-decoration: underline; }
+.prose-readme blockquote {
+  border-left: 3px solid rgb(var(--brand-500));
+  padding-left: 1em;
+  color: rgb(156 163 175);
+  margin: 1em 0;
+}

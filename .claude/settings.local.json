@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(obsidian search:*)",
+      "Bash(obsidian read:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.getdbt.com)",
+      "Bash(grep *)"
+    ]
+  }
+}

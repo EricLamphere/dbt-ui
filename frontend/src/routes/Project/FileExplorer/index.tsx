@@ -1,0 +1,422 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { api, type FileContentDto } from '../../../lib/api';
+import ProjectNav from '../components/ProjectNav';
+import { ContextMenu } from './ContextMenu';
+import { TreeItem } from './TreeItem';
+import { ViewPane } from './panes/ViewPane';
+import { RunPane } from './panes/RunPane';
+import { SetupPane } from './panes/SetupPane';
+import type { ContextMenuState, RenameState, TreeNode } from './types';
+import { filterTree, updateNode } from './types';
+
+type MainTab = 'view' | 'run' | 'setup';
+
+export default function FileExplorerPage() {
+  const { projectId } = useParams<{ projectId: string }>();
+  const id = Number(projectId);
+  const [searchParams] = useSearchParams();
+
+  const [tree, setTree] = useState<TreeNode[]>([]);
+  const [filterText, setFilterText] = useState('');
+  const [openFile, setOpenFile] = useState<FileContentDto | null>(null);
+  const [edited, setEdited] = useState<string | undefined>(undefined);
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState('');
+  const [loadingPath, setLoadingPath] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const [renameState, setRenameState] = useState<RenameState | null>(null);
+  const [mainTab, setMainTab] = useState<MainTab>('view');
+  /** unique_id of the model corresponding to the open file, if any */
+  const [modelUid, setModelUid] = useState<string | null>(null);
+  const [modelName, setModelName] = useState<string | null>(null);
+
+  // Resizable panels
+  const [treeWidth, setTreeWidth] = useState(256);
+  const [navWidth, setNavWidth] = useState(192);
+  const treeResizing = useRef(false);
+  const navResizing = useRef(false);
+
+  // Fetch graph so we can resolve model uid from file path
+  const { data: graph } = useQuery({
+    queryKey: ['models', id],
+    queryFn: () => api.models.graph(id),
+    refetchInterval: false,
+  });
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (treeResizing.current) {
+        setTreeWidth((w) => Math.max(150, Math.min(500, w + e.movementX)));
+      }
+      if (navResizing.current) {
+        setNavWidth((w) => Math.max(120, Math.min(320, w + e.movementX)));
+      }
+    };
+    const onMouseUp = () => {
+      treeResizing.current = false;
+      navResizing.current = false;
+    };
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+    };
+  }, []);
+
+  // Dismiss context menu on outside click
+  useEffect(() => {
+    if (!contextMenu) return;
+    const dismiss = () => setContextMenu(null);
+    window.addEventListener('mousedown', dismiss);
+    return () => window.removeEventListener('mousedown', dismiss);
+  }, [contextMenu]);
+
+  const reloadDir = useCallback(async (dirPath = '') => {
+    const nodes = await api.files.list(id, dirPath);
+    if (!dirPath) {
+      setTree(nodes as TreeNode[]);
+    } else {
+      const root = await api.files.list(id);
+      setTree(root as TreeNode[]);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    reloadDir();
+  }, [reloadDir]);
+
+  const openFileNode = useCallback(async (path: string) => {
+    setLoadingPath(path);
+    setEdited(undefined);
+    setSaveStatus('idle');
+    try {
+      const file = await api.files.getContent(id, path);
+      setOpenFile(file);
+      setMainTab('view');
+      // Resolve model uid for this file
+      if (graph) {
+        const node = graph.nodes.find((n) => n.original_file_path && path.endsWith(n.original_file_path));
+        if (node) {
+          setModelUid(node.unique_id);
+          setModelName(node.name);
+        } else {
+          setModelUid(null);
+          setModelName(null);
+        }
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingPath(null);
+    }
+  }, [id, graph]);
+
+  const SESSION_KEY = `file-explorer-open-${id}`;
+
+  // Persist open file path to sessionStorage whenever it changes
+  useEffect(() => {
+    if (openFile) {
+      sessionStorage.setItem(SESSION_KEY, openFile.path);
+    }
+  }, [openFile, SESSION_KEY]);
+
+  // Deep-link: ?model=<unique_id> — open the corresponding file
+  // Also restore last open file from sessionStorage (if no deep-link)
+  const deepLinkHandled = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandled.current) return;
+    if (!graph) return;
+    deepLinkHandled.current = true;
+
+    const modelParam = searchParams.get('model');
+    if (modelParam) {
+      const node = graph.nodes.find((n) => n.unique_id === modelParam);
+      if (node?.original_file_path) {
+        openFileNode(node.original_file_path);
+        return;
+      }
+    }
+
+    // Restore last open file from sessionStorage
+    const savedPath = sessionStorage.getItem(SESSION_KEY);
+    if (savedPath) {
+      openFileNode(savedPath);
+    }
+  }, [searchParams, graph, openFileNode, SESSION_KEY]);
+
+  const loadChildren = useCallback(async (node: TreeNode, pathParts: string[]) => {
+    if (!node.is_dir) return;
+    const children = await api.files.list(id, node.path);
+    setTree((prev) => updateNode(prev, pathParts, (n) => ({
+      ...n,
+      expanded: !n.expanded,
+      children: n.expanded ? n.children : (children as TreeNode[]),
+    })));
+  }, [id]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
+        e.preventDefault();
+        if (openFile && edited !== undefined) handleSave();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openFile, edited]);
+
+  const handleSave = async () => {
+    if (!openFile) return;
+    setSaving(true);
+    setSaveStatus('idle');
+    try {
+      const content = edited ?? openFile.content;
+      const updated = await api.files.putContent(id, openFile.path, content);
+      setOpenFile(updated);
+      setEdited(undefined);
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (e) {
+      setSaveError(String(e));
+      setSaveStatus('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteFile = async () => {
+    if (!openFile) return;
+    if (!confirm(`Delete '${openFile.path}'? This cannot be undone.`)) return;
+    try {
+      await api.files.delete(id, openFile.path);
+      setOpenFile(null);
+      setEdited(undefined);
+      setModelUid(null);
+      setModelName(null);
+      sessionStorage.removeItem(SESSION_KEY);
+      await reloadDir();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleContextRename = (node: TreeNode) => {
+    setContextMenu(null);
+    setRenameState({ path: node.path, currentName: node.name });
+  };
+
+  const handleContextDelete = async (node: TreeNode) => {
+    setContextMenu(null);
+    const label = node.is_dir ? `folder '${node.name}' and all its contents` : `'${node.name}'`;
+    if (!confirm(`Delete ${label}? This cannot be undone.`)) return;
+    try {
+      await api.files.delete(id, node.path);
+      if (openFile?.path === node.path || openFile?.path.startsWith(node.path + '/')) {
+        setOpenFile(null);
+        setEdited(undefined);
+        setModelUid(null);
+        setModelName(null);
+      }
+      await reloadDir();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleContextNewFile = async (node: TreeNode) => {
+    setContextMenu(null);
+    const dirPath = node.is_dir ? node.path : node.path.split('/').slice(0, -1).join('/');
+    const name = prompt('New file name:');
+    if (!name?.trim()) return;
+    try {
+      await api.files.newFile(id, name.trim(), dirPath, false);
+      await reloadDir();
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
+  const handleContextNewFolder = async (node: TreeNode) => {
+    setContextMenu(null);
+    const dirPath = node.is_dir ? node.path : node.path.split('/').slice(0, -1).join('/');
+    const name = prompt('New folder name:');
+    if (!name?.trim()) return;
+    try {
+      await api.files.newFile(id, name.trim(), dirPath, true);
+      await reloadDir();
+    } catch (e) {
+      alert(String(e));
+    }
+  };
+
+  const handleContextCopyPath = (node: TreeNode) => {
+    setContextMenu(null);
+    navigator.clipboard.writeText(node.path).catch(console.error);
+  };
+
+  const handleContextCopyRelativePath = (node: TreeNode) => {
+    setContextMenu(null);
+    navigator.clipboard.writeText(node.path).catch(console.error);
+  };
+
+  const handleRenameSubmit = async (newName: string) => {
+    if (!renameState) return;
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed === renameState.currentName) {
+      setRenameState(null);
+      return;
+    }
+    try {
+      await api.files.rename(id, renameState.path, trimmed);
+      if (openFile?.path === renameState.path) {
+        setOpenFile(null);
+        setEdited(undefined);
+        setModelUid(null);
+        setModelName(null);
+      }
+      await reloadDir();
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setRenameState(null);
+    }
+  };
+
+  const isDirty = edited !== undefined && edited !== openFile?.content;
+  const visibleTree = filterText.trim() ? filterTree(tree, filterText) : tree;
+
+  const MAIN_TABS: { id: MainTab; label: string; disabled?: boolean }[] = [
+    { id: 'view', label: 'View' },
+    { id: 'run', label: 'Run', disabled: !modelUid },
+    { id: 'setup', label: 'Setup' },
+  ];
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      {/* Side rail */}
+      <div style={{ width: navWidth }} className="shrink-0 bg-surface-panel border-r border-gray-800 flex flex-col overflow-hidden relative">
+        <ProjectNav projectId={id} current="files" />
+        <div
+          onMouseDown={() => { navResizing.current = true; }}
+          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-brand-500/40 transition-colors"
+        />
+      </div>
+
+      {/* File tree */}
+      <div style={{ width: treeWidth }} className="shrink-0 bg-surface-app border-r border-gray-800 flex flex-col overflow-hidden relative">
+        <div className="px-2 py-2 border-b border-gray-800 shrink-0">
+          <input
+            type="search"
+            placeholder="Filter files…"
+            value={filterText}
+            onChange={(e) => setFilterText(e.target.value)}
+            className="w-full bg-surface-elevated border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
+        <div className="overflow-auto flex-1 py-1">
+          {visibleTree.map((node, i) => (
+            <TreeItem
+              key={node.path}
+              node={node}
+              depth={0}
+              pathParts={[String(i)]}
+              onToggle={loadChildren}
+              onOpen={openFileNode}
+              activePath={openFile?.path ?? null}
+              loadingPath={loadingPath}
+              onContextMenu={(e, n, pp) => {
+                e.preventDefault();
+                setContextMenu({ x: e.clientX, y: e.clientY, node: n, pathParts: pp });
+              }}
+              renameState={renameState}
+              onRenameSubmit={handleRenameSubmit}
+            />
+          ))}
+        </div>
+        <div
+          onMouseDown={() => { treeResizing.current = true; }}
+          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-brand-500/40 transition-colors"
+        />
+      </div>
+
+      {/* Main pane */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Main tab bar */}
+        <div className="flex items-center gap-1 px-4 py-2 bg-surface-panel border-b border-gray-800 shrink-0">
+          {MAIN_TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => !t.disabled && setMainTab(t.id)}
+              disabled={t.disabled}
+              className={`px-4 py-1.5 text-sm rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed
+                ${mainTab === t.id
+                  ? 'bg-brand-900/50 text-brand-300 font-medium'
+                  : 'text-gray-500 hover:text-gray-300'
+                }`}
+            >
+              {t.label}
+            </button>
+          ))}
+          {openFile && mainTab === 'view' && (
+            <span className="ml-auto text-xs font-mono text-gray-600 truncate max-w-[300px]">{openFile.path}</span>
+          )}
+        </div>
+
+        {/* Pane content */}
+        <div className="flex-1 overflow-hidden">
+          {mainTab === 'view' && openFile && (
+            <ViewPane
+              projectId={id}
+              openFile={openFile}
+              edited={edited}
+              onEdit={setEdited}
+              onSave={handleSave}
+              onDelete={handleDeleteFile}
+              saving={saving}
+              saveStatus={saveStatus}
+              saveError={saveError}
+              isDirty={isDirty}
+              modelUid={modelUid}
+            />
+          )}
+          {mainTab === 'view' && !openFile && (
+            <div className="flex-1 flex items-center justify-center text-gray-600 text-sm select-none h-full">
+              Select a file to view or edit
+            </div>
+          )}
+          {mainTab === 'run' && modelUid && modelName && (
+            <RunPane
+              projectId={id}
+              modelName={modelName}
+              modelUid={modelUid}
+            />
+          )}
+          {mainTab === 'setup' && (
+            <SetupPane projectId={id} />
+          )}
+        </div>
+      </div>
+
+      {/* Context menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          node={contextMenu.node}
+          onRename={() => handleContextRename(contextMenu.node)}
+          onDelete={() => handleContextDelete(contextMenu.node)}
+          onNewFile={() => handleContextNewFile(contextMenu.node)}
+          onNewFolder={() => handleContextNewFolder(contextMenu.node)}
+          onCopyPath={() => handleContextCopyPath(contextMenu.node)}
+          onCopyRelativePath={() => handleContextCopyRelativePath(contextMenu.node)}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,349 @@
+const BASE = '/api';
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    ...init,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => res.statusText);
+    throw new Error(`${res.status} ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export function get<T>(path: string): Promise<T> {
+  return request<T>(path);
+}
+
+export function post<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'POST',
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+export function put<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'PUT',
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+export function del<T>(path: string): Promise<T> {
+  return request<T>(path, { method: 'DELETE' });
+}
+
+export function patch<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, {
+    method: 'PATCH',
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
+// ---- typed helpers ----
+
+export interface Project {
+  id: number;
+  name: string;
+  path: string;
+  platform: string;
+  profile: string | null;
+  vscode_cmd: string | null;
+  init_script_path: string;
+  readme: string | null;
+}
+
+export interface ModelNode {
+  unique_id: string;
+  name: string;
+  resource_type: string;
+  schema_: string | null;
+  database: string | null;
+  materialized: string | null;
+  tags: string[];
+  description: string;
+  original_file_path: string | null;
+  status: 'idle' | 'pending' | 'running' | 'success' | 'error' | 'stale' | 'warn';
+  message: string | null;
+}
+
+export interface Edge {
+  source: string;
+  target: string;
+}
+
+export interface GraphDto {
+  nodes: ModelNode[];
+  edges: Edge[];
+}
+
+export interface InitStepDto {
+  id: number | null;
+  name: string;
+  order: number;
+  is_base: boolean;
+  enabled: boolean;
+  script_path: string | null;
+}
+
+export interface SqlDto {
+  unique_id: string;
+  path: string;
+  content: string;
+}
+
+export interface FileNode {
+  name: string;
+  path: string;
+  is_dir: boolean;
+  children: FileNode[] | null;
+}
+
+export interface FileContentDto {
+  path: string;
+  content: string;
+  language: string;
+}
+
+export interface EnvVarDto {
+  key: string;
+  value: string;
+}
+
+export interface ProfileVarDto {
+  key: string;
+  value: string;
+}
+
+export interface ProfileDto {
+  id: number;
+  name: string;
+  is_default: boolean;
+  is_active: boolean;
+  vars: ProfileVarDto[];
+}
+
+export interface DocsColumnDto {
+  name: string;
+  description: string;
+  data_type: string;
+  meta: Record<string, unknown>;
+  tags: string[];
+  constraints: unknown[];
+  tests: string[];
+}
+
+export interface DocsArgumentDto {
+  name: string;
+  type: string | null;
+  description: string;
+}
+
+export interface DocsNodeDto {
+  unique_id: string;
+  name: string;
+  resource_type: string;
+  schema: string | null;
+  database: string | null;
+  package_name: string | null;
+  path: string | null;
+  language: string | null;
+  materialized: string | null;
+  access: string | null;
+  group: string | null;
+  contract: boolean;
+  relation_name: string | null;
+  owner: string | null;
+  catalog_type: string | null;
+  tags: string[];
+  description: string;
+  meta: Record<string, unknown>;
+  columns: DocsColumnDto[];
+  node_level_tests: string[];
+  raw_code: string;
+  compiled_code: string;
+  depends_on_nodes: string[];
+  depends_on_macros: string[];
+  refs: string[];
+  sources: unknown[];
+  child_models: string[];
+  child_tests: string[];
+  parents: string[];
+  // test-specific
+  attached_node: string | null;
+  column_name: string | null;
+  test_metadata: { name: string; kwargs: Record<string, unknown> } | null;
+}
+
+export interface DocsMacroDto {
+  unique_id: string;
+  name: string;
+  resource_type: 'macro';
+  package_name: string | null;
+  path: string | null;
+  description: string;
+  meta: Record<string, unknown>;
+  arguments: DocsArgumentDto[];
+  macro_sql: string;
+  depends_on_macros: string[];
+  child_models: string[];
+  child_tests: string[];
+  parents: string[];
+  tags: string[];
+}
+
+export interface DocsDataDto {
+  nodes: DocsNodeDto[];
+  macros: DocsMacroDto[];
+  project_name: string;
+  project_description: string;
+}
+
+export const api = {
+  projects: {
+    list: () => get<Project[]>('/projects'),
+    get: (id: number) => get<Project>(`/projects/${id}`),
+    rescan: () => post<Project[]>('/projects/rescan'),
+    listApplications: () => get<string[]>('/projects/applications'),
+    openInApp: (appName: string, path: string) =>
+      post<{ ok: boolean }>('/projects/open-in-app', { app_name: appName, path }),
+    updateSettings: (projectId: number, body: { init_script_path: string }) =>
+      patch<Project>(`/projects/${projectId}/settings`, body),
+  },
+  models: {
+    graph: (projectId: number) => get<GraphDto>(`/projects/${projectId}/models`),
+    sql: (projectId: number, uniqueId: string) =>
+      get<SqlDto>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/sql`),
+    saveSql: (projectId: number, uniqueId: string, content: string) =>
+      put<SqlDto>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/sql`, { content }),
+    create: (projectId: number, name: string, sql: string) =>
+      post<{ name: string; path: string }>(`/projects/${projectId}/models`, { name, sql }),
+    delete: (projectId: number, uniqueId: string) =>
+      request<void>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}`, { method: 'DELETE' }),
+    compile: (projectId: number) =>
+      post<{ status: string }>(`/projects/${projectId}/compile`),
+    getCompiled: (projectId: number, uniqueId: string) =>
+      get<{ compiled_sql: string }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/compiled`),
+    show: (projectId: number, uniqueId: string, limit = 1000) =>
+      post<{ columns: string[]; rows: unknown[][] }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/show`, { limit }),
+  },
+  runs: {
+    run: (projectId: number, model: string, mode: string) =>
+      post(`/projects/${projectId}/run`, { model, mode }),
+    build: (projectId: number, model: string, mode: string) =>
+      post(`/projects/${projectId}/build`, { model, mode }),
+    test: (projectId: number, model: string, mode: string) =>
+      post(`/projects/${projectId}/test`, { model, mode }),
+  },
+  files: {
+    list: (projectId: number, path = '') =>
+      get<FileNode[]>(`/projects/${projectId}/files${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+    getContent: (projectId: number, path: string) =>
+      get<FileContentDto>(`/projects/${projectId}/files/content?path=${encodeURIComponent(path)}`),
+    putContent: (projectId: number, path: string, content: string) =>
+      request<FileContentDto>(`/projects/${projectId}/files/content?path=${encodeURIComponent(path)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ content }),
+      }),
+    rename: (projectId: number, path: string, newName: string) =>
+      request<FileNode>(`/projects/${projectId}/files/rename?path=${encodeURIComponent(path)}`, {
+        method: 'POST',
+        body: JSON.stringify({ new_name: newName }),
+      }),
+    delete: (projectId: number, path: string) =>
+      request<void>(`/projects/${projectId}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }),
+    newFile: (projectId: number, name: string, dirPath: string, isDir = false) =>
+      request<FileNode>(`/projects/${projectId}/files/new`, {
+        method: 'POST',
+        body: JSON.stringify({ name, dir_path: dirPath, is_dir: isDir }),
+      }),
+  },
+  init: {
+    steps: (projectId: number) => get<InitStepDto[]>(`/projects/${projectId}/init/steps`),
+    open: (projectId: number) => post(`/projects/${projectId}/open`),
+    createStep: (projectId: number, name: string, content: string) =>
+      post(`/projects/${projectId}/init/steps`, { name, content }),
+    deleteStep: (projectId: number, name: string) =>
+      del(`/projects/${projectId}/init/steps/${encodeURIComponent(name)}`),
+    toggleStep: (projectId: number, name: string, enabled: boolean) =>
+      request<InitStepDto>(`/projects/${projectId}/init/steps/${encodeURIComponent(name)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled }),
+      }),
+    getScriptContent: (projectId: number, name: string) =>
+      get<{ content: string }>(`/projects/${projectId}/init/steps/${encodeURIComponent(name)}/content`)
+        .then((r) => r.content),
+    putScriptContent: (projectId: number, name: string, content: string) =>
+      put<{ ok: string }>(`/projects/${projectId}/init/steps/${encodeURIComponent(name)}/content`, { content }),
+    reorder: (projectId: number, ordered_names: string[]) =>
+      post(`/projects/${projectId}/init/reorder`, { ordered_names }),
+    linkStep: (projectId: number, path: string) =>
+      post<InitStepDto>(`/projects/${projectId}/init/steps/link`, { path }),
+    getEnvVars: (projectId: number) =>
+      get<EnvVarDto[]>(`/projects/${projectId}/init/env`),
+    setEnvVar: (projectId: number, key: string, value: string) =>
+      request<EnvVarDto>(`/projects/${projectId}/init/env/${encodeURIComponent(key)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ key, value }),
+      }),
+    deleteEnvVar: (projectId: number, key: string) =>
+      request<void>(`/projects/${projectId}/init/env/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    startSession: (platform: string, cwd?: string) =>
+      post<{ session_id: string }>('/projects/init-session/start', { platform, cwd: cwd ?? null }),
+    sendInput: (sessionId: string, data: string) =>
+      post(`/projects/init-session/${sessionId}/input`, { data }),
+    stopSession: (sessionId: string) =>
+      post(`/projects/init-session/${sessionId}/stop`),
+  },
+  profiles: {
+    list: (projectId: number) =>
+      get<ProfileDto[]>(`/projects/${projectId}/profiles`),
+    create: (projectId: number, name: string) =>
+      post<ProfileDto>(`/projects/${projectId}/profiles`, { name }),
+    rename: (projectId: number, profileId: number, name: string) =>
+      request<ProfileDto>(`/projects/${projectId}/profiles/${profileId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      }),
+    delete: (projectId: number, profileId: number) =>
+      request<void>(`/projects/${projectId}/profiles/${profileId}`, { method: 'DELETE' }),
+    setVar: (projectId: number, profileId: number, key: string, value: string) =>
+      request<ProfileVarDto>(`/projects/${projectId}/profiles/${profileId}/vars/${encodeURIComponent(key)}`, {
+        method: 'PUT',
+        body: JSON.stringify({ key, value }),
+      }),
+    deleteVar: (projectId: number, profileId: number, key: string) =>
+      request<void>(`/projects/${projectId}/profiles/${profileId}/vars/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    activate: (projectId: number, profileId: number) =>
+      post<ProfileDto>(`/projects/${projectId}/profiles/${profileId}/activate`),
+  },
+  docs: {
+    status: (projectId: number) =>
+      get<{ generated_at: string | null }>(`/projects/${projectId}/docs/status`),
+    generate: (projectId: number) =>
+      post<{ status: string }>(`/projects/${projectId}/docs/generate`),
+    data: (projectId: number) =>
+      get<DocsDataDto>(`/projects/${projectId}/docs/data`),
+  },
+  terminal: {
+    start: (cwd: string, cols: number, rows: number) =>
+      post<{ session_id: string }>('/terminal/start', { cwd, cols, rows }),
+    input: (sessionId: string, data: string) =>
+      post<{ ok: boolean }>(`/terminal/${sessionId}/input`, { data }),
+    resize: (sessionId: string, cols: number, rows: number) =>
+      post<{ ok: boolean }>(`/terminal/${sessionId}/resize`, { cols, rows }),
+    stop: (sessionId: string) =>
+      post<{ ok: boolean }>(`/terminal/${sessionId}/stop`),
+  },
+  settings: {
+    get: () => get<{ dbt_projects_path: string; configured: boolean }>('/settings'),
+    update: (body: { dbt_projects_path: string }) => put<{ dbt_projects_path: string; configured: boolean }>('/settings', body),
+  },
+  logs: {
+    projectLogs: (projectId: number, tail = 500) =>
+      get<{ lines: string[] }>(`/projects/${projectId}/logs/project?tail=${tail}`),
+    apiLogs: (projectId: number, tail = 500) =>
+      get<{ lines: string[] }>(`/projects/${projectId}/logs/api?tail=${tail}`),
+  },
+};
