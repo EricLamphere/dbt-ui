@@ -1,6 +1,6 @@
 # dbt-ui Architecture
 
-dbt-ui is a local-first web UI that wraps dbt-core. It runs as a single Docker container (or local dev server pair), discovers dbt projects from a mounted workspace directory, and provides a live-updating DAG view with run/build/test controls, an in-browser SQL editor, and a PTY-backed `dbt init` terminal.
+dbt-ui is a local-first web UI that wraps dbt-core. It runs as a single Docker container (or local dev server pair), discovers dbt projects from a configured workspace directory, and provides a live-updating DAG view with run/build/test controls, an integrated terminal, an in-browser SQL editor, and a PTY-backed `dbt init` terminal.
 
 ---
 
@@ -9,7 +9,7 @@ dbt-ui is a local-first web UI that wraps dbt-core. It runs as a single Docker c
 | Layer | Technology | Why |
 |---|---|---|
 | Backend | FastAPI (Python 3.11+) | Async, native SSE/streaming, simple subprocess management |
-| dbt execution | `subprocess` calling the system `dbt` CLI | Safe — avoids `dbtRunner` global state issues; one process per invocation |
+| dbt execution | `subprocess` calling the system `dbt` CLI | Safe — avoids dbt Python API global state issues; one process per invocation |
 | Manifest parsing | Custom JSON parser over `manifest.json` | Direct, version-agnostic parsing of dbt's output artifacts |
 | File watching | `watchfiles` (Rust-backed) | Low-overhead, async-friendly, debounced |
 | Live push | Server-Sent Events (SSE) via `sse-starlette` | One-way server→client is sufficient; simpler than WebSockets; built-in browser reconnect |
@@ -17,10 +17,10 @@ dbt-ui is a local-first web UI that wraps dbt-core. It runs as a single Docker c
 | Frontend | React 18 + Vite + TypeScript | Standard SPA stack |
 | DAG rendering | `@xyflow/react` + `dagre` | Interactive graph with automatic LR layout |
 | SQL editor | `@monaco-editor/react` | Full editor experience in-browser |
-| Terminal | `xterm.js` + `xterm-addon-fit` | PTY output rendering for `dbt init` |
+| Terminal | `xterm.js` + `xterm-addon-fit` | PTY output rendering for integrated terminal and `dbt init` |
 | Styling | Tailwind CSS | Utility-first, fast iteration |
 | Data fetching | TanStack Query | Cache invalidation on SSE events; no manual refetch logic |
-| Interactive init | `ptyprocess` | Full PTY for `dbt init`'s interactive prompts |
+| Interactive init / terminal | `ptyprocess` | Full PTY for `dbt init`'s interactive prompts and integrated bash terminal |
 
 ---
 
@@ -38,26 +38,31 @@ dbt-ui/
 │   │   │   ├── models.py            # /api/projects/{id}/models — DAG, create, compile
 │   │   │   ├── runs.py              # /api/projects/{id}/run|build|test
 │   │   │   ├── sql.py               # /api/projects/{id}/models/{uid}/sql GET/PUT
+│   │   │   ├── files.py             # /api/projects/{id}/files — file browser
+│   │   │   ├── docs.py              # /api/projects/{id}/docs — native docs browser
+│   │   │   ├── env.py               # /api/projects/{id}/env — env vars + profiles
 │   │   │   ├── init.py              # /api/projects/{id}/init — steps, pipeline, PTY session
+│   │   │   ├── terminal.py          # /api/terminal — integrated bash PTY sessions
+│   │   │   ├── settings.py          # /api/settings — global app config (dbt_projects_path)
 │   │   │   ├── events.py            # /api/projects/{id}/events — SSE endpoint
 │   │   │   └── health.py            # /api/health
 │   │   ├── db/
 │   │   │   ├── engine.py            # Async SQLAlchemy engine, SessionLocal, get_session
-│   │   │   ├── models.py            # ORM: Project, InitStep, ModelStatus, RunInvocation
-│   │   │   └── migrations.py        # create_all on startup
+│   │   │   ├── models.py            # ORM: 8 tables (see Database Schema below)
+│   │   │   └── migrations.py        # DDL-on-startup migrations
 │   │   ├── dbt/
 │   │   │   ├── manifest.py          # Parse target/manifest.json → nodes + edges
 │   │   │   ├── run_results.py       # Parse target/run_results.json → statuses
-│   │   │   ├── runner.py            # Async subprocess wrapper; streams stdout as SSE
+│   │   │   ├── runner.py            # DbtRunner singleton; subprocess + asyncio.Lock per project
 │   │   │   ├── select.py            # Build --select strings (only/upstream/downstream/full)
 │   │   │   ├── init_scripts.py      # Read/write init/*.sh custom scripts
-│   │   │   └── interactive.py       # PTY session manager (create_pending, start_pty, replay buffer)
+│   │   │   └── interactive.py       # InteractiveInitManager singleton (PTY sessions; reused for terminal)
 │   │   ├── events/
-│   │   │   ├── bus.py               # In-process pub/sub EventBus
+│   │   │   ├── bus.py               # In-process pub/sub EventBus singleton
 │   │   │   └── sse.py               # SSE response helpers (standard + with-replay)
 │   │   ├── projects/
 │   │   │   ├── discovery.py         # Walk workspace for dbt_project.yml; infer platform
-│   │   │   └── service.py           # list_projects, rescan_projects (upsert to DB)
+│   │   │   └── service.py           # list_projects, rescan_projects; _effective_workspace()
 │   │   └── watcher/
 │   │       └── service.py           # watchfiles task per project; routes to bus.publish
 │   ├── pyproject.toml
@@ -69,26 +74,33 @@ dbt-ui/
 │   │   ├── App.tsx                  # BrowserRouter + route definitions
 │   │   ├── lib/
 │   │   │   ├── api.ts               # fetch wrappers + typed API helpers
-│   │   │   └── sse.ts               # useProjectEvents, useInitSessionEvents hooks
+│   │   │   └── sse.ts               # useProjectEvents, useInitSessionEvents, useTerminalEvents
 │   │   ├── components/
-│   │   │   ├── Header.tsx           # Persistent nav (home link, New project, Project home)
+│   │   │   ├── Header.tsx           # Persistent nav (home link, New project, Settings)
 │   │   │   └── StatusBadge.tsx      # Status color chip
 │   │   └── routes/
-│   │       ├── Home.tsx             # Project list, search, rescan, new project modal
+│   │       ├── Home.tsx             # Project list, search, rescan, new project modal, global settings modal
 │   │       └── Project/
-│   │           ├── index.tsx        # Project home (init steps, open button)
-│   │           ├── Models.tsx       # React Flow DAG, side panel, log drawer, compile spinner
+│   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet>)
+│   │           ├── index.tsx            # Project home (tiles)
+│   │           ├── Models.tsx           # React Flow DAG with real-time run overlays
+│   │           ├── Docs.tsx             # Native docs browser (folder tree)
+│   │           ├── Environment.tsx      # Env vars + profiles
+│   │           ├── InitScripts.tsx      # Init pipeline management
+│   │           ├── FileExplorer/        # File browser + Monaco editor
 │   │           └── components/
+│   │               ├── BottomPane/
+│   │               │   ├── index.tsx        # Drag-to-resize pane; tab management; terminal instances
+│   │               │   ├── RunPanel.tsx     # Execution DAG (real-time run_log parsing)
+│   │               │   ├── TerminalPanel.tsx # xterm.js multi-instance terminal
+│   │               │   └── LogPanel.tsx     # Project and API logs
 │   │               ├── ModelNode.tsx
 │   │               ├── SqlEditorModal.tsx
-│   │               ├── InitStepsModal.tsx
-│   │               ├── NewModelModal.tsx
 │   │               └── NewProjectModal.tsx
 │   ├── vite.config.ts               # Dev proxy → :8001; prod build output
 │   └── tailwind.config.ts
 ├── docs/
 │   └── architecture.md              # This file
-├── workspace/                       # dbt projects (git-ignored; volume-mounted in Docker)
 ├── data/                            # SQLite database (git-ignored; volume-mounted in Docker)
 ├── docker-compose.yml
 └── Taskfile.yml
@@ -98,23 +110,26 @@ dbt-ui/
 
 ## Database Schema
 
+8 tables, all in `backend/app/db/models.py`:
+
 ```
 projects
-  id            INTEGER PK
-  name          TEXT(255)        -- from dbt_project.yml "name:"
-  path          TEXT(1024) UNIQUE -- absolute path to project directory
-  platform      TEXT(64)         -- inferred from profiles.yml (postgres, duckdb, athena, …)
-  profile       TEXT(255)        -- value of dbt_project.yml "profile:"
-  vscode_cmd    TEXT(255)        -- optional custom VS Code launch command
-  created_at    DATETIME
+  id                INTEGER PK
+  name              TEXT(255)          -- from dbt_project.yml "name:"
+  path              TEXT(1024) UNIQUE  -- absolute path to project directory
+  platform          TEXT(64)           -- inferred from profiles.yml (postgres, duckdb, …)
+  profile           TEXT(255)          -- value of dbt_project.yml "profile:"
+  vscode_cmd        TEXT(255)          -- optional custom VS Code launch command
+  init_script_path  TEXT(255)          -- subdirectory for init scripts (default "init/")
+  created_at        DATETIME
 
 init_steps
   id            INTEGER PK
   project_id    INTEGER FK→projects
-  name          TEXT(255)        -- "base: cd", "base: dbt deps", or "custom: <name>"
-  order         INTEGER          -- display/execution order
-  script_path   TEXT(1024)       -- path to .sh file (custom steps only)
-  is_base       BOOLEAN          -- True for built-in steps
+  name          TEXT(255)        -- display name
+  order         INTEGER          -- execution order
+  script_path   TEXT(1024)       -- absolute path for linked external scripts
+  is_base       BOOLEAN          -- True for built-in steps (dbt deps)
   enabled       BOOLEAN
   UNIQUE (project_id, name)
 
@@ -138,6 +153,27 @@ run_invocations
   log_path      TEXT(1024)
   started_at    DATETIME
   finished_at   DATETIME
+
+env_profiles
+  id            INTEGER PK
+  project_id    INTEGER FK→projects
+  name          TEXT(255)
+
+profile_env_vars
+  id            INTEGER PK
+  profile_id    INTEGER FK→env_profiles
+  key           TEXT(255)
+  value         TEXT
+
+project_env_vars
+  id            INTEGER PK
+  project_id    INTEGER FK→projects
+  key           TEXT(255)
+  value         TEXT
+
+app_settings
+  key           TEXT PK          -- e.g. "dbt_projects_path"
+  value         TEXT
 ```
 
 ---
@@ -147,6 +183,9 @@ run_invocations
 ```
 GET    /api/health
 
+GET    /api/settings
+PUT    /api/settings
+
 GET    /api/projects
 POST   /api/projects/rescan
 GET    /api/projects/{id}
@@ -154,7 +193,7 @@ GET    /api/projects/{id}
 GET    /api/projects/{id}/events                         SSE
 
 GET    /api/projects/{id}/models
-POST   /api/projects/{id}/models                         creates .sql + triggers dbt compile
+POST   /api/projects/{id}/models
 GET    /api/projects/{id}/models/{unique_id}
 GET    /api/projects/{id}/models/{unique_id}/sql
 PUT    /api/projects/{id}/models/{unique_id}/sql
@@ -173,6 +212,19 @@ POST   /api/projects/init-session/start                  pip install adapter + s
 POST   /api/projects/init-session/{session_id}/input
 POST   /api/projects/init-session/{session_id}/stop
 GET    /api/projects/init-session/{session_id}/events    SSE with replay buffer
+
+POST   /api/terminal/start                               spawn bash/zsh PTY
+POST   /api/terminal/{id}/input
+POST   /api/terminal/{id}/resize
+POST   /api/terminal/{id}/stop
+GET    /api/terminal/{id}/events                         SSE with replay buffer
+
+GET    /api/projects/{id}/env/profiles
+POST   /api/projects/{id}/env/profiles
+DELETE /api/projects/{id}/env/profiles/{profile_id}
+GET    /api/projects/{id}/env/vars
+POST   /api/projects/{id}/env/vars
+DELETE /api/projects/{id}/env/vars/{var_id}
 ```
 
 ---
@@ -184,7 +236,7 @@ All real-time updates flow through a single in-process pub/sub bus. Publishers c
 ### Event Bus (`events/bus.py`)
 
 ```
-EventBus
+EventBus (module singleton: bus)
   _subscribers: dict[topic → set[asyncio.Queue]]
 
   subscribe(topic)  → asyncio.Queue   (creates queue, registers it)
@@ -198,25 +250,28 @@ Each SSE client gets its own queue. `publish` is non-blocking (`put_nowait`); ev
 
 | Topic | Subscribers | Publishers |
 |---|---|---|
-| `project:{id}` | Models page, Project home page | Runner, Watcher, Init pipeline, `_compile_project` |
+| `project:{id}` | All project routes (RunPanel always mounted) | Runner, Watcher, Init pipeline, compile |
 | `init:{session_id}` | New project terminal modal | PTY reader, pip install stream |
+| `terminal:{session_id}` | TerminalPanel | PTY reader (bash/zsh) |
 
 ### Project-scoped Event Types
 
 | Type | Published by | Frontend effect |
 |---|---|---|
-| `run_started` | `runner.py` | Opens log drawer, clears logs |
-| `run_log` | `runner.py` | Appends line to log drawer |
-| `run_finished` | `runner.py` | — |
-| `run_error` | `runner.py` | — |
-| `statuses_changed` | `runs.py` | Invalidates models query → DAG tiles update |
+| `run_started` | `runner.py` | RunPanel begins tracking new run |
+| `run_log` | `runner.py` | RunPanel parses line → updates Execution DAG + Models DAG in real time |
+| `run_finished` | `runner.py` | RunPanel stops timer |
+| `run_error` | `runner.py` | RunPanel shows error |
+| `statuses_changed` | `runs.py` | Invalidates models query → DAG tiles update; clears live overlays |
 | `graph_changed` | `watcher.py`, `models.py` | Invalidates models query → DAG re-renders |
-| `files_changed` | `watcher.py` | — (graph_changed handles the visual update) |
-| `compile_started` | `models.py` | Shows "Compiling…" spinner in filter bar |
+| `files_changed` | `watcher.py` | — (graph_changed handles visual update) |
+| `compile_started` | `models.py` | Shows "Compiling…" spinner |
 | `compile_finished` | `models.py` | Hides spinner |
+| `docs_generating` | `docs.py` | — |
+| `docs_generated` | `docs.py` | Invalidates docs-status query |
 | `init_pipeline_started` | `init.py` | Init modal shows step list |
 | `init_step` | `init.py` | Init modal updates step status |
-| `init_pipeline_finished` | `init.py` | Init modal shows success/error; navigates on success |
+| `init_pipeline_finished` | `init.py` | Init modal shows success/error |
 
 ### Init Session Event Types
 
@@ -225,9 +280,16 @@ Each SSE client gets its own queue. `publish` is non-blocking (`put_nowait`); ev
 | `init_output` | `interactive.py`, pip install stream | Writes chunk to xterm.js terminal |
 | `init_finished` | `interactive.py` | Shows "Done" footer; triggers rescan on close |
 
+### Terminal Event Types
+
+| Type | Published by | Frontend effect |
+|---|---|---|
+| `terminal_output` | `interactive.py` PTY reader | Writes chunk to xterm.js |
+| `terminal_finished` | `interactive.py` PTY reader | Shows restart bar in TerminalPanel |
+
 ### SSE with Replay (`events/sse.py`)
 
-Init session events use a replay buffer. When a subscriber connects, the SSE endpoint first sends all buffered output chunks, then streams live events. This ensures the terminal shows complete output even if the user opens the modal after output has already started (e.g., during a slow pip install).
+PTY session events (init and terminal) use a replay buffer. When a subscriber connects, the SSE endpoint first sends all buffered output chunks, then streams live events. This ensures the terminal shows complete output even if the user navigates away and back, or opens the modal after output has started.
 
 Standard project events do not replay.
 
@@ -238,88 +300,91 @@ Standard project events do not replay.
 ### 1. Project Discovery
 
 On startup and on `POST /api/projects/rescan`:
-1. `discovery.py` walks the workspace directory for `dbt_project.yml` files
-2. For each project, reads `profile:` from the YAML and looks up the adapter type in `profiles.yml` (checks project dir → parent dir → `~/.dbt/profiles.yml`)
-3. `service.py` upserts rows into `projects` — new projects are added, existing rows have `name`/`platform`/`profile` refreshed, removed projects are deleted
+1. `_effective_workspace()` in `service.py` resolves the active projects path: checks `app_settings` DB table first, falls back to `DBT_PROJECTS_PATH` env var, returns `None` if unconfigured
+2. If `None`, rescan is a no-op; Home page shows a blocking banner
+3. `discovery.py` walks the workspace for `dbt_project.yml` files
+4. For each project, reads `profile:` from the YAML and looks up the adapter type in `profiles.yml`
+5. `service.py` upserts rows into `projects`
 
-### 2. Opening a Project (Init Pipeline)
+### 2. Global Settings
+
+- `GET /api/settings` returns `{ dbt_projects_path, configured }` where `configured: bool` indicates whether the path is meaningfully set
+- `PUT /api/settings` saves the path to `app_settings` and returns `configured: true`
+- Home page gates the project list on `configured` and shows an amber banner when false
+- `_effective_workspace()` is the single source of truth for path resolution across the backend
+
+### 3. Opening a Project (Init Pipeline)
 
 `POST /api/projects/{id}/open` → background task `_run_init_steps()`:
 1. Publishes `init_pipeline_started`
-2. For each enabled `InitStep` in order:
-   - Publishes `init_step {status: running}`
-   - Runs the step: `cd` (existence check), `dbt deps`, or `bash <script_path>`
-   - Publishes `init_step {status: success|error, log, return_code}`
-   - Stops on first failure
+2. For each enabled `InitStep` in order: runs `dbt deps` or `bash <script_path>`, publishes `init_step` with status
 3. Publishes `init_pipeline_finished`
 
-The frontend `InitStepsModal` subscribes to project SSE and renders a live progress list.
-
-### 3. Models DAG
+### 4. Models DAG
 
 `GET /api/projects/{id}/models`:
-1. Loads `target/manifest.json` with the custom parser in `manifest.py`
-2. Extracts nodes (models, seeds, snapshots, sources, tests) and parent→child edges from `parent_map`
+1. Loads `target/manifest.json` via `manifest.py`
+2. Extracts nodes and edges from `parent_map`
 3. Merges with latest `ModelStatus` rows from SQLite
 4. Returns `GraphDto {nodes, edges}`
 
-The frontend runs `dagre` layout on the nodes client-side and renders them with React Flow. Node colors reflect live status. Clicking a node opens the side panel with run controls and "Edit SQL".
+The frontend runs `dagre` layout client-side and renders with React Flow. `Models.tsx` overlays a live `liveStatuses` map (populated from `run_log` SSE parsing) so models turn blue while running without waiting for `statuses_changed`.
 
-### 4. Running dbt
+### 5. Running dbt
 
 `POST /api/projects/{id}/run` (same pattern for build/test):
-1. `select.py` builds the `--select` string from `(model_name, mode)` — e.g. `+my_model+` for full
-2. `runner.py` spawns `dbt run --select <selector>` as an async subprocess
-3. Each stdout/stderr line is published as `run_log`
-4. On exit, `run_results.py` parses `target/run_results.json` and upserts `ModelStatus` rows
-5. Publishes `statuses_changed` → frontend invalidates models query → DAG tiles update colors
+1. `select.py` builds the `--select` string from `(model_name, mode)`
+2. `runner.py` acquires the per-project `asyncio.Lock` and spawns `dbt run --select <selector>`
+3. Each stdout line is published as `run_log`
+4. `RunPanel.tsx` (always mounted) parses `run_log` lines with regex to identify START/result events, updates the Execution DAG in real time — models appear blue (running) as they start
+5. On exit, `run_results.py` parses `target/run_results.json`, upserts `ModelStatus`, publishes `statuses_changed`
+6. Frontend invalidates the graph query → final statuses applied
 
-### 5. Creating a New Model
+### 6. Execution DAG (RunPanel)
 
-`POST /api/projects/{id}/models`:
-1. Validates name (alphanumeric + `_-`, with `/` for subdirectories)
-2. Writes `models/<name>.sql` with the provided SQL (or a default scaffold)
-3. Spawns `dbt compile` as a background task
-4. Publishes `compile_started` → frontend shows spinner
-5. On compile success, publishes `compile_finished` + `graph_changed` → frontend hides spinner and refreshes DAG
+`RunPanel.tsx` is always mounted (height=0 when the pane is closed) so it never misses SSE events:
+- On `run_started`: builds a `name → unique_id` lookup map from current graph; sets a `newRunPending` flag
+- On `run_log` START line: clears previous run's nodes on first hit (lazy clear), adds node with `running` status
+- On `run_log` result line (OK/ERROR/WARN/PASS/FAIL): updates node status optimistically
+- `buildDisplayGraph` includes ancestor nodes so edges are visible even for single-model runs
+- On `statuses_changed`: final states confirmed from DB
 
-### 6. Interactive `dbt init`
+### 7. Integrated Terminal
 
-1. Frontend shows platform picker (Postgres, DuckDB, Athena, etc.)
-2. `POST /api/projects/init-session/start {platform}` creates a pending session and returns `session_id`
-3. Background task `_pip_install_and_start_pty()`:
-   - Reads shebang of system `dbt` binary to find its Python interpreter
-   - Runs `<dbt-python> -m pip install dbt-<platform>` streaming output as `init_output` events
-   - On success, spawns `dbt init` in a PTY via `ptyprocess`
-   - PTY reader task publishes `init_output` chunks; accumulates them in `replay_buffer`
-4. Frontend subscribes to `GET /api/projects/init-session/{id}/events` (SSE with replay)
-5. xterm.js renders all output; keyboard/paste input forwarded via `POST .../input`
-6. On `init_finished`, frontend calls `api.projects.rescan()` then closes modal — project appears in list
+`TerminalPanel.tsx` hosts multiple xterm.js instances (VSCode-style tabs):
+- `POST /api/terminal/start` spawns a login shell (`$SHELL -l`, falling back to zsh/bash/sh)
+- `InteractiveInitManager` singleton manages the PTY session (reused from `dbt init`)
+- `ResizeObserver` + `xterm-addon-fit` handle dynamic resize; a 30ms timeout ensures fit runs after the container is visible
+- Sessions persist until explicitly closed; switching tabs unmounts the terminal visually but keeps the session alive
 
-### 7. File Watching
+### 8. Interactive `dbt init`
 
-`WatcherManager` runs a supervisor loop that starts one `watchfiles.awatch` task per known project. Watched paths include `models/`, `tests/`, `seeds/`, `snapshots/`, `macros/`, and `target/`.
+1. Frontend shows platform picker
+2. `POST /api/projects/init-session/start {platform}` creates a pending session
+3. Background: pip-installs the adapter, then spawns `dbt init` via ptyprocess
+4. Frontend subscribes to SSE with replay buffer; xterm.js renders all output
+5. On `init_finished`, frontend rescans → project appears in list
 
-- `.sql`/`.yml` changes → `files_changed` event
-- `manifest.json` or `run_results.json` changes → `graph_changed` event
+### 9. File Watching
 
-The supervisor re-syncs every 10 seconds to pick up newly added projects.
+`WatcherManager` runs one `watchfiles.awatch` task per project. Watched paths: `models/`, `tests/`, `seeds/`, `snapshots/`, `macros/`, `analyses/`, `target/`.
+
+- `manifest.json` / `run_results.json` changes → `graph_changed`
+- `.sql` / `.yml` / `.yaml` changes → `files_changed`
 
 ---
 
 ## Configuration
 
-All settings are via environment variables (with defaults):
-
 | Variable | Default | Description |
 |---|---|---|
-| `DBT_UI_WORKSPACE` | `/workspace` | Root directory scanned for dbt projects |
+| `DBT_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects; overridable via UI settings |
 | `DBT_UI_DATA_DIR` | `/data` | Directory for SQLite database |
-| `DBT_UI_DATABASE_URL` | _(derived from DATA_DIR)_ | Override SQLite path or use a different DB URL |
+| `DBT_UI_DATABASE_URL` | _(derived from DATA_DIR)_ | Override SQLite path |
 | `DBT_UI_FRONTEND_DIST` | `/app/frontend_dist` | Path to built React SPA |
 | `DBT_UI_LOG_LEVEL` | `INFO` | structlog level |
 
-In local development, `DBT_UI_WORKSPACE` defaults to `./workspace` and `DBT_UI_DATA_DIR` to `./data` (relative to the backend working directory).
+In local development (`task dev:backend`), `DBT_UI_DATA_DIR` defaults to `./data` relative to the backend working directory.
 
 ---
 
@@ -331,33 +396,37 @@ A single multi-stage `Dockerfile`:
 1. `node:20-alpine` builds the React SPA (`npm run build`)
 2. `python:3.12-slim` installs Python deps and copies the built frontend dist
 
-`docker-compose.yml` mounts the user's dbt projects at `/workspace` and a named volume for SQLite at `/data`. The container binds on `127.0.0.1:8000` — not accessible off-host.
+`docker-compose.yml` mounts a named volume for SQLite at `/data`. The container binds on `127.0.0.1:8000`.
 
-```
+```bash
 docker compose up --build
 ```
 
 ### Local Development
 
-```
+```bash
 task install    # create venv, pip install, npm install
-task start      # runs backend (:8001) and frontend Vite dev server (:5173) in parallel
+task start      # backend (:8001) + Vite dev server (:5173) in parallel
 ```
 
-The Vite dev server proxies all `/api` requests to `localhost:8001`. The backend serves the built SPA in production but is not involved in frontend HMR during development.
+The Vite dev server proxies all `/api` requests to `localhost:8001`.
 
 ---
 
 ## Design Decisions
 
-**Subprocess over dbtRunner** — `dbtRunner` (dbt's Python API) is not safe for concurrent use: it modifies global state and is not re-entrant. Using a subprocess per invocation isolates execution completely and allows streaming stdout line-by-line.
+**Subprocess over dbt Python API** — the dbt Python API is not safe for concurrent use; it modifies global state and is not re-entrant. Using a subprocess per invocation isolates execution completely and allows streaming stdout line-by-line.
 
-**SSE over WebSockets** — All communication is server→client. SSE is sufficient, simpler, and has built-in browser reconnect. WebSockets would add bidirectional complexity for no benefit.
+**SSE over WebSockets** — All real-time communication is server→client. SSE is sufficient, simpler, and has built-in browser reconnect.
 
 **In-memory event bus** — A Redis or database-backed queue would add ops overhead for a local-only tool. The in-memory bus is zero-config and fast enough; events lost on restart are acceptable (the next page load re-fetches current state from disk).
 
-**Replay buffer for PTY only** — Run log events are ephemeral (the log file on disk is the durable record). PTY output has no equivalent durable store, so the replay buffer fills that gap for the init terminal.
+**Replay buffer for PTY sessions only** — Run log events are ephemeral (run_results.json is the durable record). PTY output has no equivalent durable store, so the replay buffer fills that gap for both the init terminal and the integrated bash terminal.
+
+**RunPanel always mounted** — The bottom pane can be collapsed, but `RunPanel` must always receive `run_log` SSE events. It renders with `height: 0` when hidden rather than unmounting, so no events are lost mid-run.
+
+**Lazy clear on new run** — `runNodeIds` is not cleared on `run_started`. It clears when the first `START` log line of the new run arrives. This keeps the previous run's Execution DAG visible until actual execution begins.
 
 **SQLite** — Single-user, local tool. No concurrent writes from multiple processes. SQLite with aiosqlite is zero-ops and sufficient.
 
-**Platform inference at rescan** — Platform is derived by reading `profiles.yml` at discovery time and stored in the DB. Checked in order: project dir → parent dir → `~/.dbt/profiles.yml`. Re-evaluated on every rescan (including at startup) so stale values are always refreshed.
+**`_effective_workspace()` as single source of truth** — The projects path can come from the `app_settings` DB table (set via UI) or the `DBT_PROJECTS_PATH` env var. All backend code that needs the workspace path calls this one function; nothing reads `settings.workspace` directly.

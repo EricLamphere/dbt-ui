@@ -14,7 +14,7 @@ from app.events.bus import bus, Event
 
 ```python
 await bus.publish(Event(
-    topic="project:42",     # "project:{id}" or "init:{session_id}"
+    topic="project:42",     # "project:{id}", "init:{session_id}", or "terminal:{session_id}"
     type="my_event",        # must be a known event type (see list below)
     data={"key": "value"},  # must be JSON-serialisable
 ))
@@ -52,7 +52,7 @@ return sse_response_with_replay(
 )
 ```
 
-Use `sse_response_with_replay` **only** for PTY init sessions. All other SSE endpoints use `sse_response`.
+Use `sse_response_with_replay` for PTY sessions (both `init:{session_id}` and `terminal:{session_id}`). All other SSE endpoints use `sse_response`.
 
 ## Complete Event Type List
 
@@ -74,10 +74,12 @@ Use `sse_response_with_replay` **only** for PTY init sessions. All other SSE end
 | `init_pipeline_finished` | project | `api/init.py` |
 | `init_output` | init | `dbt/interactive.py` PTY reader |
 | `init_finished` | init | `dbt/interactive.py` PTY reader |
+| `terminal_output` | terminal | `dbt/interactive.py` PTY reader (bash terminal) |
+| `terminal_finished` | terminal | `dbt/interactive.py` PTY reader (bash terminal) |
 
 ## Adding a New Event Type
 
-1. Choose the right topic (`project:{id}` for almost everything; `init:{session_id}` for PTY only)
+1. Choose the right topic (`project:{id}` for almost everything; `init:{session_id}` for dbt init PTY; `terminal:{session_id}` for bash terminal)
 2. Add `await bus.publish(Event(...))` at the right call site in the backend
 3. In the frontend (`frontend/src/lib/sse.ts`), add handling in `useProjectEvents` callback if needed
 4. If the event signals stale cached data, add `qc.invalidateQueries(...)` in the relevant route component
