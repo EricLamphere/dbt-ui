@@ -8,17 +8,13 @@ from app.projects.discovery import DiscoveredProject, discover_projects
 from app.config import settings
 
 
-_DOCKER_DEFAULT = "/workspace"
-
-
 async def _effective_workspace(session: AsyncSession) -> Path | None:
-    """Return the effective workspace path, or None if not meaningfully configured."""
+    """Return the effective workspace path, or None if not configured."""
     row = await session.get(AppSetting, "dbt_projects_path")
     if row is not None and row.value:
         return Path(row.value)
-    # If the config value is just the Docker default and we're running locally, treat as unset
-    if str(settings.workspace) != _DOCKER_DEFAULT:
-        return settings.workspace
+    if settings.dbt_projects_path is not None:
+        return settings.dbt_projects_path
     return None
 
 

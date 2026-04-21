@@ -38,7 +38,7 @@ async def lifespan(app: FastAPI):
     await init_db()
     async with SessionLocal() as session:
         await rescan_projects(session)
-    log.info("startup", workspace=str(settings.workspace), db=settings.resolved_database_url())
+    log.info("startup", workspace=str(settings.dbt_projects_path), db=settings.resolved_database_url())
     await watcher_manager.start()
     try:
         yield

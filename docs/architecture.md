@@ -1,6 +1,6 @@
 # dbt-ui Architecture
 
-dbt-ui is a local-first web UI that wraps dbt-core. It runs as a single Docker container (or local dev server pair), discovers dbt projects from a configured workspace directory, and provides a live-updating DAG view with run/build/test controls, an integrated terminal, an in-browser SQL editor, and a PTY-backed `dbt init` terminal.
+dbt-ui is a local-first web UI that wraps dbt-core. It runs as a local dev server pair (FastAPI + Vite), discovers dbt projects from a configured workspace directory, and provides a live-updating DAG view with run/build/test controls, an integrated terminal, an in-browser SQL editor, and a PTY-backed `dbt init` terminal.
 
 ---
 
@@ -66,7 +66,6 @@ dbt-ui/
 │   │   └── watcher/
 │   │       └── service.py           # watchfiles task per project; routes to bus.publish
 │   ├── pyproject.toml
-│   ├── Dockerfile                   # Multi-stage: frontend build → backend runtime
 │   └── tests/
 ├── frontend/
 │   ├── src/
@@ -101,8 +100,7 @@ dbt-ui/
 │   └── tailwind.config.ts
 ├── docs/
 │   └── architecture.md              # This file
-├── data/                            # SQLite database (git-ignored; volume-mounted in Docker)
-├── docker-compose.yml
+├── data/                            # SQLite database (git-ignored)
 └── Taskfile.yml
 ```
 
@@ -378,38 +376,21 @@ The frontend runs `dagre` layout client-side and renders with React Flow. `Model
 
 | Variable | Default | Description |
 |---|---|---|
-| `DBT_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects; overridable via UI settings |
-| `DBT_UI_DATA_DIR` | `/data` | Directory for SQLite database |
+| `DBT_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects; overridable via Global Settings UI |
+| `DBT_UI_DATA_DIR` | `data/` | Directory for SQLite database |
 | `DBT_UI_DATABASE_URL` | _(derived from DATA_DIR)_ | Override SQLite path |
-| `DBT_UI_FRONTEND_DIST` | `/app/frontend_dist` | Path to built React SPA |
 | `DBT_UI_LOG_LEVEL` | `INFO` | structlog level |
-
-In local development (`task dev:backend`), `DBT_UI_DATA_DIR` defaults to `./data` relative to the backend working directory.
 
 ---
 
-## Deployment
-
-### Docker (production)
-
-A single multi-stage `Dockerfile`:
-1. `node:20-alpine` builds the React SPA (`npm run build`)
-2. `python:3.12-slim` installs Python deps and copies the built frontend dist
-
-`docker-compose.yml` mounts a named volume for SQLite at `/data`. The container binds on `127.0.0.1:8000`.
-
-```bash
-docker compose up --build
-```
-
-### Local Development
+## Running Locally
 
 ```bash
 task install    # create venv, pip install, npm install
 task start      # backend (:8001) + Vite dev server (:5173) in parallel
 ```
 
-The Vite dev server proxies all `/api` requests to `localhost:8001`.
+The Vite dev server proxies all `/api` requests to `localhost:8001`. Open [http://localhost:5173](http://localhost:5173).
 
 ---
 
@@ -429,4 +410,4 @@ The Vite dev server proxies all `/api` requests to `localhost:8001`.
 
 **SQLite** — Single-user, local tool. No concurrent writes from multiple processes. SQLite with aiosqlite is zero-ops and sufficient.
 
-**`_effective_workspace()` as single source of truth** — The projects path can come from the `app_settings` DB table (set via UI) or the `DBT_PROJECTS_PATH` env var. All backend code that needs the workspace path calls this one function; nothing reads `settings.workspace` directly.
+**`_effective_workspace()` as single source of truth** — The projects path can come from the `app_settings` DB table (set via UI) or `settings.dbt_projects_path` (the `DBT_PROJECTS_PATH` env var). All backend code that needs the workspace path calls this one function.

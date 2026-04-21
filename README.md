@@ -21,40 +21,37 @@ Gives you an interactive dependency graph, live run/build/test controls with str
 
 ### Prerequisites
 
-- Docker + Docker Compose
-
-### 1. Start
-
-```bash
-task up
-# or: docker compose up --build -d
-```
-
-Open [http://localhost:8000](http://localhost:8000).
-
-### 2. Configure your projects path
-
-On first launch, a banner prompts you to set **DBT_PROJECTS_PATH** — the directory containing your dbt projects. Click **Configure** and enter the path. The project list loads once the path is set.
-
-### 3. Stop
-
-```bash
-task down
-```
-
-## Development
-
-### Prerequisites
-
 - Python 3.11+
 - Node.js 20+
 - [Task](https://taskfile.dev) (`brew install go-task`)
+- `dbt-core` installed and on your `$PATH`
 
-### Install
+### 1. Install dependencies
 
 ```bash
-task install        # installs backend venv + frontend node_modules
+task install
 ```
+
+### 2. Start
+
+```bash
+task start
+```
+
+Open [http://localhost:5173](http://localhost:5173).
+
+### 3. Configure your projects path
+
+On first launch, a banner prompts you to set **DBT_PROJECTS_PATH** — the directory containing your dbt projects. Click **Configure** and enter the path. The project list loads once the path is set.
+
+You can also set it via environment variable instead of the UI:
+
+```bash
+export DBT_PROJECTS_PATH=$HOME/dbt-projects
+task start
+```
+
+## Development
 
 ### Run dev servers
 
@@ -68,8 +65,6 @@ Or run separately:
 task dev:backend    # FastAPI with hot reload (:8001)
 task dev:frontend   # Vite dev server, proxies /api → :8001 (:5173)
 ```
-
-Open [http://localhost:5173](http://localhost:5173).
 
 ### Tests
 
@@ -109,25 +104,22 @@ dbt-ui/
 │       └── lib/      api.ts, sse.ts (useProjectEvents, useInitSessionEvents, useTerminalEvents)
 ├── docs/
 │   └── architecture.md
-├── data/             SQLite database (git-ignored; volume-mounted in Docker)
-├── docker-compose.yml
+├── data/             SQLite database (git-ignored)
 └── Taskfile.yml
 ```
 
 **Stack highlights:**
 - Backend: FastAPI, SQLAlchemy (async), aiosqlite, sse-starlette, watchfiles, ptyprocess
 - Frontend: React 18, Vite, TypeScript, @xyflow/react, dagre, Monaco, xterm.js, TanStack Query, Tailwind CSS
-- DB: SQLite (8 tables; bind-mounted volume in Docker)
+- DB: SQLite (8 tables)
 - dbt invocation: subprocess only (serialized per project via asyncio.Lock)
 
 ## Environment Variables
 
-These are set automatically in Docker. Only needed if running outside Docker without `task dev:backend`.
-
 | Variable | Default | Description |
 |---|---|---|
 | `DBT_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects (overridable via UI) |
-| `DBT_UI_DATA_DIR` | `/data` | SQLite storage directory |
+| `DBT_UI_DATA_DIR` | `data/` | SQLite storage directory |
 | `DBT_UI_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 ## License

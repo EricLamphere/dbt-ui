@@ -1,7 +1,7 @@
 # dbt-ui
 
 Local web UI for managing dbt projects. No auth, single user, runs on localhost only.
-Dev: backend on `:8001`, frontend on `:5173`. Production Docker: `:8000`.
+Backend on `:8001`, frontend on `:5173`.
 
 ## Stack
 
@@ -13,7 +13,7 @@ Dev: backend on `:8001`, frontend on `:5173`. Production Docker: `:8000`.
 | Editor | Monaco (@monaco-editor/react) |
 | Terminal | xterm.js + ptyprocess (dbt init PTY) |
 | DB | SQLite via aiosqlite |
-| Deploy | Docker multi-stage + docker-compose + Taskfile |
+| Deploy | Taskfile (task start) |
 
 ## Directory Map
 
@@ -223,13 +223,13 @@ useInitSessionEvents(sessionId, onEvent, useCallback(() => { /* on close */ }, [
 ## Development Commands
 
 ```bash
+task start           # backend + frontend in parallel (primary)
 task dev:backend     # uvicorn on :8001, hot reload
 task dev:frontend    # vite on :5173, proxies /api → :8001
 task test:backend    # pytest --cov=app -q (run from backend/)
 task test            # pytest + tsc build
 task lint            # ruff check app tests
 task db:reset        # delete data/dbt_ui.sqlite
-task up / down       # docker compose (production)
 ```
 
 Single test file: `cd backend && .venv/bin/pytest tests/test_x.py -xvs`

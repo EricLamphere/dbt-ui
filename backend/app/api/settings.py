@@ -8,19 +8,14 @@ from app.db.models import AppSetting
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
-KNOWN_KEYS = {"dbt_projects_path"}
-
-# The default workspace path shipped in config — only meaningful inside Docker.
-_DOCKER_DEFAULT = "/workspace"
-
 
 class SettingsUpdateDto(BaseModel):
     dbt_projects_path: str
 
 
 class SettingsDto(BaseModel):
-    dbt_projects_path: str
-    configured: bool  # False when the path is the unconfigured Docker default
+    dbt_projects_path: str | None
+    configured: bool
 
 
 async def _get_override(session: AsyncSession, key: str) -> str | None:
@@ -33,10 +28,10 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> Settings
     override = await _get_override(session, "dbt_projects_path")
     if override is not None:
         return SettingsDto(dbt_projects_path=override, configured=True)
-    # No DB override — use env/config value but mark as unconfigured if it's the Docker default
-    path = str(settings.workspace)
-    configured = path != _DOCKER_DEFAULT
-    return SettingsDto(dbt_projects_path=path, configured=configured)
+    env_path = settings.dbt_projects_path
+    if env_path is not None:
+        return SettingsDto(dbt_projects_path=str(env_path), configured=True)
+    return SettingsDto(dbt_projects_path=None, configured=False)
 
 
 @router.put("", response_model=SettingsDto)

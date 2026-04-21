@@ -5,39 +5,14 @@ vars:
   FRONTEND_DIR: frontend
 
 tasks:
-  # ---- Docker (production) ----
-
-  up:
-    desc: Build and start the full stack via Docker Compose
-    cmds:
-      - docker compose up --build -d
-      - echo "dbt-ui running at http://localhost:8000"
-
-  down:
-    desc: Stop and remove containers
-    cmds:
-      - docker compose down
-
-  logs:
-    desc: Tail container logs
-    cmds:
-      - docker compose logs -f
-
-  build:
-    desc: Build the Docker image without starting
-    cmds:
-      - docker compose build
-
-  # ---- Local development ----
+  # ---- Development ----
 
   dev:backend:
     desc: Start the FastAPI backend in dev mode (hot reload)
     dir: "{{.BACKEND_DIR}}"
     cmds:
-      - mkdir -p "{{.ROOT_DIR}}/data"
       - .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
     env:
-      DBT_UI_WORKSPACE: "{{.ROOT_DIR}}/workspace"
       DBT_UI_DATA_DIR: "{{.ROOT_DIR}}/data"
       DBT_UI_FRONTEND_DIST: "{{.ROOT_DIR}}/frontend/dist"
 
