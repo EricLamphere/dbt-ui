@@ -337,13 +337,18 @@ export const api = {
       post<{ ok: boolean }>(`/terminal/${sessionId}/stop`),
   },
   settings: {
-    get: () => get<{ dbt_projects_path: string; configured: boolean }>('/settings'),
-    update: (body: { dbt_projects_path: string }) => put<{ dbt_projects_path: string; configured: boolean }>('/settings', body),
+    get: () => get<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; configured: boolean }>('/settings'),
+    update: (body: { dbt_projects_path?: string; data_dir?: string; log_level?: string }) =>
+      put<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; configured: boolean }>('/settings', body),
   },
   logs: {
     projectLogs: (projectId: number, tail = 500) =>
       get<{ lines: string[] }>(`/projects/${projectId}/logs/project?tail=${tail}`),
+    clearProjectLogs: (projectId: number) =>
+      del<{ ok: boolean }>(`/projects/${projectId}/logs/project`),
     apiLogs: (projectId: number, tail = 500) =>
       get<{ lines: string[] }>(`/projects/${projectId}/logs/api?tail=${tail}`),
+    clearApiLogs: (projectId: number) =>
+      del<{ ok: boolean }>(`/projects/${projectId}/logs/api`),
   },
 };

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
+import { ChevronsDownUp } from 'lucide-react';
 import { api, type FileContentDto } from '../../../lib/api';
 import ProjectNav from '../components/ProjectNav';
 import { ContextMenu } from './ContextMenu';
@@ -75,15 +76,54 @@ export default function FileExplorerPage() {
     return () => window.removeEventListener('mousedown', dismiss);
   }, [contextMenu]);
 
-  const reloadDir = useCallback(async (dirPath = '') => {
-    const nodes = await api.files.list(id, dirPath);
-    if (!dirPath) {
-      setTree(nodes as TreeNode[]);
-    } else {
-      const root = await api.files.list(id);
-      setTree(root as TreeNode[]);
+  const SESSION_KEY = `file-explorer-open-${id}`;
+  const EXPANDED_KEY = `file-explorer-expanded-${id}`;
+
+  const getExpandedPaths = useCallback((): Set<string> => {
+    try {
+      const raw = sessionStorage.getItem(EXPANDED_KEY);
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch {
+      return new Set();
     }
+  }, [EXPANDED_KEY]);
+
+  const saveExpandedPaths = useCallback((paths: Set<string>) => {
+    sessionStorage.setItem(EXPANDED_KEY, JSON.stringify([...paths]));
+  }, [EXPANDED_KEY]);
+
+  // Re-expand a flat tree by replaying the saved expanded paths breadth-first
+  const reexpandTree = useCallback(async (rootNodes: TreeNode[], expandedPaths: Set<string>): Promise<TreeNode[]> => {
+    if (expandedPaths.size === 0) return rootNodes;
+
+    let current = rootNodes;
+
+    // Walk each saved path and expand it, loading children if needed
+    const expand = async (nodes: TreeNode[], parts: string[]): Promise<TreeNode[]> => {
+      if (parts.length === 0) return nodes;
+      const [head, ...rest] = parts;
+      const results = await Promise.all(nodes.map(async (n) => {
+        if (!n.is_dir || n.name !== head) return n;
+        const children = n.children?.length ? n.children : (await api.files.list(id, n.path) as TreeNode[]);
+        const expandedChildren = rest.length > 0 ? await expand(children, rest) : children;
+        return { ...n, expanded: true, children: expandedChildren };
+      }));
+      return results;
+    };
+
+    for (const p of expandedPaths) {
+      const parts = p.split('/');
+      current = await expand(current, parts);
+    }
+    return current;
   }, [id]);
+
+  const reloadDir = useCallback(async () => {
+    const root = await api.files.list(id);
+    const expandedPaths = getExpandedPaths();
+    const reexpanded = await reexpandTree(root as TreeNode[], expandedPaths);
+    setTree(reexpanded);
+  }, [id, getExpandedPaths, reexpandTree]);
 
   useEffect(() => {
     reloadDir();
@@ -114,8 +154,6 @@ export default function FileExplorerPage() {
       setLoadingPath(null);
     }
   }, [id, graph]);
-
-  const SESSION_KEY = `file-explorer-open-${id}`;
 
   // Persist open file path to sessionStorage whenever it changes
   useEffect(() => {
@@ -151,12 +189,34 @@ export default function FileExplorerPage() {
   const loadChildren = useCallback(async (node: TreeNode, pathParts: string[]) => {
     if (!node.is_dir) return;
     const children = await api.files.list(id, node.path);
+    const willExpand = !node.expanded;
     setTree((prev) => updateNode(prev, pathParts, (n) => ({
       ...n,
-      expanded: !n.expanded,
-      children: n.expanded ? n.children : (children as TreeNode[]),
+      expanded: willExpand,
+      children: willExpand ? (children as TreeNode[]) : n.children,
     })));
-  }, [id]);
+    const expandedPaths = getExpandedPaths();
+    if (willExpand) {
+      expandedPaths.add(node.path);
+    } else {
+      // Collapse this folder and all descendants
+      for (const p of expandedPaths) {
+        if (p === node.path || p.startsWith(node.path + '/')) {
+          expandedPaths.delete(p);
+        }
+      }
+    }
+    saveExpandedPaths(expandedPaths);
+  }, [id, getExpandedPaths, saveExpandedPaths]);
+
+  const collapseAll = useCallback(() => {
+    saveExpandedPaths(new Set());
+    setTree((prev) => {
+      const collapse = (nodes: TreeNode[]): TreeNode[] =>
+        nodes.map((n) => ({ ...n, expanded: false, children: n.children ? collapse(n.children) : n.children }));
+      return collapse(prev);
+    });
+  }, [saveExpandedPaths]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -309,14 +369,21 @@ export default function FileExplorerPage() {
 
       {/* File tree */}
       <div style={{ width: treeWidth }} className="shrink-0 bg-surface-app border-r border-gray-800 flex flex-col overflow-hidden relative">
-        <div className="px-2 py-2 border-b border-gray-800 shrink-0">
+        <div className="flex items-center gap-1 px-2 py-2 border-b border-gray-800 shrink-0">
           <input
             type="search"
             placeholder="Filter files…"
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
-            className="w-full bg-surface-elevated border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
+            className="flex-1 bg-surface-elevated border border-gray-700 rounded px-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
+          <button
+            onClick={collapseAll}
+            title="Collapse all folders"
+            className="shrink-0 p-1 text-gray-600 hover:text-gray-300 transition-colors"
+          >
+            <ChevronsDownUp className="w-3.5 h-3.5" />
+          </button>
         </div>
         <div className="overflow-auto flex-1 py-1">
           {visibleTree.map((node, i) => (

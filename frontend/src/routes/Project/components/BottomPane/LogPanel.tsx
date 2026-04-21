@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../../../lib/api';
 import { useProjectEvents } from '../../../../lib/sse';
+import { Trash2 } from 'lucide-react';
 
 interface LogPanelProps {
   projectId: number;
@@ -97,6 +98,16 @@ export function LogPanel({ projectId, logType }: LogPanelProps) {
     setAutoScroll(atBottom);
   };
 
+  const handleClear = async () => {
+    if (logType === 'project') {
+      await api.logs.clearProjectLogs(projectId);
+    } else {
+      await api.logs.clearApiLogs(projectId);
+    }
+    setLiveLines([]);
+    qc.invalidateQueries({ queryKey });
+  };
+
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Toolbar */}
@@ -118,6 +129,13 @@ export function LogPanel({ projectId, logType }: LogPanelProps) {
               ↓ Scroll to bottom
             </button>
           )}
+          <button
+            onClick={handleClear}
+            className="text-gray-600 hover:text-red-400 transition-colors"
+            title="Clear log file"
+          >
+            <Trash2 className="w-3 h-3" />
+          </button>
           <button
             onClick={() => qc.invalidateQueries({ queryKey })}
             className="text-[10px] text-gray-600 hover:text-gray-300 transition-colors"

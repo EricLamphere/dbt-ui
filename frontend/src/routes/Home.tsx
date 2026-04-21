@@ -191,15 +191,16 @@ function GlobalSettingsModal({ onClose }: { onClose: () => void }) {
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const rows: { key: string; label: string; value: string | undefined }[] = [
+  const rows: { key: string; label: string; value: string | null | undefined; hint?: string }[] = [
     { key: 'dbt_projects_path', label: 'DBT_PROJECTS_PATH', value: appSettings?.dbt_projects_path },
+    { key: 'data_dir', label: 'DBT_UI_DATA_DIR', value: appSettings?.data_dir, hint: 'takes effect on restart' },
+    { key: 'log_level', label: 'DBT_UI_LOG_LEVEL', value: appSettings?.log_level, hint: 'takes effect on restart' },
   ];
 
   const handleSave = async (key: string) => {
-    if (key !== 'dbt_projects_path') return;
     setSaving(true);
     try {
-      await api.settings.update({ dbt_projects_path: editValue });
+      await api.settings.update({ [key]: editValue });
       setEditingKey(null);
       qc.invalidateQueries({ queryKey: ['app-settings'] });
     } catch (e) {
@@ -224,9 +225,12 @@ function GlobalSettingsModal({ onClose }: { onClose: () => void }) {
           <p className="text-xs text-gray-500">Configuration shared across all projects.</p>
           <div className="flex flex-col gap-1.5">
             {!appSettings && <p className="text-xs text-gray-600">Loading…</p>}
-            {rows.map(({ key, label, value }) => (
+            {rows.map(({ key, label, value, hint }) => (
               <div key={key} className="flex items-center gap-2 px-3 py-2 bg-surface-elevated rounded border border-gray-800 text-xs">
-                <span className="font-mono text-brand-300 w-44 shrink-0 truncate">{label}</span>
+                <div className="w-52 shrink-0">
+                  <span className="font-mono text-brand-300 truncate block">{label}</span>
+                  {hint && <span className="text-gray-600 italic">{hint}</span>}
+                </div>
                 <span className="text-gray-600">=</span>
                 {editingKey === key ? (
                   <>

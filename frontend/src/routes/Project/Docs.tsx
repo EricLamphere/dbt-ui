@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   RefreshCw, BookOpen, Search, ChevronRight, ChevronDown,
   Database, FileCode2, Layers, FlaskConical, Sprout, Wrench,
-  Copy, Check, Folder, FolderOpen, LayoutGrid, Package,
+  Copy, Check, Folder, FolderOpen, LayoutGrid, Package, ChevronsDownUp,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { api, type DocsNodeDto, type DocsMacroDto } from '../../lib/api';
@@ -233,6 +233,42 @@ function resourceColor(type: string) {
   }
 }
 
+// ---- persistent expanded state ----
+
+function useExpandedSet(storageKey: string): [Set<string>, (key: string, open: boolean) => void, () => void] {
+  const [expanded, setExpanded] = useState<Set<string>>(() => {
+    try {
+      const raw = sessionStorage.getItem(storageKey);
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const toggle = useCallback((key: string, open: boolean) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (open) {
+        next.add(key);
+      } else {
+        // Also remove all descendants
+        for (const k of next) {
+          if (k === key || k.startsWith(key + '/')) next.delete(k);
+        }
+      }
+      sessionStorage.setItem(storageKey, JSON.stringify([...next]));
+      return next;
+    });
+  }, [storageKey]);
+
+  const collapseAll = useCallback(() => {
+    setExpanded(new Set());
+    sessionStorage.removeItem(storageKey);
+  }, [storageKey]);
+
+  return [expanded, toggle, collapseAll];
+}
+
 // ---- tab type ----
 
 type DocsTab = 'project' | 'database' | 'group';
@@ -253,6 +289,12 @@ export default function DocsPage() {
   const [filter, setFilter] = useState('');
   const [docsTab, setDocsTab] = useState<DocsTab>('project');
   const autoGenerateTriggered = useRef(false);
+
+  const [projectExpanded, setProjectExpanded, collapseProject] = useExpandedSet(`docs-expanded-project-${id}`);
+  const [databaseExpanded, setDatabaseExpanded, collapseDatabase] = useExpandedSet(`docs-expanded-database-${id}`);
+  const [groupExpanded, setGroupExpanded, collapseGroup] = useExpandedSet(`docs-expanded-group-${id}`);
+
+  const collapseAll = docsTab === 'project' ? collapseProject : docsTab === 'database' ? collapseDatabase : collapseGroup;
 
   const selectedUid = searchParams.get('node') ?? null;
 
@@ -403,10 +445,19 @@ export default function DocsPage() {
             ))}
           </div>
 
-          <div className="relative">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-600 pointer-events-none" />
-            <input type="search" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)}
-              className="w-full bg-surface-elevated border border-gray-700 rounded pl-6 pr-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+          <div className="flex items-center gap-1">
+            <div className="relative flex-1">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3 h-3 text-gray-600 pointer-events-none" />
+              <input type="search" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)}
+                className="w-full bg-surface-elevated border border-gray-700 rounded pl-6 pr-2 py-1 text-xs text-gray-200 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500" />
+            </div>
+            <button
+              onClick={collapseAll}
+              title="Collapse all folders"
+              className="shrink-0 p-1 text-gray-600 hover:text-gray-300 transition-colors"
+            >
+              <ChevronsDownUp className="w-3.5 h-3.5" />
+            </button>
           </div>
           {status?.generated_at && (
             <p className="text-[10px] text-gray-700 truncate">{new Date(status.generated_at).toLocaleString()}</p>
@@ -440,6 +491,8 @@ export default function DocsPage() {
                   selectedUid={selectedUid}
                   onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })}
                   filterQ={q}
+                  expanded={projectExpanded}
+                  onToggle={setProjectExpanded}
                 />
               )}
               {docsTab === 'database' && (
@@ -449,6 +502,8 @@ export default function DocsPage() {
                   onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })}
                   filterQ={q}
                   emptyLabel="No database objects found."
+                  expanded={databaseExpanded}
+                  onToggle={setDatabaseExpanded}
                 />
               )}
               {docsTab === 'group' && (
@@ -458,6 +513,8 @@ export default function DocsPage() {
                   onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })}
                   filterQ={q}
                   emptyLabel="No grouped nodes found."
+                  expanded={groupExpanded}
+                  onToggle={setGroupExpanded}
                 />
               )}
             </>
@@ -496,16 +553,23 @@ interface ProjectRootTreeProps {
   selectedUid: string | null;
   onSelect: (uid: string) => void;
   filterQ: string;
+  expanded: Set<string>;
+  onToggle: (key: string, open: boolean) => void;
 }
 
-function ProjectRootTree({ projectName, sections, selectedUid, onSelect, filterQ }: ProjectRootTreeProps) {
+function ProjectRootTree({ projectName, sections, selectedUid, onSelect, filterQ, expanded, onToggle }: ProjectRootTreeProps) {
   const isFilterActive = filterQ.length > 0;
-  const [open, setOpen] = useState(true);
+  // Default open if not explicitly collapsed
+  const open = isFilterActive || !expanded.has('__root__:closed');
 
-  // When filter becomes active, ensure the root stays open
-  useEffect(() => {
-    if (isFilterActive) setOpen(true);
-  }, [isFilterActive]);
+  const handleToggle = () => {
+    // We track closed state specially so default is open
+    if (open) {
+      onToggle('__root__:closed', true);
+    } else {
+      onToggle('__root__:closed', false);
+    }
+  };
 
   const isSelected = selectedUid === '__project__';
 
@@ -514,7 +578,7 @@ function ProjectRootTree({ projectName, sections, selectedUid, onSelect, filterQ
       {/* Project root row */}
       <div className="flex items-center">
         <button
-          onClick={() => setOpen((v) => !v)}
+          onClick={handleToggle}
           className="p-1 pl-2 text-gray-600 hover:text-gray-400 shrink-0"
         >
           {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
@@ -539,34 +603,39 @@ function ProjectRootTree({ projectName, sections, selectedUid, onSelect, filterQ
           {sections.map((section) => (
             <SectionTree
               key={section.id}
+              sectionKey={section.id}
               label={section.label}
               resourceType={section.resourceType}
               tree={section.tree}
               selectedUid={selectedUid}
               onSelect={onSelect}
               filterQ={filterQ}
+              expanded={expanded}
+              onToggle={onToggle}
             />
           ))}
         </div>
       )}
     </div>
   );
+
 }
 
 // ---- SectionTree (Project tab) ----
 
 interface SectionTreeProps {
+  sectionKey: string;
   label: string;
   resourceType: string;
   tree: TreeDir;
   selectedUid: string | null;
   onSelect: (uid: string) => void;
   filterQ: string;
+  expanded: Set<string>;
+  onToggle: (key: string, open: boolean) => void;
 }
 
-function SectionTree({ label, resourceType, tree, selectedUid, onSelect, filterQ }: SectionTreeProps) {
-  const [open, setOpen] = useState(false);
-
+function SectionTree({ sectionKey, label, resourceType, tree, selectedUid, onSelect, filterQ, expanded, onToggle }: SectionTreeProps) {
   const { matchingUids, expandedDirs } = useMemo(() => {
     if (!filterQ) return { matchingUids: null, expandedDirs: null };
     return {
@@ -588,15 +657,13 @@ function SectionTree({ label, resourceType, tree, selectedUid, onSelect, filterQ
     return n;
   }, [tree]);
 
-  // Auto-open section when filter is active and has matches
-  useEffect(() => {
-    if (filterQ && matchingUids && matchingUids.size > 0) setOpen(true);
-  }, [filterQ, matchingUids]);
+  const isFilterActive = !!filterQ && matchingUids !== null && matchingUids.size > 0;
+  const open = isFilterActive || expanded.has(sectionKey);
 
   return (
     <div className="mb-0.5">
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => onToggle(sectionKey, !open)}
         className="w-full flex items-center gap-1.5 px-2 py-1 text-[10px] uppercase tracking-wider text-gray-500 font-semibold hover:text-gray-300 transition-colors"
       >
         {open ? <ChevronDown className="w-3 h-3 shrink-0" /> : <ChevronRight className="w-3 h-3 shrink-0" />}
@@ -619,7 +686,9 @@ function SectionTree({ label, resourceType, tree, selectedUid, onSelect, filterQ
               onSelect={onSelect}
               matchingUids={matchingUids}
               expandedDirs={expandedDirs}
-              pathKey={child.kind === 'dir' ? child.name : ''}
+              pathKey={sectionKey + '/' + (child.kind === 'dir' ? child.name : '')}
+              expanded={expanded}
+              onToggle={onToggle}
             />
           ))}
         </div>
@@ -638,9 +707,11 @@ interface FlatTreeProps {
   onSelect: (uid: string) => void;
   filterQ: string;
   emptyLabel: string;
+  expanded: Set<string>;
+  onToggle: (key: string, open: boolean) => void;
 }
 
-function FlatTree({ tree, selectedUid, onSelect, filterQ, emptyLabel }: FlatTreeProps) {
+function FlatTree({ tree, selectedUid, onSelect, filterQ, emptyLabel, expanded, onToggle }: FlatTreeProps) {
   const q = filterQ.toLowerCase().trim();
   const matchingUids = useMemo(() => q ? collectMatching(tree, q) : null, [tree, q]);
   const expandedDirs = useMemo(() => q ? expandedDirsForFilter(tree, q) : null, [tree, q]);
@@ -671,6 +742,8 @@ function FlatTree({ tree, selectedUid, onSelect, filterQ, emptyLabel }: FlatTree
           matchingUids={matchingUids}
           expandedDirs={expandedDirs}
           pathKey={child.kind === 'dir' ? child.name : ''}
+          expanded={expanded}
+          onToggle={onToggle}
         />
       ))}
     </div>
@@ -688,20 +761,13 @@ interface TreeNodeRowProps {
   matchingUids: Set<string> | null;
   expandedDirs: Set<string> | null;
   pathKey: string;
+  expanded: Set<string>;
+  onToggle: (key: string, open: boolean) => void;
 }
 
-function TreeNodeRow({ node, depth, resourceType, selectedUid, onSelect, matchingUids, expandedDirs, pathKey }: TreeNodeRowProps) {
+function TreeNodeRow({ node, depth, resourceType, selectedUid, onSelect, matchingUids, expandedDirs, pathKey, expanded, onToggle }: TreeNodeRowProps) {
   const isFilterActive = matchingUids !== null;
-  const defaultOpen = !isFilterActive ? false : (expandedDirs?.has(pathKey) ?? false);
-  const [open, setOpen] = useState(defaultOpen);
-
-  useEffect(() => {
-    if (isFilterActive) {
-      setOpen(expandedDirs?.has(pathKey) ?? false);
-    } else {
-      setOpen(false);
-    }
-  }, [isFilterActive, expandedDirs, pathKey]);
+  const open = isFilterActive ? (expandedDirs?.has(pathKey) ?? false) : expanded.has(pathKey);
 
   const indent = depth * 12;
 
@@ -743,7 +809,7 @@ function TreeNodeRow({ node, depth, resourceType, selectedUid, onSelect, matchin
   return (
     <div>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => !isFilterActive && onToggle(pathKey, !open)}
         style={{ paddingLeft: indent }}
         className="w-full text-left py-1 pr-3 text-xs flex items-center gap-1.5 text-gray-500 hover:text-gray-300 transition-colors"
       >
@@ -766,6 +832,8 @@ function TreeNodeRow({ node, depth, resourceType, selectedUid, onSelect, matchin
           matchingUids={matchingUids}
           expandedDirs={expandedDirs}
           pathKey={pathKey + '/' + child.name}
+          expanded={expanded}
+          onToggle={onToggle}
         />
       ))}
     </div>

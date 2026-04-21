@@ -57,23 +57,27 @@ export default function EnvironmentPage() {
 
 // ---- Global Settings (read-only, system-level) ----
 
-function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_path: string } | null }) {
+function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_path: string | null; data_dir: string | null; log_level: string | null } | null }) {
+  const rows: { label: string; value: string | null | undefined }[] = [
+    { label: 'DBT_PROJECTS_PATH', value: appSettings?.dbt_projects_path },
+    { label: 'DBT_UI_DATA_DIR', value: appSettings?.data_dir },
+    { label: 'DBT_UI_LOG_LEVEL', value: appSettings?.log_level },
+  ];
+
   return (
     <section>
       <h2 className="text-sm font-semibold text-gray-300 mb-1">Global Settings</h2>
-      <p className="text-xs text-gray-500 mb-4">System-level configuration shared across all projects. Managed via environment variables.</p>
+      <p className="text-xs text-gray-500 mb-4">System-level configuration shared across all projects. Edit via the Global Settings panel.</p>
       <div className="flex flex-col gap-1.5">
-        {appSettings ? (
-          <div className="flex items-center gap-2 px-3 py-2 bg-surface-panel rounded border border-gray-800/60 text-xs opacity-75">
+        {!appSettings && <p className="text-xs text-gray-600 italic">Loading…</p>}
+        {appSettings && rows.map(({ label, value }) => (
+          <div key={label} className="flex items-center gap-2 px-3 py-2 bg-surface-panel rounded border border-gray-800/60 text-xs opacity-75">
             <Lock className="w-3 h-3 text-gray-600 shrink-0" />
-            <span className="font-mono text-gray-500 w-44 shrink-0 truncate">DBT_PROJECTS_PATH</span>
+            <span className="font-mono text-gray-500 w-48 shrink-0 truncate">{label}</span>
             <span className="text-gray-600">=</span>
-            <span className="flex-1 font-mono text-gray-400 truncate">{appSettings.dbt_projects_path}</span>
-            <span className="text-[10px] text-gray-600 italic shrink-0">system env var</span>
+            <span className="flex-1 font-mono text-gray-400 truncate">{value ?? <span className="italic text-gray-600">not set</span>}</span>
           </div>
-        ) : (
-          <p className="text-xs text-gray-600 italic">Loading…</p>
-        )}
+        ))}
       </div>
     </section>
   );
