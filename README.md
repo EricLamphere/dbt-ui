@@ -58,11 +58,14 @@ task install        # installs backend venv + frontend node_modules
 ### Run dev servers
 
 ```bash
-# Terminal 1 — FastAPI with hot reload
-task dev:backend
+task start          # backend + frontend in parallel
+```
 
-# Terminal 2 — Vite dev server (proxies /api → :8000)
-task dev:frontend
+Or run separately:
+
+```bash
+task dev:backend    # FastAPI with hot reload (:8001)
+task dev:frontend   # Vite dev server, proxies /api → :8001 (:5173)
 ```
 
 Open [http://localhost:5173](http://localhost:5173).
