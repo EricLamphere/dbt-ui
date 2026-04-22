@@ -294,7 +294,7 @@ async def put_step_content(
 
 
 class InitStepLinkDto(BaseModel):
-    path: str  # relative to project root
+    path: str  # absolute path or path relative to project root
 
 
 @router.post("/{project_id}/init/steps/link", response_model=InitStepDto)
@@ -303,17 +303,17 @@ async def link_step(
     dto: InitStepLinkDto,
     session: AsyncSession = Depends(get_session),
 ) -> InitStepDto:
-    """Register an existing .sh file (by relative path) as an init step without copying it."""
+    """Register an existing .sh file as an init step without copying it.
+    Accepts an absolute path or a path relative to the project root."""
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    root = Path(project.path).resolve()
-    candidate = (root / dto.path).resolve()
-    try:
-        candidate.relative_to(root)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="path escapes project root")
+    if dto.path.startswith("/"):
+        candidate = Path(dto.path).resolve()
+    else:
+        root = Path(project.path).resolve()
+        candidate = (root / dto.path).resolve()
 
     if not candidate.exists() or not candidate.is_file():
         raise HTTPException(status_code=400, detail="file not found")

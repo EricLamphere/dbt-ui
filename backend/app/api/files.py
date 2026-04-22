@@ -230,3 +230,41 @@ async def delete_file(
         shutil.rmtree(target)
     else:
         target.unlink()
+
+
+# ── Filesystem browser (not project-scoped) ─────────────────────────────────
+
+fs_router = APIRouter(prefix="/api/filesystem", tags=["filesystem"])
+
+
+def _browse_dir(abs_path: Path) -> list[FileNode]:
+    """List one level of abs_path, returning dirs and .sh files only."""
+    nodes: list[FileNode] = []
+    try:
+        entries = sorted(abs_path.iterdir(), key=lambda e: (not e.is_dir(), e.name.lower()))
+    except PermissionError:
+        return []
+    for entry in entries:
+        if entry.is_dir() and entry.name in HIDDEN_DIRS:
+            continue
+        if entry.is_dir():
+            nodes.append(FileNode(name=entry.name, path=str(entry), is_dir=True))
+        elif entry.suffix.lower() == ".sh":
+            nodes.append(FileNode(name=entry.name, path=str(entry), is_dir=False))
+    return nodes
+
+
+@fs_router.get("/browse", response_model=list[FileNode])
+async def browse_filesystem(path: str = "") -> list[FileNode]:
+    """Browse the local filesystem one level at a time. Returns dirs and .sh files.
+    `path` must be an absolute path; defaults to the user's home directory."""
+    if not path:
+        target = Path.home()
+    else:
+        target = Path(path)
+        if not target.is_absolute():
+            raise HTTPException(status_code=400, detail="path must be absolute")
+    target = target.resolve()
+    if not target.is_dir():
+        raise HTTPException(status_code=400, detail="not a directory")
+    return _browse_dir(target)

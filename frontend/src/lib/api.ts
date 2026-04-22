@@ -51,6 +51,7 @@ export interface Project {
   profile: string | null;
   vscode_cmd: string | null;
   init_script_path: string;
+  ignored: boolean;
   readme: string | null;
   dbt_project_yml: string | null;
   profiles_yml: string | null;
@@ -223,6 +224,12 @@ export const api = {
       patch<Project>(`/projects/${projectId}/settings`, body),
     ensureProfilesYml: (projectId: number) =>
       post<{ created: boolean }>(`/projects/${projectId}/ensure-profiles-yml`),
+    ignore: (id: number, ignored: boolean) =>
+      patch<Project>(`/projects/${id}/ignore`, { ignored }),
+  },
+  filesystem: {
+    browse: (path = '') =>
+      get<FileNode[]>(`/filesystem/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
   },
   models: {
     graph: (projectId: number) => get<GraphDto>(`/projects/${projectId}/models`),

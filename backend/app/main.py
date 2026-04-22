@@ -68,6 +68,7 @@ app.include_router(env_api.router)
 app.include_router(docs_api.router)
 app.include_router(events_api.router)
 app.include_router(files_api.router)
+app.include_router(files_api.fs_router)
 app.include_router(logs_api.router)
 app.include_router(terminal_api.router)
 

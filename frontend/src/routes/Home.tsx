@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check } from 'lucide-react';
-import { api } from '../lib/api';
+import { Check, ChevronRight, ChevronDown } from 'lucide-react';
+import { api, type Project } from '../lib/api';
 import NewProjectModal from './Project/components/NewProjectModal';
 
 const PLATFORM_ICONS: Record<string, string> = {
@@ -29,6 +29,77 @@ function PlatformBadge({ platform }: { platform: string }) {
   );
 }
 
+interface ProjectCardProps {
+  project: Project;
+  onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+}
+
+function ProjectCard({ project, onClick, onContextMenu }: ProjectCardProps) {
+  return (
+    <button
+      onClick={onClick}
+      onContextMenu={onContextMenu}
+      className="w-full flex items-center justify-between bg-surface-panel border border-gray-800 rounded-xl px-5 py-4 hover:border-brand-700 hover:bg-surface-elevated/60 transition-colors text-left"
+    >
+      <div className="flex flex-col gap-1 min-w-0">
+        <div className="flex items-center gap-3">
+          <span className="font-semibold text-gray-100">{project.name}</span>
+          <PlatformBadge platform={project.platform} />
+        </div>
+        <span className="text-xs text-gray-500 truncate font-mono">{project.path}</span>
+      </div>
+      <svg className="w-4 h-4 text-gray-600 shrink-0 ml-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+      </svg>
+    </button>
+  );
+}
+
+interface CardMenuState {
+  id: number;
+  x: number;
+  y: number;
+  isIgnored: boolean;
+}
+
+interface ProjectCardMenuProps {
+  menu: CardMenuState;
+  onIgnore: (id: number, ignored: boolean) => void;
+  onClose: () => void;
+}
+
+function ProjectCardMenu({ menu, onIgnore, onClose }: ProjectCardMenuProps) {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [onClose]);
+
+  // Clamp to viewport
+  const style: React.CSSProperties = {
+    position: 'fixed',
+    top: Math.min(menu.y, window.innerHeight - 80),
+    left: Math.min(menu.x, window.innerWidth - 160),
+    zIndex: 50,
+  };
+
+  return (
+    <div ref={ref} style={style} className="bg-surface-panel border border-gray-700 rounded-lg shadow-xl py-1 w-36">
+      <button
+        onClick={() => { onIgnore(menu.id, !menu.isIgnored); onClose(); }}
+        className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-surface-elevated transition-colors"
+      >
+        {menu.isIgnored ? 'Un-ignore' : 'Ignore'}
+      </button>
+    </div>
+  );
+}
+
 export default function Home() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -36,13 +107,15 @@ export default function Home() {
   const [platformFilter, setPlatformFilter] = useState('');
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
+  const [ignoredOpen, setIgnoredOpen] = useState(false);
+  const [cardMenu, setCardMenu] = useState<CardMenuState | null>(null);
 
   const { data: appSettings } = useQuery({
     queryKey: ['app-settings'],
     queryFn: () => api.settings.get(),
   });
 
-  const isConfigured = appSettings?.configured ?? true; // optimistic until loaded
+  const isConfigured = appSettings?.configured ?? true;
 
   const { data: projects = [], isLoading, error } = useQuery({
     queryKey: ['projects'],
@@ -68,17 +141,34 @@ export default function Home() {
     return () => window.removeEventListener('dbt-ui:global-settings', handler);
   }, []);
 
-  const filtered = projects.filter((p) => {
+  const activeProjects = projects.filter((p) => !p.ignored);
+  const ignoredProjects = projects.filter((p) => p.ignored);
+
+  const activeFiltered = activeProjects.filter((p) => {
     const matchName = p.name.toLowerCase().includes(search.toLowerCase());
     const matchPlatform = !platformFilter || p.platform === platformFilter;
     return matchName && matchPlatform;
   });
 
-  const platforms = Array.from(new Set(projects.map((p) => p.platform))).sort();
+  const platforms = Array.from(new Set(activeProjects.map((p) => p.platform))).sort();
 
   const handleRescan = async () => {
     await api.projects.rescan();
     qc.invalidateQueries({ queryKey: ['projects'] });
+  };
+
+  const handleIgnore = useCallback(async (id: number, ignored: boolean) => {
+    try {
+      await api.projects.ignore(id, ignored);
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    } catch (e) {
+      alert(String(e));
+    }
+  }, [qc]);
+
+  const openCardMenu = (e: React.MouseEvent, project: Project) => {
+    e.preventDefault();
+    setCardMenu({ id: project.id, x: e.clientX, y: e.clientY, isIgnored: project.ignored });
   };
 
   return (
@@ -138,7 +228,7 @@ export default function Home() {
       {error && (
         <p className="text-red-400 text-sm">Error: {String(error)}</p>
       )}
-      {isConfigured && !isLoading && filtered.length === 0 && (
+      {isConfigured && !isLoading && activeFiltered.length === 0 && ignoredProjects.length === 0 && (
         <div className="text-center py-16 text-gray-600">
           <p className="text-lg mb-2">No dbt projects found</p>
           <p className="text-xs font-mono text-gray-700">{appSettings?.dbt_projects_path}</p>
@@ -146,25 +236,51 @@ export default function Home() {
       )}
 
       <div className="grid gap-3">
-        {filtered.map((project) => (
-          <button
+        {activeFiltered.map((project) => (
+          <ProjectCard
             key={project.id}
+            project={project}
             onClick={() => navigate(`/projects/${project.id}`)}
-            className="w-full flex items-center justify-between bg-surface-panel border border-gray-800 rounded-xl px-5 py-4 hover:border-brand-700 hover:bg-surface-elevated/60 transition-colors text-left"
-          >
-            <div className="flex flex-col gap-1 min-w-0">
-              <div className="flex items-center gap-3">
-                <span className="font-semibold text-gray-100">{project.name}</span>
-                <PlatformBadge platform={project.platform} />
-              </div>
-              <span className="text-xs text-gray-500 truncate font-mono">{project.path}</span>
-            </div>
-            <svg className="w-4 h-4 text-gray-600 shrink-0 ml-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-            </svg>
-          </button>
+            onContextMenu={(e) => openCardMenu(e, project)}
+          />
         ))}
       </div>
+
+      {/* Ignored section */}
+      {ignoredProjects.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <button
+            onClick={() => setIgnoredOpen((v) => !v)}
+            className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-400 transition-colors"
+          >
+            {ignoredOpen
+              ? <ChevronDown className="w-3 h-3" />
+              : <ChevronRight className="w-3 h-3" />
+            }
+            <span>Ignored ({ignoredProjects.length})</span>
+          </button>
+          {ignoredOpen && (
+            <div className="grid gap-2 opacity-50">
+              {ignoredProjects.map((project) => (
+                <ProjectCard
+                  key={project.id}
+                  project={project}
+                  onClick={() => navigate(`/projects/${project.id}`)}
+                  onContextMenu={(e) => openCardMenu(e, project)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {cardMenu && (
+        <ProjectCardMenu
+          menu={cardMenu}
+          onIgnore={handleIgnore}
+          onClose={() => setCardMenu(null)}
+        />
+      )}
 
       {newProjectOpen && (
         <NewProjectModal

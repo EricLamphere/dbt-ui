@@ -67,6 +67,11 @@ export default function InitScriptsPage() {
   const id = Number(projectId);
   const qc = useQueryClient();
 
+  const { data: project } = useQuery({
+    queryKey: ['project', id],
+    queryFn: () => api.projects.get(id),
+  });
+
   const { data: steps = [], isLoading } = useQuery({
     queryKey: ['init-steps', id],
     queryFn: () => api.init.steps(id),
@@ -295,7 +300,7 @@ export default function InitScriptsPage() {
 
       {filePickerOpen && (
         <FilePickerModal
-          projectId={id}
+          projectPath={project?.path ?? '/'}
           onClose={() => setFilePickerOpen(false)}
           onSelect={async (path) => {
             try {

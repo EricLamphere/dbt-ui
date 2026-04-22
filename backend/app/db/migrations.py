@@ -30,6 +30,11 @@ async def run_migrations() -> None:
                 text("CREATE TABLE app_settings (key TEXT NOT NULL PRIMARY KEY, value TEXT NOT NULL DEFAULT '')")
             )
             await session.commit()
+        if not await _column_exists(session, "projects", "ignored"):
+            await session.execute(
+                text("ALTER TABLE projects ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0")
+            )
+            await session.commit()
 
 
 async def init_db() -> None:

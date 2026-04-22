@@ -44,6 +44,7 @@ class ProjectOut(BaseModel):
     profile: str | None
     vscode_cmd: str | None
     init_script_path: str = "init"
+    ignored: bool = False
     readme: str | None = None
     dbt_project_yml: str | None = None
     profiles_yml: str | None = None
@@ -59,6 +60,7 @@ class ProjectOut(BaseModel):
             profile=row.profile,
             vscode_cmd=row.vscode_cmd,
             init_script_path=row.init_script_path,
+            ignored=row.ignored,
             readme=_read_readme(row.path) if include_files else None,
             dbt_project_yml=_read_file_text(root / "dbt_project.yml") if include_files else None,
             profiles_yml=_read_file_text(root / "profiles.yml") if include_files else None,
@@ -153,6 +155,25 @@ async def patch_project_settings(
     if not dto.init_script_path or "/" in dto.init_script_path or dto.init_script_path.startswith("."):
         raise HTTPException(status_code=400, detail="invalid init_script_path")
     row.init_script_path = dto.init_script_path
+    await session.commit()
+    await session.refresh(row)
+    return ProjectOut.from_row(row)
+
+
+class ProjectIgnoreDto(BaseModel):
+    ignored: bool
+
+
+@router.patch("/{project_id}/ignore", response_model=ProjectOut)
+async def patch_project_ignore(
+    project_id: int,
+    dto: ProjectIgnoreDto,
+    session: AsyncSession = Depends(get_session),
+) -> ProjectOut:
+    row = await session.get(Project, project_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    row.ignored = dto.ignored
     await session.commit()
     await session.refresh(row)
     return ProjectOut.from_row(row)
