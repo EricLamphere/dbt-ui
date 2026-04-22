@@ -11,6 +11,7 @@ from app.api import docs as docs_api
 from app.api import env as env_api
 from app.api import events as events_api
 from app.api import files as files_api
+from app.api import global_profiles as global_profiles_api
 from app.api import health as health_api
 from app.api import init as init_api
 from app.api import logs as logs_api
@@ -69,6 +70,7 @@ app.include_router(docs_api.router)
 app.include_router(events_api.router)
 app.include_router(files_api.router)
 app.include_router(files_api.fs_router)
+app.include_router(global_profiles_api.router)
 app.include_router(logs_api.router)
 app.include_router(terminal_api.router)
 

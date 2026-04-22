@@ -35,6 +35,24 @@ async def run_migrations() -> None:
                 text("ALTER TABLE projects ADD COLUMN ignored INTEGER NOT NULL DEFAULT 0")
             )
             await session.commit()
+        if not await _table_exists(session, "global_profiles"):
+            await session.execute(text(
+                "CREATE TABLE global_profiles ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "name TEXT NOT NULL UNIQUE, "
+                "created_at DATETIME DEFAULT CURRENT_TIMESTAMP)"
+            ))
+            await session.commit()
+        if not await _table_exists(session, "global_profile_vars"):
+            await session.execute(text(
+                "CREATE TABLE global_profile_vars ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "profile_id INTEGER NOT NULL REFERENCES global_profiles(id) ON DELETE CASCADE, "
+                "key TEXT NOT NULL, "
+                "value TEXT NOT NULL DEFAULT '', "
+                "UNIQUE(profile_id, key))"
+            ))
+            await session.commit()
 
 
 async def init_db() -> None:

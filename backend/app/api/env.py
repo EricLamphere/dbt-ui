@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.engine import get_session
-from app.db.models import EnvProfile, ProfileEnvVar, Project, ProjectEnvVar
+from app.db.models import EnvProfile, GlobalProfile, ProfileEnvVar, Project, ProjectEnvVar
 from app.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -41,16 +41,6 @@ class RenameProfileDto(BaseModel):
 
 # ---- helpers ----
 
-async def _ensure_default_profile(session: AsyncSession, project_id: int) -> None:
-    """Auto-create 'dev' default profile if none exist."""
-    result = await session.execute(
-        select(EnvProfile).where(EnvProfile.project_id == project_id)
-    )
-    if result.scalars().first() is None:
-        dev = EnvProfile(project_id=project_id, name="dev", is_default=True, is_active=True)
-        session.add(dev)
-        await session.commit()
-
 
 def _profile_to_dto(profile: EnvProfile) -> ProfileDto:
     return ProfileDto(
@@ -80,7 +70,6 @@ async def get_profiles(
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
-    await _ensure_default_profile(session, project_id)
     result = await session.execute(
         select(EnvProfile)
         .where(EnvProfile.project_id == project_id)
@@ -145,8 +134,6 @@ async def delete_profile(
     profile = await session.get(EnvProfile, profile_id)
     if profile is None or profile.project_id != project_id:
         raise HTTPException(status_code=404, detail="profile not found")
-    if profile.is_default:
-        raise HTTPException(status_code=400, detail="cannot delete the default profile")
     await session.delete(profile)
     await session.commit()
 
@@ -200,6 +187,24 @@ async def delete_profile_var(
         await session.commit()
 
 
+@router.post("/{project_id}/profiles/{profile_id}/deactivate", response_model=ProfileDto)
+async def deactivate_profile(
+    project_id: int,
+    profile_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> ProfileDto:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    profile = await session.get(EnvProfile, profile_id)
+    if profile is None or profile.project_id != project_id:
+        raise HTTPException(status_code=404, detail="profile not found")
+    profile.is_active = False
+    await session.commit()
+    loaded = await _get_profile_with_vars(session, profile_id)
+    return _profile_to_dto(loaded)  # type: ignore[arg-type]
+
+
 @router.post("/{project_id}/profiles/{profile_id}/activate", response_model=ProfileDto)
 async def activate_profile(
     project_id: int,
@@ -221,6 +226,55 @@ async def activate_profile(
         p.is_active = p.id == profile_id
     await session.commit()
     loaded = await _get_profile_with_vars(session, profile_id)
+    return _profile_to_dto(loaded)  # type: ignore[arg-type]
+
+
+# ---- import global profile ----
+
+class ImportGlobalProfileDto(BaseModel):
+    global_profile_id: int
+    name: str | None = None  # defaults to the global profile's name
+
+
+@router.post("/{project_id}/profiles/import-global", response_model=ProfileDto, status_code=201)
+async def import_global_profile(
+    project_id: int,
+    dto: ImportGlobalProfileDto,
+    session: AsyncSession = Depends(get_session),
+) -> ProfileDto:
+    """Copy a global profile's vars into a new per-project profile."""
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+
+    global_profile = await session.execute(
+        select(GlobalProfile)
+        .where(GlobalProfile.id == dto.global_profile_id)
+        .options(selectinload(GlobalProfile.vars))
+    )
+    gp = global_profile.scalar_one_or_none()
+    if gp is None:
+        raise HTTPException(status_code=404, detail="global profile not found")
+
+    name = (dto.name or gp.name).strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name cannot be empty")
+
+    existing = await session.execute(
+        select(EnvProfile).where(EnvProfile.project_id == project_id, EnvProfile.name == name)
+    )
+    if existing.scalar_one_or_none() is not None:
+        raise HTTPException(status_code=409, detail=f"profile '{name}' already exists")
+
+    profile = EnvProfile(project_id=project_id, name=name, is_default=False, is_active=False)
+    session.add(profile)
+    await session.flush()  # get profile.id before adding vars
+
+    for v in gp.vars:
+        session.add(ProfileEnvVar(profile_id=profile.id, key=v.key, value=v.value))
+
+    await session.commit()
+    loaded = await _get_profile_with_vars(session, profile.id)
     return _profile_to_dto(loaded)  # type: ignore[arg-type]
 
 

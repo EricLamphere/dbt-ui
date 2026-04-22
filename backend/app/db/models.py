@@ -112,6 +112,31 @@ class AppSetting(Base):
     value: Mapped[str] = mapped_column(Text, default="")
 
 
+class GlobalProfile(Base):
+    __tablename__ = "global_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), unique=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    vars: Mapped[list["GlobalProfileVar"]] = relationship(
+        back_populates="profile", cascade="all, delete-orphan"
+    )
+
+
+class GlobalProfileVar(Base):
+    __tablename__ = "global_profile_vars"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile_id: Mapped[int] = mapped_column(ForeignKey("global_profiles.id", ondelete="CASCADE"), index=True)
+    key: Mapped[str] = mapped_column(String(255))
+    value: Mapped[str] = mapped_column(Text, default="")
+
+    profile: Mapped["GlobalProfile"] = relationship(back_populates="vars")
+
+    __table_args__ = (UniqueConstraint("profile_id", "key", name="uq_global_profile_var"),)
+
+
 class RunInvocation(Base):
     __tablename__ = "run_invocations"
 

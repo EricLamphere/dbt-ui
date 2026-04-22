@@ -1,9 +1,35 @@
 import { useRef, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Plus, Trash2, Check, Lock, Pencil } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Trash2, Check, Lock, Pencil, Download } from 'lucide-react';
 import { api, type EnvVarDto, type ProfileDto, type Project } from '../../lib/api';
 import ProjectNav from './components/ProjectNav';
+
+// ---- Collapsible tile wrapper ----
+
+function Tile({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <div className="border border-gray-800 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center gap-2 px-4 py-3 bg-surface-panel hover:bg-surface-elevated/40 transition-colors text-left"
+      >
+        {open
+          ? <ChevronDown className="w-4 h-4 text-gray-500 shrink-0" />
+          : <ChevronRight className="w-4 h-4 text-gray-500 shrink-0" />
+        }
+        <span className="text-sm font-semibold text-gray-200">{title}</span>
+      </button>
+      {open && (
+        <div className="border-t border-gray-800 p-6 flex flex-col gap-6 bg-surface-app">
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function EnvironmentPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -45,17 +71,22 @@ export default function EnvironmentPage() {
         />
       </div>
 
-      <div className="flex-1 overflow-auto p-6 flex flex-col gap-8">
-        <GlobalSettingsSection appSettings={appSettings ?? null} />
-        <ProjectSettingsSection projectId={id} project={project ?? null} />
-        <EnvironmentVariablesSection projectId={id} />
-        <ProfilesSection projectId={id} />
+      <div className="flex-1 overflow-auto p-6 flex flex-col gap-4">
+        <Tile title="Settings">
+          <GlobalSettingsSection appSettings={appSettings ?? null} />
+          <ProjectSettingsSection projectId={id} project={project ?? null} />
+        </Tile>
+
+        <Tile title="Environment">
+          <EnvironmentVariablesSection projectId={id} />
+          <ProfilesSection projectId={id} />
+        </Tile>
       </div>
     </div>
   );
 }
 
-// ---- Global Settings (read-only, system-level) ----
+// ---- Global Settings ----
 
 function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_path: string | null; data_dir: string | null; log_level: string | null } | null }) {
   const rows: { label: string; value: string | null | undefined }[] = [
@@ -65,9 +96,9 @@ function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_pa
   ];
 
   return (
-    <section>
-      <h2 className="text-sm font-semibold text-gray-300 mb-1">Global Settings</h2>
-      <p className="text-xs text-gray-500 mb-4">System-level configuration shared across all projects. Edit via the Global Settings panel.</p>
+    <div>
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Global</h3>
+      <p className="text-xs text-gray-500 mb-3">System-level configuration shared across all projects. Edit via the Global Settings panel.</p>
       <div className="flex flex-col gap-1.5">
         {!appSettings && <p className="text-xs text-gray-600 italic">Loading…</p>}
         {appSettings && rows.map(({ label, value }) => (
@@ -79,11 +110,11 @@ function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_pa
           </div>
         ))}
       </div>
-    </section>
+    </div>
   );
 }
 
-// ---- Project Settings (per-project config) ----
+// ---- Project Settings ----
 
 function ProjectSettingsSection({ projectId, project }: { projectId: number; project: Project | null }) {
   const qc = useQueryClient();
@@ -113,9 +144,9 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
   };
 
   return (
-    <section>
-      <h2 className="text-sm font-semibold text-gray-300 mb-1">Project Settings</h2>
-      <p className="text-xs text-gray-500 mb-4">Configuration specific to this project.</p>
+    <div>
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Project</h3>
+      <p className="text-xs text-gray-500 mb-3">Configuration specific to this project.</p>
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center gap-2 px-3 py-2 bg-surface-panel rounded border border-gray-800 text-xs">
           <span className="font-mono text-brand-300 w-44 shrink-0 truncate">INIT_SCRIPT_PATH</span>
@@ -151,7 +182,7 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
           )}
         </div>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -206,9 +237,9 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
   };
 
   return (
-    <section>
-      <h2 className="text-sm font-semibold text-gray-300 mb-1">Environment Variables</h2>
-      <p className="text-xs text-gray-500 mb-4">Applied to all init script runs. Profile variables override these.</p>
+    <div>
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Environment Variables</h3>
+      <p className="text-xs text-gray-500 mb-3">Applied to all init script runs. Profile variables override these.</p>
       <div className="flex flex-col gap-1.5 mb-3">
         {envVars.length === 0 && (
           <p className="text-xs text-gray-600 italic">No environment variables.</p>
@@ -275,7 +306,7 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
           Add
         </button>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -287,11 +318,17 @@ function ProfilesSection({ projectId }: { projectId: number }) {
     queryKey: ['profiles', projectId],
     queryFn: () => api.profiles.list(projectId),
   });
+  const { data: globalProfiles = [] } = useQuery({
+    queryKey: ['global-profiles'],
+    queryFn: () => api.globalProfiles.list(),
+  });
 
   const [newName, setNewName] = useState('');
   const [creating, setCreating] = useState(false);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [activating, setActivating] = useState<number | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   const handleCreate = async () => {
     if (!newName.trim()) return;
@@ -320,6 +357,18 @@ function ProfilesSection({ projectId }: { projectId: number }) {
     }
   };
 
+  const handleDeactivate = async (profile: ProfileDto) => {
+    setActivating(profile.id);
+    try {
+      await api.profiles.deactivate(projectId, profile.id);
+      qc.invalidateQueries({ queryKey: ['profiles', projectId] });
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setActivating(null);
+    }
+  };
+
   const handleDelete = async (profile: ProfileDto) => {
     if (!confirm(`Delete profile '${profile.name}'?`)) return;
     try {
@@ -339,10 +388,23 @@ function ProfilesSection({ projectId }: { projectId: number }) {
     });
   };
 
+  const handleImport = async (globalProfileId: number, name: string) => {
+    setImporting(true);
+    setImportOpen(false);
+    try {
+      await api.globalProfiles.importIntoProject(projectId, globalProfileId, name);
+      qc.invalidateQueries({ queryKey: ['profiles', projectId] });
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setImporting(false);
+    }
+  };
+
   return (
-    <section>
-      <h2 className="text-sm font-semibold text-gray-300 mb-1">Environment Profiles</h2>
-      <p className="text-xs text-gray-500 mb-4">Named variable sets — the active profile overrides environment variables during init runs.</p>
+    <div>
+      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Environment Profiles</h3>
+      <p className="text-xs text-gray-500 mb-3">Named variable sets — the active profile overrides environment variables during init runs.</p>
 
       <div className="flex flex-col gap-2 mb-4">
         {profiles.map((profile: ProfileDto) => (
@@ -354,6 +416,7 @@ function ProfilesSection({ projectId }: { projectId: number }) {
             activating={activating === profile.id}
             onToggleExpand={() => toggleExpand(profile.id)}
             onActivate={() => handleActivate(profile)}
+            onDeactivate={() => handleDeactivate(profile)}
             onDelete={() => handleDelete(profile)}
           />
         ))}
@@ -375,8 +438,38 @@ function ProfilesSection({ projectId }: { projectId: number }) {
           <Plus className="w-3.5 h-3.5" />
           Create
         </button>
+
+        {/* Import from global */}
+        <div className="relative shrink-0">
+          <button
+            onClick={() => setImportOpen((v) => !v)}
+            disabled={importing}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600 disabled:opacity-40 transition-colors"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Import
+          </button>
+          {importOpen && (
+            <div className="absolute bottom-full mb-1 right-0 bg-surface-panel border border-gray-700 rounded-lg shadow-xl py-1 min-w-[180px] z-10">
+              {globalProfiles.length === 0 ? (
+                <p className="px-3 py-2 text-xs text-gray-600 italic">No global profiles defined.</p>
+              ) : (
+                globalProfiles.map((gp) => (
+                  <button
+                    key={gp.id}
+                    onClick={() => handleImport(gp.id, gp.name)}
+                    className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-surface-elevated transition-colors flex items-center justify-between gap-2"
+                  >
+                    <span>{gp.name}</span>
+                    <span className="text-gray-600">{gp.vars.length}v</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -387,10 +480,11 @@ interface ProfileCardProps {
   activating: boolean;
   onToggleExpand: () => void;
   onActivate: () => void;
+  onDeactivate: () => void;
   onDelete: () => void;
 }
 
-function ProfileCard({ profile, projectId, expanded, activating, onToggleExpand, onActivate, onDelete }: ProfileCardProps) {
+function ProfileCard({ profile, projectId, expanded, activating, onToggleExpand, onActivate, onDeactivate, onDelete }: ProfileCardProps) {
   const qc = useQueryClient();
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
@@ -446,7 +540,15 @@ function ProfileCard({ profile, projectId, expanded, activating, onToggleExpand,
           <span className="text-[10px] px-1.5 py-0.5 rounded bg-brand-900/60 text-brand-300 font-mono">active</span>
         )}
         <span className="text-xs text-gray-600">{profile.vars.length} var{profile.vars.length !== 1 ? 's' : ''}</span>
-        {!profile.is_active && (
+        {profile.is_active ? (
+          <button
+            onClick={onDeactivate}
+            disabled={activating}
+            className="px-2.5 py-1 text-xs rounded border border-gray-700 text-gray-500 hover:border-red-700 hover:text-red-400 transition-colors disabled:opacity-40 shrink-0"
+          >
+            Deactivate
+          </button>
+        ) : (
           <button
             onClick={onActivate}
             disabled={activating}
@@ -455,11 +557,9 @@ function ProfileCard({ profile, projectId, expanded, activating, onToggleExpand,
             {activating ? '…' : 'Activate'}
           </button>
         )}
-        {!profile.is_default && (
-          <button onClick={onDelete} className="text-gray-600 hover:text-red-400 p-1 shrink-0">
-            <Trash2 className="w-3.5 h-3.5" />
-          </button>
-        )}
+        <button onClick={onDelete} className="text-gray-600 hover:text-red-400 p-1 shrink-0">
+          <Trash2 className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {expanded && (

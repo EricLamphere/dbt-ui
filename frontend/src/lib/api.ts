@@ -9,6 +9,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const text = await res.text().catch(() => res.statusText);
     throw new Error(`${res.status} ${text}`);
   }
+  if (res.status === 204 || res.headers.get('content-length') === '0') {
+    return undefined as T;
+  }
   return res.json() as Promise<T>;
 }
 
@@ -125,6 +128,17 @@ export interface ProfileDto {
   is_default: boolean;
   is_active: boolean;
   vars: ProfileVarDto[];
+}
+
+export interface GlobalProfileVarDto {
+  key: string;
+  value: string;
+}
+
+export interface GlobalProfileDto {
+  id: number;
+  name: string;
+  vars: GlobalProfileVarDto[];
 }
 
 export interface DbtTargetsDto {
@@ -337,6 +351,8 @@ export const api = {
       request<void>(`/projects/${projectId}/profiles/${profileId}/vars/${encodeURIComponent(key)}`, { method: 'DELETE' }),
     activate: (projectId: number, profileId: number) =>
       post<ProfileDto>(`/projects/${projectId}/profiles/${profileId}/activate`),
+    deactivate: (projectId: number, profileId: number) =>
+      post<ProfileDto>(`/projects/${projectId}/profiles/${profileId}/deactivate`),
     dbtTargets: (projectId: number) =>
       get<DbtTargetsDto>(`/projects/${projectId}/dbt-targets`),
     getDbtTarget: (projectId: number) =>
@@ -361,6 +377,17 @@ export const api = {
       post<{ ok: boolean }>(`/terminal/${sessionId}/resize`, { cols, rows }),
     stop: (sessionId: string) =>
       post<{ ok: boolean }>(`/terminal/${sessionId}/stop`),
+  },
+  globalProfiles: {
+    list: () => get<GlobalProfileDto[]>('/global-profiles'),
+    create: (name: string) => post<GlobalProfileDto>('/global-profiles', { name }),
+    delete: (id: number) => request<void>(`/global-profiles/${id}`, { method: 'DELETE' }),
+    setVar: (id: number, key: string, value: string) =>
+      put<GlobalProfileVarDto>(`/global-profiles/${id}/vars/${encodeURIComponent(key)}`, { value }),
+    deleteVar: (id: number, key: string) =>
+      request<void>(`/global-profiles/${id}/vars/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    importIntoProject: (projectId: number, globalProfileId: number, name: string) =>
+      post<ProfileDto>(`/projects/${projectId}/profiles/import-global`, { global_profile_id: globalProfileId, name }),
   },
   settings: {
     get: () => get<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; configured: boolean }>('/settings'),
