@@ -7,9 +7,9 @@ import { api, type Project } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 
 const PLATFORM_ICONS: Record<string, string> = {
-  postgres: '🐘', bigquery: '☁️', snowflake: '❄️', redshift: '⬡',
-  duckdb: '🦆', spark: '⚡', databricks: '🧱', athena: '🏺',
-  trino: '🔷', clickhouse: '🔴', unknown: '⬡',
+  postgres: '🐘', bigquery: '☁️', snowflake: '❄️', redshift: '🔴',
+  duckdb: '🦆', spark: '⚡', databricks: '🧱', athena: '🦉',
+  trino: '🔷', clickhouse: '🏡', unknown: '⬡',
 };
 
 // Editors that use URL protocols (frontend-only open)

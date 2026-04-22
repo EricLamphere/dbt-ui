@@ -126,6 +126,30 @@ dbt-ui/
 | `DBT_UI_DATA_DIR` | `data/` | SQLite storage directory |
 | `DBT_UI_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
+
+## Gallery
+
+#### Homepage
+![Homepage](img/homepage)
+
+#### Project Homepage
+![Project Homepage](img/project_home)
+
+#### File Explorer
+![File Explorer](img/files_model)
+
+#### DAG
+![DAG](img/dag_logs)
+
+#### Docs
+![Docs Overview](img/docs_overview)
+
+![Docs Model](img/docs_model)
+
+
+
+
+
 ## License
 
 MIT

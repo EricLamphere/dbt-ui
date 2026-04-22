@@ -9,10 +9,13 @@ const PLATFORM_ICONS: Record<string, string> = {
   postgres: '🐘',
   bigquery: '☁️',
   snowflake: '❄️',
-  redshift: '⬡',
+  redshift: '🔴',
   duckdb: '🦆',
   spark: '⚡',
   databricks: '🧱',
+  athena: '🦉',
+  trino: '🔷',
+  clickhouse: '🏡',
   unknown: '⬡',
 };
 
