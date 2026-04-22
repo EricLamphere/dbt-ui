@@ -130,7 +130,7 @@ dbt-ui/
 ## Gallery
 
 #### Homepage
-![Homepage](img/homepage.png)
+![Homepage](img/home.png)
 
 #### Project Homepage
 ![Project Homepage](img/project_home.png)
