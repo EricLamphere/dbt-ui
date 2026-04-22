@@ -5,7 +5,7 @@ from pathlib import Path
 INIT_DIR_NAME = "init"
 
 BASE_STEPS: tuple[tuple[str, str], ...] = (
-    ("base: cd", "cd"),
+    ("base: pip install", "pip install -r requirements.txt"),
     ("base: dbt deps", "dbt deps"),
 )
 

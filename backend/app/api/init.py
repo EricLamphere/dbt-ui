@@ -499,12 +499,25 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
         append_project_log(project_path, f"--- Step: {step.name} ---")
         started_at = datetime.now(timezone.utc).isoformat()
         try:
-            if step.name == "base: cd":
-                if not Path(project_path).exists():
-                    raise FileNotFoundError(project_path)
+            if step.name == "base: pip install":
+                global_req = await _get_global_requirements_path()
+                project_req = env.get("REQUIREMENTS_PATH")
+                log_lines = []
                 ok = True
-                log_lines: list[str] = [f"cd {project_path}"]
                 return_code = 0
+                for label, req_path in [("global", global_req), ("project", project_req)]:
+                    if not req_path:
+                        continue
+                    if not Path(req_path).exists():
+                        raise FileNotFoundError(f"{label} requirements path '{req_path}' not found")
+                    rc, lines = await _exec_and_capture(
+                        [str(_venv_pip()), "install", "-r", req_path], project_path, env
+                    )
+                    log_lines.extend(lines)
+                    if rc != 0:
+                        return_code = rc
+                        ok = False
+                        break
             elif step.name == "base: dbt deps":
                 return_code, log_lines = await _exec_and_capture(
                     ["dbt", "deps"], project_path, env
@@ -626,6 +639,19 @@ def _dbt_bin() -> Path:
     if not dbt:
         raise RuntimeError("dbt not found on PATH")
     return Path(dbt)
+
+
+def _venv_pip() -> Path:
+    """Return absolute path to pip in the same venv as the dbt binary."""
+    return _dbt_bin().parent / "pip"
+
+
+async def _get_global_requirements_path() -> str | None:
+    from app.db.engine import SessionLocal
+    from app.db.models import AppSetting
+    async with SessionLocal() as session:
+        row = await session.get(AppSetting, "global_requirements_path")
+        return row.value if row is not None else None
 
 
 def _dbt_python() -> Path:

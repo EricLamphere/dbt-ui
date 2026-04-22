@@ -13,12 +13,14 @@ class SettingsUpdateDto(BaseModel):
     dbt_projects_path: str | None = None
     data_dir: str | None = None
     log_level: str | None = None
+    global_requirements_path: str | None = None
 
 
 class SettingsDto(BaseModel):
     dbt_projects_path: str | None
     data_dir: str | None
     log_level: str | None
+    global_requirements_path: str | None
     configured: bool
 
 
@@ -54,11 +56,14 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> Settings
     log_level_override = await _get_override(session, "log_level")
     log_level = log_level_override if log_level_override is not None else settings.log_level
 
+    global_requirements_path = await _get_override(session, "global_requirements_path")
+
     return SettingsDto(
         dbt_projects_path=dbt_projects_path,
         configured=configured,
         data_dir=data_dir,
         log_level=log_level,
+        global_requirements_path=global_requirements_path,
     )
 
 
@@ -73,5 +78,7 @@ async def put_settings(
         await _upsert(session, "data_dir", dto.data_dir)
     if dto.log_level is not None:
         await _upsert(session, "log_level", dto.log_level)
+    if dto.global_requirements_path is not None:
+        await _upsert(session, "global_requirements_path", dto.global_requirements_path)
     await session.commit()
     return await get_settings(session)

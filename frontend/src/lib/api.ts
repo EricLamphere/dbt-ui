@@ -390,9 +390,9 @@ export const api = {
       post<ProfileDto>(`/projects/${projectId}/profiles/import-global`, { global_profile_id: globalProfileId, name }),
   },
   settings: {
-    get: () => get<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; configured: boolean }>('/settings'),
-    update: (body: { dbt_projects_path?: string; data_dir?: string; log_level?: string }) =>
-      put<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; configured: boolean }>('/settings', body),
+    get: () => get<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; configured: boolean }>('/settings'),
+    update: (body: { dbt_projects_path?: string; data_dir?: string; log_level?: string; global_requirements_path?: string }) =>
+      put<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; configured: boolean }>('/settings', body),
   },
   logs: {
     projectLogs: (projectId: number, tail = 500) =>

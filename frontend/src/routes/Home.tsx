@@ -312,6 +312,7 @@ function GlobalSettingsModal({ onClose }: { onClose: () => void }) {
 
   const rows: { key: string; label: string; value: string | null | undefined; hint?: string }[] = [
     { key: 'dbt_projects_path', label: 'DBT_PROJECTS_PATH', value: appSettings?.dbt_projects_path },
+    { key: 'global_requirements_path', label: 'GLOBAL_REQUIREMENTS_PATH', value: appSettings?.global_requirements_path, hint: 'requirements.txt installed before every project init' },
     { key: 'data_dir', label: 'DBT_UI_DATA_DIR', value: appSettings?.data_dir, hint: 'takes effect on restart' },
     { key: 'log_level', label: 'DBT_UI_LOG_LEVEL', value: appSettings?.log_level, hint: 'takes effect on restart' },
   ];
