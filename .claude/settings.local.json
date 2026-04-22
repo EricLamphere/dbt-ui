@@ -5,8 +5,19 @@
       "Bash(obsidian read:*)",
       "WebSearch",
       "WebFetch(domain:docs.getdbt.com)",
+      "WebFetch(domain:fastapi.tiangolo.com)",
+      "WebFetch(domain:tanstack.com)",
       "Bash(grep *)",
-      "Bash(.venv/bin/python -c \"import yaml; print\\('ok'\\)\")"
+      "Bash(find *)",
+      "Bash(.venv/bin/python -c *)",
+      "Bash(.venv/bin/pytest*)",
+      "Bash(npx tsc --noEmit*)",
+      "Bash(task test*)",
+      "Bash(task lint*)",
+      "Bash(task dev:backend*)",
+      "Bash(task dev:frontend*)",
+      "Bash(cd backend && .venv/bin/pytest*)",
+      "Bash(cd frontend && npx tsc*)"
     ]
   }
 }

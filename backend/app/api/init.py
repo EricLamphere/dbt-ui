@@ -511,8 +511,9 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                 )
                 ok = return_code == 0
             elif step.script_path:
+                script_dir = str(Path(step.script_path).parent)
                 return_code, log_lines = await _exec_and_capture(
-                    ["bash", "-euo", "pipefail", step.script_path], project_path, env
+                    ["bash", "-euo", "pipefail", step.script_path], script_dir, env
                 )
                 ok = return_code == 0
             else:
