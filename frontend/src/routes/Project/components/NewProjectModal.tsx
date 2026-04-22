@@ -125,7 +125,9 @@ export default function NewProjectModal({ onClose }: Props) {
   const handleDone = async () => {
     const sid = sessionIdRef.current;
     if (sid) api.init.stopSession(sid).catch(() => {});
-    await api.projects.rescan().catch(() => {});
+    const projects = await api.projects.rescan().catch(() => []);
+    // Write profiles.yml into any newly-created project that doesn't have one yet
+    await Promise.all(projects.map((p) => api.projects.ensureProfilesYml(p.id).catch(() => {})));
     onClose();
   };
 

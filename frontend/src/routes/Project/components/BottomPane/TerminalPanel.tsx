@@ -46,6 +46,7 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [dead, setDead] = useState(false);
 
@@ -67,14 +68,21 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
     term.loadAddon(fit);
     term.open(container);
     termRef.current = term;
+
     fitRef.current = fit;
+
+    const resizeIfChanged = (sid: string) => {
+      const { cols, rows } = term;
+      const last = lastSizeRef.current;
+      if (last && last.cols === cols && last.rows === rows) return;
+      lastSizeRef.current = { cols, rows };
+      api.terminal.resize(sid, cols, rows).catch(() => {});
+    };
 
     const doFitAndResize = () => {
       fit.fit();
       const sid = sessionIdRef.current;
-      if (sid && term.cols && term.rows) {
-        api.terminal.resize(sid, term.cols, term.rows).catch(() => {});
-      }
+      if (sid && term.cols && term.rows) resizeIfChanged(sid);
     };
 
     const ro = new ResizeObserver(() => doFitAndResize());
@@ -84,13 +92,9 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
       .then(({ session_id }) => {
         if (!termRef.current) { api.terminal.stop(session_id).catch(() => {}); return; }
         sessionIdRef.current = session_id;
+        lastSizeRef.current = { cols: term.cols, rows: term.rows };
         setSessionId(session_id);
-        // Fit after session starts — container may now be visible
-        requestAnimationFrame(() => {
-          fit.fit();
-          api.terminal.resize(session_id, term.cols, term.rows).catch(() => {});
-          term.focus();
-        });
+        requestAnimationFrame(() => { fit.fit(); });
       })
       .catch((e) => { term.writeln(`\x1b[31mFailed to start terminal: ${e}\x1b[0m`); });
 
@@ -106,25 +110,35 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectPath]);
 
-  // Re-focus and re-fit whenever this terminal becomes the visible one.
-  // Use a small timeout so the parent's display:flex has taken effect before fit() measures.
+  // Re-fit whenever this terminal becomes the visible one.
+  // Only send resize to the PTY if dimensions actually changed — sending SIGWINCH
+  // unconditionally causes zsh to redraw the prompt, producing spurious blank lines.
   useEffect(() => {
     if (!active) return;
     const t = setTimeout(() => {
       fitRef.current?.fit();
-      termRef.current?.focus();
       const sid = sessionIdRef.current;
       const term = termRef.current;
-      if (sid && term) api.terminal.resize(sid, term.cols, term.rows).catch(() => {});
+      if (!sid || !term) return;
+      const { cols, rows } = term;
+      const last = lastSizeRef.current;
+      if (!last || last.cols !== cols || last.rows !== rows) {
+        lastSizeRef.current = { cols, rows };
+        api.terminal.resize(sid, cols, rows).catch(() => {});
+      }
     }, 30);
     return () => clearTimeout(t);
   }, [active]);
 
-  // Wire keyboard input
+  // Wire keyboard input — filter out xterm focus-in/out sequences (\x1b[I / \x1b[O)
+  // before forwarding to the PTY so zsh doesn't redraw the prompt on click.
   useEffect(() => {
     const term = termRef.current;
     if (!term || !sessionId) return;
-    const d = term.onData((data) => api.terminal.input(sessionId, data).catch(() => {}));
+    const d = term.onData((data) => {
+      if (/^\x1b\[[IO]$/.test(data)) return;
+      api.terminal.input(sessionId, data).catch(() => {});
+    });
     return () => d.dispose();
   }, [sessionId]);
 
@@ -151,6 +165,7 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
     api.terminal.start(projectPath, term.cols || 220, term.rows || 50)
       .then(({ session_id }) => {
         sessionIdRef.current = session_id;
+        lastSizeRef.current = { cols: term.cols, rows: term.rows };
         setSessionId(session_id);
         fit.fit();
       })

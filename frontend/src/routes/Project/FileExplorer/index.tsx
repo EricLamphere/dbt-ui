@@ -1,22 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronsDownUp } from 'lucide-react';
-import { api, type FileContentDto } from '../../../lib/api';
+import { api, type FileContentDto, type ModelNode } from '../../../lib/api';
 import ProjectNav from '../components/ProjectNav';
+import { SidePane } from '../components/SidePane';
 import { ContextMenu } from './ContextMenu';
 import { TreeItem } from './TreeItem';
 import { ViewPane } from './panes/ViewPane';
-import { RunPane } from './panes/RunPane';
-import { SetupPane } from './panes/SetupPane';
 import type { ContextMenuState, RenameState, TreeNode } from './types';
 import { filterTree, updateNode } from './types';
-
-type MainTab = 'view' | 'run' | 'setup';
 
 export default function FileExplorerPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
   const [tree, setTree] = useState<TreeNode[]>([]);
@@ -29,10 +27,10 @@ export default function FileExplorerPage() {
   const [loadingPath, setLoadingPath] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [renameState, setRenameState] = useState<RenameState | null>(null);
-  const [mainTab, setMainTab] = useState<MainTab>('view');
-  /** unique_id of the model corresponding to the open file, if any */
+  /** model node corresponding to the open file, if any */
+  const [selectedModel, setSelectedModel] = useState<ModelNode | null>(null);
+  /** unique_id of the model corresponding to the open file, for ViewPane compiled SQL */
   const [modelUid, setModelUid] = useState<string | null>(null);
-  const [modelName, setModelName] = useState<string | null>(null);
 
   // Resizable panels
   const [treeWidth, setTreeWidth] = useState(256);
@@ -136,16 +134,15 @@ export default function FileExplorerPage() {
     try {
       const file = await api.files.getContent(id, path);
       setOpenFile(file);
-      setMainTab('view');
-      // Resolve model uid for this file
+      // Resolve model for this file
       if (graph) {
         const node = graph.nodes.find((n) => n.original_file_path && path.endsWith(n.original_file_path));
         if (node) {
           setModelUid(node.unique_id);
-          setModelName(node.name);
+          setSelectedModel(node);
         } else {
           setModelUid(null);
-          setModelName(null);
+          setSelectedModel(null);
         }
       }
     } catch (e) {
@@ -257,7 +254,23 @@ export default function FileExplorerPage() {
       setOpenFile(null);
       setEdited(undefined);
       setModelUid(null);
-      setModelName(null);
+      setSelectedModel(null);
+      sessionStorage.removeItem(SESSION_KEY);
+      await reloadDir();
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleDeleteModel = async () => {
+    if (!selectedModel) return;
+    if (!confirm(`Delete model '${selectedModel.name}'? This removes the file from disk.`)) return;
+    try {
+      await api.models.delete(id, selectedModel.unique_id);
+      setOpenFile(null);
+      setEdited(undefined);
+      setModelUid(null);
+      setSelectedModel(null);
       sessionStorage.removeItem(SESSION_KEY);
       await reloadDir();
     } catch (e) {
@@ -280,7 +293,7 @@ export default function FileExplorerPage() {
         setOpenFile(null);
         setEdited(undefined);
         setModelUid(null);
-        setModelName(null);
+        setSelectedModel(null);
       }
       await reloadDir();
     } catch (e) {
@@ -337,7 +350,7 @@ export default function FileExplorerPage() {
         setOpenFile(null);
         setEdited(undefined);
         setModelUid(null);
-        setModelName(null);
+        setSelectedModel(null);
       }
       await reloadDir();
     } catch (e) {
@@ -349,12 +362,6 @@ export default function FileExplorerPage() {
 
   const isDirty = edited !== undefined && edited !== openFile?.content;
   const visibleTree = filterText.trim() ? filterTree(tree, filterText) : tree;
-
-  const MAIN_TABS: { id: MainTab; label: string; disabled?: boolean }[] = [
-    { id: 'view', label: 'View' },
-    { id: 'run', label: 'Run', disabled: !modelUid },
-    { id: 'setup', label: 'Setup' },
-  ];
 
   return (
     <div className="flex h-full overflow-hidden">
@@ -411,63 +418,39 @@ export default function FileExplorerPage() {
         />
       </div>
 
-      {/* Main pane */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Main tab bar */}
-        <div className="flex items-center gap-1 px-4 py-2 bg-surface-panel border-b border-gray-800 shrink-0">
-          {MAIN_TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => !t.disabled && setMainTab(t.id)}
-              disabled={t.disabled}
-              className={`px-4 py-1.5 text-sm rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed
-                ${mainTab === t.id
-                  ? 'bg-brand-900/50 text-brand-300 font-medium'
-                  : 'text-gray-500 hover:text-gray-300'
-                }`}
-            >
-              {t.label}
-            </button>
-          ))}
-          {openFile && mainTab === 'view' && (
-            <span className="ml-auto text-xs font-mono text-gray-600 truncate max-w-[300px]">{openFile.path}</span>
-          )}
-        </div>
-
-        {/* Pane content */}
-        <div className="flex-1 overflow-hidden">
-          {mainTab === 'view' && openFile && (
-            <ViewPane
-              projectId={id}
-              openFile={openFile}
-              edited={edited}
-              onEdit={setEdited}
-              onSave={handleSave}
-              onDelete={handleDeleteFile}
-              saving={saving}
-              saveStatus={saveStatus}
-              saveError={saveError}
-              isDirty={isDirty}
-              modelUid={modelUid}
-            />
-          )}
-          {mainTab === 'view' && !openFile && (
-            <div className="flex-1 flex items-center justify-center text-gray-600 text-sm select-none h-full">
-              Select a file to view or edit
-            </div>
-          )}
-          {mainTab === 'run' && modelUid && modelName && (
-            <RunPane
-              projectId={id}
-              modelName={modelName}
-              modelUid={modelUid}
-            />
-          )}
-          {mainTab === 'setup' && (
-            <SetupPane projectId={id} />
-          )}
-        </div>
+      {/* Main editor area */}
+      <div className="flex-1 overflow-hidden">
+        {openFile ? (
+          <ViewPane
+            projectId={id}
+            openFile={openFile}
+            edited={edited}
+            onEdit={setEdited}
+            onSave={handleSave}
+            onDelete={handleDeleteFile}
+            saving={saving}
+            saveStatus={saveStatus}
+            saveError={saveError}
+            isDirty={isDirty}
+            modelUid={modelUid}
+          />
+        ) : (
+          <div className="flex items-center justify-center text-gray-600 text-sm select-none h-full">
+            Select a file to view or edit
+          </div>
+        )}
       </div>
+
+      {/* Side panel */}
+      <SidePane
+        projectId={id}
+        model={selectedModel}
+        graph={graph ?? null}
+        page="files"
+        onNavigateToDag={() => selectedModel && navigate(`/projects/${id}/models?model=${encodeURIComponent(selectedModel.unique_id)}`)}
+        onViewDocs={() => selectedModel && navigate(`/projects/${id}/docs?node=${encodeURIComponent(selectedModel.unique_id)}`)}
+        onDelete={handleDeleteModel}
+      />
 
       {/* Context menu */}
       {contextMenu && (

@@ -8,8 +8,10 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select as sa_select
+
 from app.db.engine import SessionLocal, get_session
-from app.db.models import ModelStatus, Project
+from app.db.models import ModelStatus, Project, ProjectEnvVar
 from app.dbt.manifest import load_manifest
 from app.dbt.run_results import load_run_results
 from app.api.init import load_project_env
@@ -103,13 +105,28 @@ async def _persist_results_after_run(project: Project) -> None:
             )
 
 
+async def _load_active_target(project_id: int) -> str | None:
+    async with SessionLocal() as session:
+        result = await session.execute(
+            sa_select(ProjectEnvVar).where(
+                ProjectEnvVar.project_id == project_id,
+                ProjectEnvVar.key == "dbt_target",
+            )
+        )
+        row = result.scalar_one_or_none()
+        return row.value if row else None
+
+
 async def _run_dbt_and_persist(project: Project, command: str, select: str | None) -> None:
     env = await load_project_env(project.id)
+    target = await _load_active_target(project.id)
+    extra: tuple[str, ...] = ("--target", target) if target else ()
     req = RunRequest(
         project_id=project.id,
         project_path=Path(project.path),
         command=command,
         select=select,
+        extra=extra,
         env=env,
     )
     async for _ in runner.stream(req):

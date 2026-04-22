@@ -36,6 +36,8 @@ class DbtRunner:
 
     def build_args(self, req: RunRequest) -> list[str]:
         args = ["dbt", req.command]
+        if (req.project_path / "profiles.yml").exists():
+            args += ["--profiles-dir", str(req.project_path)]
         if req.select:
             args += ["--select", req.select]
         args += list(req.extra)

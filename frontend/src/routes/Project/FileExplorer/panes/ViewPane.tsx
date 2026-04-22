@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import Editor from '@monaco-editor/react';
+import { RotateCw } from 'lucide-react';
 import { format as sqlFormat } from 'sql-formatter';
 import { api, type FileContentDto } from '../../../../lib/api';
 
@@ -72,19 +73,40 @@ export function ViewPane({
     setPreviewError(null);
   }, [openFile.path]);
 
+  const fetchCompiledSql = async () => {
+    if (!canCompile || !modelUid) return;
+    setCompiledLoading(true);
+    setCompiledError(null);
+    try {
+      const result = await api.models.getCompiled(projectId, modelUid);
+      setCompiledSql(result.compiled_sql);
+    } catch (e) {
+      setCompiledError(String(e));
+    } finally {
+      setCompiledLoading(false);
+    }
+  };
+
+  const handleRefreshCompiled = async () => {
+    if (!canCompile || !modelUid) return;
+    setCompiledSql(null);
+    setCompiledLoading(true);
+    setCompiledError(null);
+    try {
+      await api.models.compile(projectId);
+      const result = await api.models.getCompiled(projectId, modelUid);
+      setCompiledSql(result.compiled_sql);
+    } catch (e) {
+      setCompiledError(String(e));
+    } finally {
+      setCompiledLoading(false);
+    }
+  };
+
   const handleTabChange = async (tab: ViewTab) => {
     setActiveTab(tab);
     if (tab === 'compiled' && !compiledSql && canCompile && modelUid) {
-      setCompiledLoading(true);
-      setCompiledError(null);
-      try {
-        const result = await api.models.getCompiled(projectId, modelUid);
-        setCompiledSql(result.compiled_sql);
-      } catch (e) {
-        setCompiledError(String(e));
-      } finally {
-        setCompiledLoading(false);
-      }
+      await fetchCompiledSql();
     }
     if (tab === 'preview' && !previewData && canCompile && modelUid) {
       setPreviewLoading(true);
@@ -144,7 +166,6 @@ export function ViewPane({
 
         {activeTab === 'code' && (
           <div className="flex items-center gap-2 shrink-0">
-            <span className="text-xs font-mono text-gray-500 truncate max-w-[200px]">{openFile.path}</span>
             {isDirty && <span className="w-1.5 h-1.5 rounded-full bg-brand-400 shrink-0" />}
             {saveStatus === 'error' && (
               <span className="text-xs text-red-400">{saveError}</span>
@@ -176,6 +197,17 @@ export function ViewPane({
               🗑
             </button>
           </div>
+        )}
+        {activeTab === 'compiled' && canCompile && (
+          <button
+            onClick={handleRefreshCompiled}
+            disabled={compiledLoading}
+            className="ml-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 transition-colors shrink-0"
+            title="Recompile and refresh"
+          >
+            <RotateCw className={`w-3 h-3 ${compiledLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
         )}
       </div>
 

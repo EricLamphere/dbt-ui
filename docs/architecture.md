@@ -34,13 +34,13 @@ dbt-ui/
 │   │   ├── config.py                # Pydantic settings (env vars, paths)
 │   │   ├── logging_setup.py         # structlog configuration
 │   │   ├── api/
-│   │   │   ├── projects.py          # /api/projects — list, get, rescan
+│   │   │   ├── projects.py          # /api/projects — list, get, rescan, ensure-profiles-yml; returns dbt_project_yml + profiles_yml
 │   │   │   ├── models.py            # /api/projects/{id}/models — DAG, create, compile
-│   │   │   ├── runs.py              # /api/projects/{id}/run|build|test
+│   │   │   ├── runs.py              # /api/projects/{id}/run|build|test (loads dbt_target from project_env_vars → --target)
 │   │   │   ├── sql.py               # /api/projects/{id}/models/{uid}/sql GET/PUT
 │   │   │   ├── files.py             # /api/projects/{id}/files — file browser
 │   │   │   ├── docs.py              # /api/projects/{id}/docs — native docs browser
-│   │   │   ├── env.py               # /api/projects/{id}/env — env vars + profiles
+│   │   │   ├── env.py               # /api/projects/{id}/profiles + dbt-targets + dbt-target (R/W)
 │   │   │   ├── init.py              # /api/projects/{id}/init — steps, pipeline, PTY session
 │   │   │   ├── terminal.py          # /api/terminal — integrated bash PTY sessions
 │   │   │   ├── settings.py          # /api/settings — global app config (dbt_projects_path)
@@ -75,27 +75,29 @@ dbt-ui/
 │   │   │   ├── api.ts               # fetch wrappers + typed API helpers
 │   │   │   └── sse.ts               # useProjectEvents, useInitSessionEvents, useTerminalEvents
 │   │   ├── components/
-│   │   │   ├── Header.tsx           # Persistent nav (home link, New project, Settings)
+│   │   │   ├── Header.tsx           # Persistent nav; Profile + Target dropdowns on project pages (reads projectId from pathname)
 │   │   │   └── StatusBadge.tsx      # Status color chip
 │   │   └── routes/
 │   │       ├── Home.tsx             # Project list, search, rescan, new project modal, global settings modal
 │   │       └── Project/
-│   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet>)
-│   │           ├── index.tsx            # Project home (tiles)
-│   │           ├── Models.tsx           # React Flow DAG with real-time run overlays
+│   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet overflow-auto>)
+│   │           ├── index.tsx            # Project home: tiles + tabbed README/dbt_project.yml/profiles.yml viewer
+│   │           ├── Models.tsx           # React Flow DAG with real-time run overlays; ?model= deep-link; SidePane
 │   │           ├── Docs.tsx             # Native docs browser (folder tree)
 │   │           ├── Environment.tsx      # Env vars + profiles
 │   │           ├── InitScripts.tsx      # Init pipeline management
-│   │           ├── FileExplorer/        # File browser + Monaco editor
+│   │           ├── FileExplorer/        # File browser + Monaco editor; SidePane replaces old tab bar
 │   │           └── components/
 │   │               ├── BottomPane/
 │   │               │   ├── index.tsx        # Drag-to-resize pane; tab management; terminal instances
 │   │               │   ├── RunPanel.tsx     # Execution DAG (real-time run_log parsing)
-│   │               │   ├── TerminalPanel.tsx # xterm.js multi-instance terminal
+│   │               │   ├── TerminalPanel.tsx # xterm.js multi-instance terminal; only resizes PTY when dims change
 │   │               │   └── LogPanel.tsx     # Project and API logs
+│   │               ├── SidePane/
+│   │               │   ├── index.tsx        # Right-side collapsible panel (drag/collapse); renders PropertiesTab
+│   │               │   └── PropertiesTab.tsx # Model metadata + run controls + action buttons (unified, no tabs)
 │   │               ├── ModelNode.tsx
-│   │               ├── SqlEditorModal.tsx
-│   │               └── NewProjectModal.tsx
+│   │               └── NewProjectModal.tsx  # dbt init PTY terminal; writes profiles.yml after rescan
 │   ├── vite.config.ts               # Dev proxy → :8001; prod build output
 │   └── tailwind.config.ts
 ├── docs/
@@ -186,7 +188,9 @@ PUT    /api/settings
 
 GET    /api/projects
 POST   /api/projects/rescan
-GET    /api/projects/{id}
+GET    /api/projects/{id}                                includes readme, dbt_project_yml, profiles_yml
+POST   /api/projects/{id}/ensure-profiles-yml            writes minimal profiles.yml if absent
+PATCH  /api/projects/{id}/settings
 
 GET    /api/projects/{id}/events                         SSE
 
@@ -217,12 +221,17 @@ POST   /api/terminal/{id}/resize
 POST   /api/terminal/{id}/stop
 GET    /api/terminal/{id}/events                         SSE with replay buffer
 
-GET    /api/projects/{id}/env/profiles
-POST   /api/projects/{id}/env/profiles
-DELETE /api/projects/{id}/env/profiles/{profile_id}
-GET    /api/projects/{id}/env/vars
-POST   /api/projects/{id}/env/vars
-DELETE /api/projects/{id}/env/vars/{var_id}
+GET    /api/projects/{id}/profiles
+POST   /api/projects/{id}/profiles
+PATCH  /api/projects/{id}/profiles/{profile_id}
+DELETE /api/projects/{id}/profiles/{profile_id}
+POST   /api/projects/{id}/profiles/{profile_id}/activate
+PUT    /api/projects/{id}/profiles/{profile_id}/vars/{key}
+DELETE /api/projects/{id}/profiles/{profile_id}/vars/{key}
+
+GET    /api/projects/{id}/dbt-targets                    list outputs from profiles.yml
+GET    /api/projects/{id}/dbt-target                     current target (from project_env_vars)
+PUT    /api/projects/{id}/dbt-target                     set active target
 ```
 
 ---
@@ -332,11 +341,13 @@ The frontend runs `dagre` layout client-side and renders with React Flow. `Model
 
 `POST /api/projects/{id}/run` (same pattern for build/test):
 1. `select.py` builds the `--select` string from `(model_name, mode)`
-2. `runner.py` acquires the per-project `asyncio.Lock` and spawns `dbt run --select <selector>`
-3. Each stdout line is published as `run_log`
-4. `RunPanel.tsx` (always mounted) parses `run_log` lines with regex to identify START/result events, updates the Execution DAG in real time — models appear blue (running) as they start
-5. On exit, `run_results.py` parses `target/run_results.json`, upserts `ModelStatus`, publishes `statuses_changed`
-6. Frontend invalidates the graph query → final statuses applied
+2. `runs.py` reads `project_env_vars` for key `dbt_target`; if set, appends `--target <value>` to `RunRequest.extra`
+3. `runner.py` acquires the per-project `asyncio.Lock` and spawns `dbt run --select <selector> [--target <target>]`
+4. If `profiles.yml` exists in the project root, `build_args()` also adds `--profiles-dir <project_path>`
+5. Each stdout line is published as `run_log`
+6. `RunPanel.tsx` (always mounted) parses `run_log` lines with regex to identify START/result events, updates the Execution DAG in real time — models appear blue (running) as they start
+7. On exit, `run_results.py` parses `target/run_results.json`, upserts `ModelStatus`, publishes `statuses_changed`
+8. Frontend invalidates the graph query → final statuses applied
 
 ### 6. Execution DAG (RunPanel)
 
@@ -353,7 +364,8 @@ The frontend runs `dagre` layout client-side and renders with React Flow. `Model
 - `POST /api/terminal/start` spawns a login shell (`$SHELL -l`, falling back to zsh/bash/sh)
 - `InteractiveInitManager` singleton manages the PTY session (reused from `dbt init`)
 - `ResizeObserver` + `xterm-addon-fit` handle dynamic resize; a 30ms timeout ensures fit runs after the container is visible
-- Sessions persist until explicitly closed; switching tabs unmounts the terminal visually but keeps the session alive
+- `lastSizeRef` tracks last sent `{cols, rows}`; `setwinsize` is only called when dimensions actually change — prevents spurious `SIGWINCH` signals that would cause zsh to redraw the prompt on every click
+- Sessions persist until explicitly closed; switching tabs keeps the session alive
 
 ### 8. Interactive `dbt init`
 
@@ -361,7 +373,8 @@ The frontend runs `dagre` layout client-side and renders with React Flow. `Model
 2. `POST /api/projects/init-session/start {platform}` creates a pending session
 3. Background: pip-installs the adapter, then spawns `dbt init` via ptyprocess
 4. Frontend subscribes to SSE with replay buffer; xterm.js renders all output
-5. On `init_finished`, frontend rescans → project appears in list
+5. On `init_finished`, frontend calls `POST /api/projects/rescan` then `POST /api/projects/{id}/ensure-profiles-yml` on each project — writes a minimal `profiles.yml` into any newly created project that doesn't have one
+6. Project appears in list with a working `profiles.yml` ready for `--profiles-dir`
 
 ### 9. File Watching
 
@@ -411,3 +424,9 @@ The Vite dev server proxies all `/api` requests to `localhost:8001`. Open [http:
 **SQLite** — Single-user, local tool. No concurrent writes from multiple processes. SQLite with aiosqlite is zero-ops and sufficient.
 
 **`_effective_workspace()` as single source of truth** — The projects path can come from the `app_settings` DB table (set via UI) or `settings.dbt_projects_path` (the `DBT_PROJECTS_PATH` env var). All backend code that needs the workspace path calls this one function.
+
+**SidePane as a unified panel** — The right-side panel (DAG and File Explorer) intentionally has no tab bar. Model metadata and run controls live in one scrollable view. Separating them into tabs added navigation friction with no benefit since both are used together during a typical run-and-inspect workflow.
+
+**Project-local `profiles.yml`** — Each project carries its own `profiles.yml` rather than relying on `~/.dbt/profiles.yml`. This makes projects self-contained and portable. `DbtRunner.build_args()` adds `--profiles-dir` automatically when the file is present, so existing projects without one continue to use the global fallback. `ensure-profiles-yml` writes a minimal stub after `dbt init` so new projects are immediately usable.
+
+**dbt target stored in `project_env_vars`** — The active dbt target (`dev`, `prod`, etc.) is persisted as a `project_env_vars` row with key `dbt_target`, passed as `--target` on every invocation. This keeps target selection durable across sessions without adding a new DB column or migration.

@@ -5,7 +5,8 @@
       "Bash(obsidian read:*)",
       "WebSearch",
       "WebFetch(domain:docs.getdbt.com)",
-      "Bash(grep *)"
+      "Bash(grep *)",
+      "Bash(.venv/bin/python -c \"import yaml; print\\('ok'\\)\")"
     ]
   }
 }

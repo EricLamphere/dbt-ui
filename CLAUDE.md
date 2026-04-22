@@ -25,7 +25,7 @@ backend/app/
     engine.py     — get_session dependency
     migrations.py — DDL-on-startup migrations
   dbt/
-    runner.py     — DbtRunner singleton; subprocess execution + serialization lock
+    runner.py     — DbtRunner singleton; subprocess execution + serialization lock; adds --profiles-dir when project-local profiles.yml exists
     select.py     — build_selector(name, mode) → --select string
     manifest.py   — Parse target/manifest.json
     run_results.py — Parse target/run_results.json
@@ -47,18 +47,24 @@ frontend/src/
   routes/
     Home.tsx      — Project list (respects DBT_PROJECTS_PATH configured banner)
     Project/
-      ProjectLayout.tsx  — Shared layout wrapper (BottomPane + <Outlet>)
-      index.tsx          — Project homepage tiles
-      Models.tsx         — React Flow DAG page
+      ProjectLayout.tsx  — Shared layout wrapper (outlet + BottomPane; outlet has overflow-auto for scrolling)
+      index.tsx          — Project homepage (README, dbt_project.yml, profiles.yml tabbed viewer)
+      Models.tsx         — React Flow DAG page (/projects/:projectId/models); supports ?model=<uid> deep-link; uses SidePane(page="dag")
       Docs.tsx           — Native docs browser (folder tree)
-      FileExplorer/      — File browser + editor
+      FileExplorer/      — File browser + editor; uses SidePane(page="files") with navigation to DAG
       Environment.tsx    — Env vars + profiles
       InitScripts.tsx    — Init pipeline management
-      components/BottomPane/
-        RunPanel.tsx     — Execution DAG (parses run_log to show real-time status)
-        TerminalPanel.tsx — xterm.js terminals (multi-instance tabs)
-        LogPanel.tsx     — Project and API logs
-  components/     — Header, StatusBadge, shared UI
+      components/
+        SidePane/
+          index.tsx      — Right collapsible/draggable panel (horizontal drag); renders PropertiesTab; props: projectId, model, graph, page, navigation callbacks
+          PropertiesTab.tsx — Model metadata (name, type, materialization, schema, path, deps, tags, description, status), run controls (run/build/test grid), test failures, action buttons
+        BottomPane/
+          RunPanel.tsx     — Execution DAG (parses run_log to show real-time status)
+          TerminalPanel.tsx — xterm.js terminals (multi-instance tabs); optimized resize with lastSizeRef to prevent spurious SIGWINCH
+          LogPanel.tsx     — Project and API logs
+        Header.tsx         — Navigation + ProjectSelectors (Profile/Target dropdowns)
+        StatusBadge        — Shared UI
+  components/     — Other shared UI components
 ```
 
 ## Database Tables
@@ -70,7 +76,7 @@ All 8 in `backend/app/db/models.py`:
 - `run_invocations` — historical run records
 - `env_profiles` — named environment profiles per project
 - `profile_env_vars` — key/value vars belonging to a profile
-- `project_env_vars` — project-level env vars (not profile-scoped)
+- `project_env_vars` — project-level env vars (not profile-scoped); includes `dbt_target` key for active target
 - `app_settings` — global app config (key/value); e.g., `dbt_projects_path`
 
 ## Critical Architecture Rules
@@ -91,6 +97,7 @@ import dbt  # dbt Python library not installed
 - `runner` (`app.dbt.runner.runner`) is a **module-level singleton** — never instantiate another
 - Each `project_id` gets its own `asyncio.Lock` — runs are serialized per project, never bypass the lock
 - `runner.stream(req)` is an async generator; it publishes `run_started`, `run_log`, `run_finished` to the bus automatically
+- `RunRequest.extra` tuple accepts additional CLI args; dbt target is passed here when set via `/api/projects/{id}/dbt-target`
 - After a run: call `_persist_results_after_run(project)` (see `api/runs.py`) to write `model_statuses` and publish `statuses_changed`
 - Canonical pattern: `api/runs.py` → `_run_dbt_and_persist()`
 
@@ -193,6 +200,14 @@ useInitSessionEvents(sessionId, onEvent, useCallback(() => { /* on close */ }, [
 - TanStack Query cache invalidated by SSE events — never rely on polling for freshness
 - `RunPanel` is **always mounted** in `ProjectLayout` (never unmounted) so it receives `run_log` SSE events even when bottom pane is closed
 
+### dbt Target Configuration
+
+- `GET /api/projects/{id}/dbt-targets` — reads `profiles.yml` (project-local first, falls back to `~/.dbt/`) and returns available target names
+- `GET /api/projects/{id}/dbt-target` — returns currently active target from `ProjectEnvVar` table (key: `dbt_target`)
+- `PUT /api/projects/{id}/dbt-target` — sets active target; subsequent dbt runs pass `--target {value}` via `RunRequest.extra`
+- Frontend Header has Profile and Target dropdowns; Target select calls `api.profiles.setDbtTarget()` on change
+- Project-local `profiles.yml` (if exists) takes precedence over `~/.dbt/profiles.yml`
+
 ### Global Settings
 
 - New `AppSetting` table in DB (key/value pairs)
@@ -219,6 +234,38 @@ useInitSessionEvents(sessionId, onEvent, useCallback(() => { /* on close */ }, [
 - Terminal tab allows multiple instances with VSCode-style tabs on the right side
 - `RunPanel` always mounted to continuously receive `run_log` SSE events
 - `BottomPane` manages `open` state, `activeTab`, and `height`
+
+### SidePane Architecture (Right Panel)
+
+- Horizontally draggable/collapsible panel, same pattern as BottomPane
+- Unified replacement for old inline `ModelSidePanel` (DAG view) and file explorer metadata
+- **Single component**: `SidePane` renders `PropertiesTab` directly (no tab bar)
+- Props: `projectId`, `model` (ModelNode or null), `graph`, `page` ('files' | 'dag'), navigation callbacks (`onNavigateToFiles`, `onNavigateToDag`, `onViewDocs`, `onDelete`), `failedTestUid`
+- **PropertiesTab** — unified model inspector showing:
+  - Metadata: name, type, materialization, schema, database, file path, dependencies, tags, description, current status
+  - Run controls: 3×3 grid (run/build/test × upstream/downstream/all) for models; single test button for tests
+  - Test failures: rows of failing test metadata (when applicable)
+  - Action buttons: Edit in Files / Open in DAG, View Docs, Delete model
+- All run state and execution logic lives in PropertiesTab (no lifting to parent)
+- Models.tsx mounts SidePane(page="dag"); FileExplorer mounts SidePane(page="files")
+- Deep-link support: `Models.tsx` uses `useSearchParams` to read `?model=<unique_id>` and pre-select on load
+
+### Project Files and Configuration
+
+**API Endpoints** (`backend/app/api/projects.py`):
+- `GET /api/projects/{id}` — returns `ProjectOut` with `readme`, `dbt_project_yml`, and `profiles_yml` text fields (populated on GET)
+- `POST /api/projects/{id}/ensure-profiles-yml` — writes minimal `profiles.yml` to project dir if missing (e.g., after `dbt init`)
+- `PATCH /api/projects/{id}/settings` — updates `init_script_path` only
+
+**dbt Targets** (`backend/app/api/env.py`):
+- `GET /api/projects/{id}/dbt-targets` — reads `profiles.yml` (project-local first, then `~/.dbt/`) and returns list of available target names
+- `GET /api/projects/{id}/dbt-target` — returns currently active target from `ProjectEnvVar` table (key: `dbt_target`)
+- `PUT /api/projects/{id}/dbt-target` — sets active target; subsequent runs pass `--target {value}` via `RunRequest.extra`
+
+**Frontend**:
+- Project homepage (`index.tsx`) displays README, dbt_project.yml, and profiles.yml in tabbed Monaco viewer using `YamlViewer` component
+- Header has Profile and Target selectors; Target dropdown populated from `GET /api/projects/{id}/dbt-targets`
+- FileExplorer: Removed old MAIN_TABS (View/Run/Setup); ViewPane always shown; integrated SidePane for navigation
 
 ## Development Commands
 
@@ -261,3 +308,11 @@ Single test file: `cd backend && .venv/bin/pytest tests/test_x.py -xvs`
 - [ ] Add `useTerminalEvents(sessionId, onEvent, onClose)` call in frontend component
 - [ ] Events: `terminal_output` (chunks), `terminal_finished`
 - [ ] TerminalPanel multi-instance tabs managed in BottomPane/index.tsx
+
+## Checklist: Adding dbt Target Support to a New Feature
+
+- [ ] Read dbt target via `GET /api/projects/{id}/dbt-target` in frontend
+- [ ] Pass target as `--target {value}` in `RunRequest.extra` tuple in backend
+- [ ] Frontend: add target-aware logic to run controls (grid layout, button behavior)
+- [ ] If storing per-run metadata: include target in historical record (e.g., run_invocations)
+- [ ] Test with multiple profiles.yml scenarios (project-local vs global)

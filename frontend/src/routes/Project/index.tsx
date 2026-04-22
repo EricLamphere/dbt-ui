@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
-import { api } from '../../lib/api';
+import Editor from '@monaco-editor/react';
+import { api, type Project } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 
 const PLATFORM_ICONS: Record<string, string> = {
@@ -148,7 +149,7 @@ export default function ProjectHome() {
   };
 
   return (
-    <div className="flex-1 overflow-auto p-6 max-w-4xl mx-auto w-full">
+    <div className="p-6 pb-12 max-w-4xl mx-auto w-full">
       {/* Header tile */}
       <div className="bg-surface-panel border border-gray-800 rounded-xl px-6 py-5 mb-6 w-full">
         <div className="flex items-start justify-between">
@@ -303,15 +304,8 @@ export default function ProjectHome() {
         />
       </div>
 
-      {/* README */}
-      {project.readme && (
-        <div className="mt-6 bg-surface-panel border border-gray-800 rounded-xl px-6 py-5">
-          <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-4">README</h2>
-          <div className="prose-readme">
-            <ReactMarkdown>{project.readme}</ReactMarkdown>
-          </div>
-        </div>
-      )}
+      {/* Project files panel */}
+      <ProjectFilesPanel project={project} />
 
       {/* App picker modal */}
       {appPickerOpen && (
@@ -320,6 +314,97 @@ export default function ProjectHome() {
           onPick={handleAppPicked}
           onClose={() => setAppPickerOpen(false)}
         />
+      )}
+    </div>
+  );
+}
+
+// ---- Project files panel (README / dbt_project.yml / profiles.yml) ----
+
+type FileTab = 'readme' | 'dbt_project' | 'profiles';
+
+const FILE_TABS: { id: FileTab; label: string; field: keyof Project; language: string }[] = [
+  { id: 'readme',      label: 'README.md',       field: 'readme',         language: 'markdown' },
+  { id: 'dbt_project', label: 'dbt_project.yml', field: 'dbt_project_yml', language: 'yaml' },
+  { id: 'profiles',   label: 'profiles.yml',     field: 'profiles_yml',   language: 'yaml' },
+];
+
+function YamlViewer({ content }: { content: string }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  return (
+    <div ref={containerRef} style={{ minHeight: 100 }}>
+      <Editor
+        language="yaml"
+        value={content}
+        theme="vs-dark"
+        onMount={(editor) => {
+          const applyHeight = () => {
+            const h = editor.getContentHeight();
+            if (containerRef.current) {
+              containerRef.current.style.height = `${h}px`;
+            }
+            editor.layout();
+          };
+          applyHeight();
+          editor.onDidContentSizeChange(applyHeight);
+        }}
+        options={{
+          fontSize: 13,
+          fontFamily: 'Menlo, Monaco, "Courier New", monospace',
+          lineNumbers: 'on',
+          minimap: { enabled: false },
+          scrollBeyondLastLine: false,
+          readOnly: true,
+          automaticLayout: true,
+          scrollbar: { vertical: 'hidden', horizontal: 'auto', handleMouseWheel: false },
+          overviewRulerLanes: 0,
+          renderLineHighlight: 'none',
+          padding: { top: 12, bottom: 12 },
+          guides: { indentation: true },
+          folding: false,
+          lineDecorationsWidth: 16,
+        }}
+      />
+    </div>
+  );
+}
+
+function ProjectFilesPanel({ project }: { project: Project }) {
+  const available = FILE_TABS.filter((t) => project[t.field] != null);
+  const [activeTab, setActiveTab] = useState<FileTab>(() => available[0]?.id ?? 'readme');
+
+  if (available.length === 0) return null;
+
+  const active = available.find((t) => t.id === activeTab) ?? available[0];
+  const content = project[active.field] as string;
+
+  return (
+    <div className="mt-6 bg-surface-panel border border-gray-800 rounded-xl overflow-hidden">
+      {/* Tab bar */}
+      <div className="flex items-center gap-1 px-4 border-b border-gray-800" style={{ height: 40 }}>
+        {available.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-3 py-1 text-xs rounded transition-colors font-mono
+              ${active.id === tab.id
+                ? 'bg-brand-900/50 text-brand-300 font-medium'
+                : 'text-gray-500 hover:text-gray-300'
+              }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content — expands to full file height, page scrolls */}
+      {active.id === 'readme' ? (
+        <div className="px-6 py-5 prose-readme">
+          <ReactMarkdown>{content}</ReactMarkdown>
+        </div>
+      ) : (
+        <YamlViewer key={active.id} content={content} />
       )}
     </div>
   );

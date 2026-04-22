@@ -52,6 +52,8 @@ export interface Project {
   vscode_cmd: string | null;
   init_script_path: string;
   readme: string | null;
+  dbt_project_yml: string | null;
+  profiles_yml: string | null;
 }
 
 export interface ModelNode {
@@ -122,6 +124,15 @@ export interface ProfileDto {
   is_default: boolean;
   is_active: boolean;
   vars: ProfileVarDto[];
+}
+
+export interface DbtTargetsDto {
+  targets: string[];
+  default_target: string | null;
+}
+
+export interface DbtTargetDto {
+  target: string | null;
 }
 
 export interface DocsColumnDto {
@@ -210,6 +221,8 @@ export const api = {
       post<{ ok: boolean }>('/projects/open-in-app', { app_name: appName, path }),
     updateSettings: (projectId: number, body: { init_script_path: string }) =>
       patch<Project>(`/projects/${projectId}/settings`, body),
+    ensureProfilesYml: (projectId: number) =>
+      post<{ created: boolean }>(`/projects/${projectId}/ensure-profiles-yml`),
   },
   models: {
     graph: (projectId: number) => get<GraphDto>(`/projects/${projectId}/models`),
@@ -317,6 +330,12 @@ export const api = {
       request<void>(`/projects/${projectId}/profiles/${profileId}/vars/${encodeURIComponent(key)}`, { method: 'DELETE' }),
     activate: (projectId: number, profileId: number) =>
       post<ProfileDto>(`/projects/${projectId}/profiles/${profileId}/activate`),
+    dbtTargets: (projectId: number) =>
+      get<DbtTargetsDto>(`/projects/${projectId}/dbt-targets`),
+    getDbtTarget: (projectId: number) =>
+      get<DbtTargetDto>(`/projects/${projectId}/dbt-target`),
+    setDbtTarget: (projectId: number, target: string) =>
+      put<DbtTargetDto>(`/projects/${projectId}/dbt-target`, { target }),
   },
   docs: {
     status: (projectId: number) =>

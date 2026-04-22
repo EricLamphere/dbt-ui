@@ -27,6 +27,15 @@ def _read_readme(project_path: str) -> str | None:
     return None
 
 
+def _read_file_text(path: Path) -> str | None:
+    if path.is_file():
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return None
+    return None
+
+
 class ProjectOut(BaseModel):
     id: int
     name: str
@@ -36,9 +45,12 @@ class ProjectOut(BaseModel):
     vscode_cmd: str | None
     init_script_path: str = "init"
     readme: str | None = None
+    dbt_project_yml: str | None = None
+    profiles_yml: str | None = None
 
     @classmethod
-    def from_row(cls, row: Project, include_readme: bool = False) -> "ProjectOut":
+    def from_row(cls, row: Project, include_files: bool = False) -> "ProjectOut":
+        root = Path(row.path)
         return cls(
             id=row.id,
             name=row.name,
@@ -47,7 +59,9 @@ class ProjectOut(BaseModel):
             profile=row.profile,
             vscode_cmd=row.vscode_cmd,
             init_script_path=row.init_script_path,
-            readme=_read_readme(row.path) if include_readme else None,
+            readme=_read_readme(row.path) if include_files else None,
+            dbt_project_yml=_read_file_text(root / "dbt_project.yml") if include_files else None,
+            profiles_yml=_read_file_text(root / "profiles.yml") if include_files else None,
         )
 
 
@@ -109,7 +123,7 @@ async def get_project(
     row = await session.get(Project, project_id)
     if row is None:
         raise HTTPException(status_code=404, detail="project not found")
-    return ProjectOut.from_row(row, include_readme=True)
+    return ProjectOut.from_row(row, include_files=True)
 
 
 @router.get("/by-path/{path:path}", response_model=ProjectOut)
@@ -142,3 +156,27 @@ async def patch_project_settings(
     await session.commit()
     await session.refresh(row)
     return ProjectOut.from_row(row)
+
+
+@router.post("/{project_id}/ensure-profiles-yml")
+async def ensure_profiles_yml(
+    project_id: int, session: AsyncSession = Depends(get_session)
+) -> dict[str, bool]:
+    """Write a minimal profiles.yml into the project dir if one does not already exist."""
+    row = await session.get(Project, project_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    dest = Path(row.path) / "profiles.yml"
+    if dest.exists():
+        return {"created": False}
+    profile_name = row.profile or row.name
+    content = (
+        f"{profile_name}:\n"
+        f"  outputs:\n"
+        f"    dev:\n"
+        f"      type: {row.platform}\n"
+        f"      threads: 1\n"
+        f"  target: dev\n"
+    )
+    dest.write_text(content, encoding="utf-8")
+    return {"created": True}

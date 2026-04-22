@@ -24,7 +24,7 @@ export default function ProjectLayout() {
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-auto">
         <Outlet />
       </div>
       <BottomPane projectId={id} graph={graph ?? null} projectPath={project?.path ?? null} />
