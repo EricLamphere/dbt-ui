@@ -130,21 +130,21 @@ dbt-ui/
 ## Gallery
 
 #### Homepage
-![Homepage](img/homepage)
+![Homepage](img/homepage.png)
 
 #### Project Homepage
-![Project Homepage](img/project_home)
+![Project Homepage](img/project_home.png)
 
 #### File Explorer
-![File Explorer](img/files_model)
+![File Explorer](img/files_model.png)
 
 #### DAG
-![DAG](img/dag_logs)
+![DAG](img/dag_logs.png)
 
 #### Docs
-![Docs Overview](img/docs_overview)
+![Docs Overview](img/docs_overview.png)
 
-![Docs Model](img/docs_model)
+![Docs Model](img/docs_model.png)
 
 
 
