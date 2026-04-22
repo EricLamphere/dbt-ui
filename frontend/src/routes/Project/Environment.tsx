@@ -88,9 +88,10 @@ export default function EnvironmentPage() {
 
 // ---- Global Settings ----
 
-function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_path: string | null; data_dir: string | null; log_level: string | null } | null }) {
+function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null } | null }) {
   const rows: { label: string; value: string | null | undefined }[] = [
-    { label: 'DBT_PROJECTS_PATH', value: appSettings?.dbt_projects_path },
+    { label: 'DBT_UI_PROJECTS_PATH', value: appSettings?.dbt_projects_path },
+    { label: 'DBT_UI_GLOBAL_REQUIREMENTS_PATH', value: appSettings?.global_requirements_path },
     { label: 'DBT_UI_DATA_DIR', value: appSettings?.data_dir },
     { label: 'DBT_UI_LOG_LEVEL', value: appSettings?.log_level },
   ];

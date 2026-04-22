@@ -651,7 +651,10 @@ async def _get_global_requirements_path() -> str | None:
     from app.db.models import AppSetting
     async with SessionLocal() as session:
         row = await session.get(AppSetting, "global_requirements_path")
-        return row.value if row is not None else None
+        if row is not None:
+            return row.value.strip() or None
+    from app.config import settings
+    return str(settings.global_requirements_path) if settings.global_requirements_path else None
 
 
 def _dbt_python() -> Path:

@@ -21,7 +21,10 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 - **Init pipeline** — configurable, sortable initialization steps (`dbt deps` + custom shell scripts) shown in a step-status modal
 - **Interactive `dbt init`** — create new projects in a full xterm.js terminal modal; writes `profiles.yml` into the new project directory automatically
 - **Project-local profiles** — `profiles.yml` co-located in the project directory; dbt invocations use `--profiles-dir` automatically when the file is present
-- **Global settings** — configure your dbt projects path from within the UI
+- **Global settings** — configure your dbt projects path, global requirements file, and other options from within the UI
+- **Requirements install** — init pipeline installs a global `requirements.txt` and an optional per-project `REQUIREMENTS_PATH` into the dbt venv automatically before running `dbt deps`
+- **Global env profiles** — define named environment variable sets globally and import them into any project as a starting point
+- **Project ignore** — mark projects as ignored so they are hidden from the project list without being deleted
 
 ## Quickstart
 
@@ -48,12 +51,12 @@ Open [http://localhost:5173](http://localhost:5173).
 
 ### 3. Configure your projects path
 
-On first launch, a banner prompts you to set **DBT_PROJECTS_PATH** — the directory containing your dbt projects. Click **Configure** and enter the path. The project list loads once the path is set.
+On first launch, a banner prompts you to set **DBT_UI_PROJECTS_PATH** — the directory containing your dbt projects. Click **Configure** and enter the path. The project list loads once the path is set.
 
 You can also set it via environment variable instead of the UI:
 
 ```bash
-export DBT_PROJECTS_PATH=$HOME/dbt-projects
+export DBT_UI_PROJECTS_PATH=$HOME/dbt-projects
 task start
 ```
 
@@ -124,9 +127,22 @@ dbt-ui/
 
 | Variable | Default | Description |
 |---|---|---|
-| `DBT_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects (overridable via UI) |
+| `DBT_UI_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects (overridable via UI) |
 | `DBT_UI_DATA_DIR` | `data/` | SQLite storage directory |
 | `DBT_UI_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+
+The following are stored in the DB via the Global Settings UI and override the environment variables above:
+
+| Setting key | Description |
+|---|---|
+| `dbt_projects_path` | Overrides `DBT_UI_PROJECTS_PATH` |
+| `global_requirements_path` | Path to a `requirements.txt` installed into the dbt venv on every project open |
+
+Per-project env var (set in the Environment tab):
+
+| Key | Description |
+|---|---|
+| `REQUIREMENTS_PATH` | Path to a project-specific `requirements.txt`; installed in addition to the global one |
 
 
 ## Gallery

@@ -13,7 +13,8 @@ class Settings(BaseSettings):
     )
 
     # Optional — can also be set via the Global Settings UI (stored in app_settings table)
-    dbt_projects_path: Path | None = Field(default=None, alias="DBT_PROJECTS_PATH")
+    dbt_projects_path: Path | None = Field(default=None, alias="DBT_UI_PROJECTS_PATH")
+    global_requirements_path: str | None = Field(default=None, alias="DBT_UI_GLOBAL_REQUIREMENTS_PATH")
     data_dir: Path = Field(default=Path("data"))
     database_url: str = Field(default="")
     vscode_cmd: str = Field(default="code")

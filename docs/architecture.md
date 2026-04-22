@@ -121,6 +121,7 @@ projects
   profile           TEXT(255)          -- value of dbt_project.yml "profile:"
   vscode_cmd        TEXT(255)          -- optional custom VS Code launch command
   init_script_path  TEXT(255)          -- subdirectory for init scripts (default "init/")
+  ignored           BOOLEAN            -- when true, project is hidden from the project list
   created_at        DATETIME
 
 init_steps
@@ -172,8 +173,20 @@ project_env_vars
   value         TEXT
 
 app_settings
-  key           TEXT PK          -- e.g. "dbt_projects_path"
+  key           TEXT PK          -- e.g. "dbt_projects_path", "global_requirements_path"
   value         TEXT
+
+global_profiles
+  id            INTEGER PK
+  name          TEXT(255) UNIQUE -- display name
+  created_at    DATETIME
+
+global_profile_vars
+  id            INTEGER PK
+  profile_id    INTEGER FK→global_profiles
+  key           TEXT(255)
+  value         TEXT
+  UNIQUE (profile_id, key)
 ```
 
 ---
@@ -232,6 +245,12 @@ DELETE /api/projects/{id}/profiles/{profile_id}/vars/{key}
 GET    /api/projects/{id}/dbt-targets                    list outputs from profiles.yml
 GET    /api/projects/{id}/dbt-target                     current target (from project_env_vars)
 PUT    /api/projects/{id}/dbt-target                     set active target
+
+GET    /api/global-profiles
+POST   /api/global-profiles
+DELETE /api/global-profiles/{profile_id}
+PUT    /api/global-profiles/{profile_id}/vars/{key}
+DELETE /api/global-profiles/{profile_id}/vars/{key}
 ```
 
 ---
@@ -307,7 +326,7 @@ Standard project events do not replay.
 ### 1. Project Discovery
 
 On startup and on `POST /api/projects/rescan`:
-1. `_effective_workspace()` in `service.py` resolves the active projects path: checks `app_settings` DB table first, falls back to `DBT_PROJECTS_PATH` env var, returns `None` if unconfigured
+1. `_effective_workspace()` in `service.py` resolves the active projects path: checks `app_settings` DB table first, falls back to `DBT_UI_PROJECTS_PATH` env var, returns `None` if unconfigured
 2. If `None`, rescan is a no-op; Home page shows a blocking banner
 3. `discovery.py` walks the workspace for `dbt_project.yml` files
 4. For each project, reads `profile:` from the YAML and looks up the adapter type in `profiles.yml`
@@ -324,8 +343,14 @@ On startup and on `POST /api/projects/rescan`:
 
 `POST /api/projects/{id}/open` → background task `_run_init_steps()`:
 1. Publishes `init_pipeline_started`
-2. For each enabled `InitStep` in order: runs `dbt deps` or `bash <script_path>`, publishes `init_step` with status
-3. Publishes `init_pipeline_finished`
+2. Builds env dict: process env + project env vars + active profile vars (via `load_project_env()`)
+3. For each enabled `InitStep` in order:
+   - `base: pip install` — installs `global_requirements_path` (from `app_settings`) and `REQUIREMENTS_PATH` (from project env vars) into the dbt venv; skips if neither is set
+   - `base: dbt deps` — runs `dbt deps` in the project directory
+   - custom steps — runs `bash -euo pipefail <script_path>` in the script's parent directory
+   - Publishes `init_step` with status after each step
+4. Publishes `init_pipeline_finished`
+5. On success, fires `_compile_project` in the background to populate the DAG immediately
 
 ### 4. Models DAG
 
@@ -389,10 +414,26 @@ The frontend runs `dagre` layout client-side and renders with React Flow. `Model
 
 | Variable | Default | Description |
 |---|---|---|
-| `DBT_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects; overridable via Global Settings UI |
+| `DBT_UI_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects; overridable via Global Settings UI |
 | `DBT_UI_DATA_DIR` | `data/` | Directory for SQLite database |
 | `DBT_UI_DATABASE_URL` | _(derived from DATA_DIR)_ | Override SQLite path |
 | `DBT_UI_LOG_LEVEL` | `INFO` | structlog level |
+
+Global settings (stored in `app_settings` table, set via UI):
+
+| Setting key | Description |
+|---|---|
+| `dbt_projects_path` | Overrides `DBT_UI_PROJECTS_PATH` |
+| `global_requirements_path` | Absolute path to a `requirements.txt` installed into the dbt venv on every project open |
+| `data_dir` | Overrides `DBT_UI_DATA_DIR` |
+| `log_level` | Overrides `DBT_UI_LOG_LEVEL` |
+
+Per-project env var (set in the Environment tab, stored in `project_env_vars`):
+
+| Key | Description |
+|---|---|
+| `REQUIREMENTS_PATH` | Path to a project-specific `requirements.txt`; installed in addition to the global one during `base: pip install` |
+| `dbt_target` | Active dbt target; passed as `--target` on every dbt invocation |
 
 ---
 
@@ -423,10 +464,14 @@ The Vite dev server proxies all `/api` requests to `localhost:8001`. Open [http:
 
 **SQLite** — Single-user, local tool. No concurrent writes from multiple processes. SQLite with aiosqlite is zero-ops and sufficient.
 
-**`_effective_workspace()` as single source of truth** — The projects path can come from the `app_settings` DB table (set via UI) or `settings.dbt_projects_path` (the `DBT_PROJECTS_PATH` env var). All backend code that needs the workspace path calls this one function.
+**`_effective_workspace()` as single source of truth** — The projects path can come from the `app_settings` DB table (set via UI) or `settings.dbt_projects_path` (the `DBT_UI_PROJECTS_PATH` env var). All backend code that needs the workspace path calls this one function.
 
 **SidePane as a unified panel** — The right-side panel (DAG and File Explorer) intentionally has no tab bar. Model metadata and run controls live in one scrollable view. Separating them into tabs added navigation friction with no benefit since both are used together during a typical run-and-inspect workflow.
 
 **Project-local `profiles.yml`** — Each project carries its own `profiles.yml` rather than relying on `~/.dbt/profiles.yml`. This makes projects self-contained and portable. `DbtRunner.build_args()` adds `--profiles-dir` automatically when the file is present, so existing projects without one continue to use the global fallback. `ensure-profiles-yml` writes a minimal stub after `dbt init` so new projects are immediately usable.
 
 **dbt target stored in `project_env_vars`** — The active dbt target (`dev`, `prod`, etc.) is persisted as a `project_env_vars` row with key `dbt_target`, passed as `--target` on every invocation. This keeps target selection durable across sessions without adding a new DB column or migration.
+
+**Global profiles as reusable env var templates** — `global_profiles` / `global_profile_vars` store named env var sets that are not tied to any project. They serve as templates that can be imported into project profiles, enabling teams to share common variable sets (e.g., a "prod credentials" profile) without duplicating them per project.
+
+**Requirements install in the dbt venv** — `pip install -r <requirements.txt>` targets the pip binary co-located with the `dbt` executable (`_venv_pip()`). This ensures packages install into whichever Python environment dbt actually runs in, not the app's own venv. A global path (for shared adapters or tools) and a per-project path (for project-specific packages) are both supported and installed in sequence.

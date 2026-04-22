@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { GlobalSettingsModal } from './GlobalSettingsModal';
 
 function ProjectSelectors({ projectId }: { projectId: number }) {
   const qc = useQueryClient();
@@ -79,6 +81,7 @@ function ProjectSelectors({ projectId }: { projectId: number }) {
 export default function Header() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const isHomepage = location.pathname === '/';
   // Header is outside <Routes> so useParams returns {}; extract projectId from path directly
   const projectIdMatch = location.pathname.match(/^\/projects\/(\d+)/);
@@ -112,26 +115,26 @@ export default function Header() {
           </>
         )}
         {isHomepage && (
-          <>
-            <button
-              onClick={() => window.dispatchEvent(new CustomEvent('dbt-ui:global-settings'))}
-              className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-surface-elevated transition-colors"
-              title="Global settings"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-              </svg>
-            </button>
-            <button
-              onClick={() => window.dispatchEvent(new CustomEvent('dbt-ui:new-project'))}
-              className="px-3 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
-            >
-              + New project
-            </button>
-          </>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent('dbt-ui:new-project'))}
+            className="px-3 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
+          >
+            + New project
+          </button>
         )}
+        <button
+          onClick={() => setSettingsOpen(true)}
+          className="p-1.5 rounded text-gray-500 hover:text-gray-300 hover:bg-surface-elevated transition-colors"
+          title="Global settings"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        </button>
       </div>
+
+      {settingsOpen && <GlobalSettingsModal onClose={() => setSettingsOpen(false)} />}
     </header>
   );
 }

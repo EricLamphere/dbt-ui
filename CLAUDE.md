@@ -19,9 +19,9 @@ Backend on `:8001`, frontend on `:5173`.
 
 ```
 backend/app/
-  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings)
+  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles)
   db/
-    models.py     — All SQLAlchemy models (8 tables)
+    models.py     — All SQLAlchemy models (10 tables)
     engine.py     — get_session dependency
     migrations.py — DDL-on-startup migrations
   dbt/
@@ -36,7 +36,7 @@ backend/app/
     sse.py        — sse_response(), sse_response_with_replay()
   projects/
     discovery.py  — Walk workspace for dbt_project.yml
-    service.py    — Upsert projects to DB; _effective_workspace() for DBT_PROJECTS_PATH
+    service.py    — Upsert projects to DB; _effective_workspace() for DBT_UI_PROJECTS_PATH
   watcher/
     service.py    — WatcherManager (watchfiles, per-project)
 
@@ -45,7 +45,7 @@ frontend/src/
     api.ts        — All typed API fetch helpers (use these, never raw fetch in components)
     sse.ts        — useProjectEvents(), useInitSessionEvents(), useTerminalEvents() hooks
   routes/
-    Home.tsx      — Project list (respects DBT_PROJECTS_PATH configured banner)
+    Home.tsx      — Project list (respects DBT_UI_PROJECTS_PATH configured banner)
     Project/
       ProjectLayout.tsx  — Shared layout wrapper (outlet + BottomPane; outlet has overflow-auto for scrolling)
       index.tsx          — Project homepage (README, dbt_project.yml, profiles.yml tabbed viewer)
@@ -69,15 +69,17 @@ frontend/src/
 
 ## Database Tables
 
-All 8 in `backend/app/db/models.py`:
-- `projects` — discovered dbt projects (includes `init_script_path: str` per-project init dir)
+All 10 in `backend/app/db/models.py`:
+- `projects` — discovered dbt projects (includes `init_script_path: str` per-project init dir; `ignored: bool` to hide from list)
 - `init_steps` — ordered init pipeline steps per project (includes `script_path` for linked external scripts)
 - `model_statuses` — per-model run status (idle/pending/running/success/error/warn/stale)
 - `run_invocations` — historical run records
 - `env_profiles` — named environment profiles per project
 - `profile_env_vars` — key/value vars belonging to a profile
-- `project_env_vars` — project-level env vars (not profile-scoped); includes `dbt_target` key for active target
-- `app_settings` — global app config (key/value); e.g., `dbt_projects_path`
+- `project_env_vars` — project-level env vars (not profile-scoped); includes `dbt_target` for active target; `REQUIREMENTS_PATH` for per-project requirements
+- `app_settings` — global app config (key/value); keys: `dbt_projects_path`, `global_requirements_path`, `data_dir`, `log_level`
+- `global_profiles` — named env var sets shared across all projects
+- `global_profile_vars` — key/value vars belonging to a global profile
 
 ## Critical Architecture Rules
 
@@ -149,14 +151,21 @@ finally:
 
 ### Init Pipeline System
 
-**Init Pipeline** — runs dbt deps + custom shell scripts in sequence
+**Init Pipeline** — runs pip install + dbt deps + custom shell scripts in sequence
 - Entry: `POST /api/projects/{id}/open`
+- Built-in base steps (in order): `base: pip install`, `base: dbt deps`
 - Scripts in `{project_path}/{init_script_path}/*.sh` (default `init/`; managed by `dbt/init_scripts.py`)
 - Per-project `init_script_path` column in `projects` table
 - Linked external scripts tracked with absolute `script_path` in `init_steps` table
 - `_sync_steps_from_disk()` only deletes owned (init-dir) scripts; preserves linked ones
 - SSE topic: `project:{id}`
 - Events: `init_pipeline_started` → `init_step` (×N) → `init_pipeline_finished`
+
+**`base: pip install` step logic:**
+1. Reads `global_requirements_path` from `app_settings` (set via Global Settings UI)
+2. Reads `REQUIREMENTS_PATH` from project env vars (set in Environment tab)
+3. Installs both (global first, project second) into the dbt venv via `_venv_pip()` (pip co-located with the `dbt` binary)
+4. Skips silently if neither path is configured; fails fast if a configured path does not exist
 
 ### Interactive PTY Systems
 
@@ -210,13 +219,14 @@ useInitSessionEvents(sessionId, onEvent, useCallback(() => { /* on close */ }, [
 
 ### Global Settings
 
-- New `AppSetting` table in DB (key/value pairs)
-- `GET /api/settings` returns `{ dbt_projects_path, configured }`
-- `PUT /api/settings` updates global config
-- `configured: bool` indicates whether `DBT_PROJECTS_PATH` is set (mandatory to show project list)
+- `AppSetting` table stores key/value pairs for global config
+- `GET /api/settings` returns `{ dbt_projects_path, global_requirements_path, data_dir, log_level, configured }`
+- `PUT /api/settings` updates any subset of the above keys
+- `configured: bool` indicates whether `DBT_UI_PROJECTS_PATH` is meaningfully set (mandatory to show project list)
 - Home page shows blocking banner if `configured: false`
-- Workspace is resolved from `app_settings` table (key `dbt_projects_path`) with fallback to env var `DBT_PROJECTS_PATH`
+- Workspace is resolved from `app_settings` table (key `dbt_projects_path`) with fallback to env var `DBT_UI_PROJECTS_PATH`
 - `_effective_workspace()` in `projects/service.py` handles resolution; used by `rescan_projects` and `start_init_session`
+- `global_requirements_path` is read by `_run_init_steps()` in `api/init.py` during `base: pip install`
 
 ### File Watcher
 
@@ -294,11 +304,13 @@ Single test file: `cd backend && .venv/bin/pytest tests/test_x.py -xvs`
 ## Checklist: Adding a New Global Setting
 
 - [ ] Add key/value to `AppSetting` table via migrations (or upsert in-code if safe)
-- [ ] Add `GET` handler to `api/settings.py` that returns the setting
-- [ ] Add `PUT` handler to update it
+- [ ] Add field to `SettingsUpdateDto` and `SettingsDto` in `api/settings.py`
+- [ ] Add `_get_override(session, "my_key")` call in `get_settings()`
+- [ ] Add `_upsert(session, "my_key", ...)` call in `put_settings()`
 - [ ] Return `configured` flag if it affects workspace visibility (Home page)
 - [ ] Call `_effective_workspace()` in `projects/service.py` to resolve final workspace path
 - [ ] Update frontend `api.settings.get()` type if response shape changed
+- [ ] Update `docs/architecture.md` → Configuration table and `README.md` → Environment Variables table
 
 ## Checklist: Adding a New Terminal Feature
 

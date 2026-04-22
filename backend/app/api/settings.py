@@ -73,12 +73,12 @@ async def put_settings(
     session: AsyncSession = Depends(get_session),
 ) -> SettingsDto:
     if dto.dbt_projects_path is not None:
-        await _upsert(session, "dbt_projects_path", dto.dbt_projects_path)
+        await _upsert(session, "dbt_projects_path", dto.dbt_projects_path.strip())
     if dto.data_dir is not None:
         await _upsert(session, "data_dir", dto.data_dir)
     if dto.log_level is not None:
         await _upsert(session, "log_level", dto.log_level)
     if dto.global_requirements_path is not None:
-        await _upsert(session, "global_requirements_path", dto.global_requirements_path)
+        await _upsert(session, "global_requirements_path", dto.global_requirements_path.strip())
     await session.commit()
     return await get_settings(session)
