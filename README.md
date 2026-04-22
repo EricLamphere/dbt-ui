@@ -4,7 +4,7 @@ An open-source, local-first web UI for [dbt-core](https://github.com/dbt-labs/db
 
 Gives you an interactive dependency graph, live run/build/test controls with streaming logs, an integrated terminal, an in-browser SQL editor, and project discovery — all running locally against your dbt projects.
 
-Built with ![claude-code](img/claude-code.png)
+Built with <img src="img/claude-code.png" width="20" height="20">
 
 ## Features
 
