@@ -9,6 +9,7 @@ import {
   useNodesState,
   useEdgesState,
   type Node,
+  type OnSelectionChangeParams,
   BackgroundVariant,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -78,6 +79,7 @@ export default function ModelsPage() {
 
   const [filterText, setFilterText] = useState('');
   const [selectedModel, setSelectedModel] = useState<ModelNode | null>(null);
+  const [selectedModels, setSelectedModels] = useState<ModelNode[]>([]);
   const [newModelOpen, setNewModelOpen] = useState(false);
   const [compiling, setCompiling] = useState(false);
   const [failedTestUid, setFailedTestUid] = useState<string | null>(null);
@@ -193,6 +195,15 @@ export default function ModelsPage() {
     [],
   );
 
+  const onSelectionChange = useCallback(({ nodes }: OnSelectionChangeParams) => {
+    const models = nodes
+      .map((n) => n.data?.model as ModelNode | undefined)
+      .filter((m): m is ModelNode => m !== undefined);
+    setSelectedModels(models);
+    if (models.length === 1) setSelectedModel(models[0]);
+    if (models.length === 0) setSelectedModel(null);
+  }, []);
+
   const handleRefreshDag = async () => {
     await api.models.compile(id);
   };
@@ -260,6 +271,7 @@ export default function ModelsPage() {
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
             onNodeClick={onNodeClick}
+            onSelectionChange={onSelectionChange}
             nodeTypes={nodeTypes}
             fitView
             fitViewOptions={{ padding: 0.2 }}
@@ -287,6 +299,7 @@ export default function ModelsPage() {
       <SidePane
         projectId={id}
         model={selectedModel}
+        selectedModels={selectedModels}
         graph={graph ?? null}
         page="dag"
         onNavigateToFiles={() => selectedModel && navigate(`/projects/${id}/files?model=${encodeURIComponent(selectedModel.unique_id)}`)}

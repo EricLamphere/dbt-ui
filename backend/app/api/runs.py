@@ -166,6 +166,18 @@ async def post_build(
     return await _launch(project, "build", dto)
 
 
+@router.post("/{project_id}/seed", response_model=RunResponseDto)
+async def post_seed(
+    project_id: int,
+    dto: RunRequestDto,
+    session: AsyncSession = Depends(get_session),
+) -> RunResponseDto:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    return await _launch(project, "seed", dto)
+
+
 @router.post("/{project_id}/test", response_model=RunResponseDto)
 async def post_test(
     project_id: int,

@@ -263,12 +263,14 @@ export const api = {
       post<{ columns: string[]; rows: unknown[][] }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/show`, { limit }),
   },
   runs: {
-    run: (projectId: number, model: string, mode: string) =>
-      post(`/projects/${projectId}/run`, { model, mode }),
-    build: (projectId: number, model: string, mode: string) =>
-      post(`/projects/${projectId}/build`, { model, mode }),
-    test: (projectId: number, model: string, mode: string) =>
-      post(`/projects/${projectId}/test`, { model, mode }),
+    run: (projectId: number, model: string, mode: string, select?: string) =>
+      post(`/projects/${projectId}/run`, { model: model || null, mode, select: select ?? null }),
+    build: (projectId: number, model: string, mode: string, select?: string) =>
+      post(`/projects/${projectId}/build`, { model: model || null, mode, select: select ?? null }),
+    test: (projectId: number, model: string, mode: string, select?: string) =>
+      post(`/projects/${projectId}/test`, { model: model || null, mode, select: select ?? null }),
+    seed: (projectId: number, model: string, mode: string, select?: string) =>
+      post(`/projects/${projectId}/seed`, { model: model || null, mode, select: select ?? null }),
   },
   files: {
     list: (projectId: number, path = '') =>
@@ -323,12 +325,20 @@ export const api = {
       }),
     deleteEnvVar: (projectId: number, key: string) =>
       request<void>(`/projects/${projectId}/init/env/${encodeURIComponent(key)}`, { method: 'DELETE' }),
-    startSession: (platform: string, cwd?: string) =>
-      post<{ session_id: string }>('/projects/init-session/start', { platform, cwd: cwd ?? null }),
+    startSession: (platform: string, cwd?: string, skipInstall?: boolean) =>
+      post<{ session_id: string }>('/projects/init-session/start', { platform, cwd: cwd ?? null, skip_install: skipInstall ?? false }),
     sendInput: (sessionId: string, data: string) =>
       post(`/projects/init-session/${sessionId}/input`, { data }),
     stopSession: (sessionId: string) =>
       post(`/projects/init-session/${sessionId}/stop`),
+    checkPackage: (pkg: string) =>
+      get<{ package: string; installed_version: string | null }>(`/init/package-info?package=${encodeURIComponent(pkg)}`),
+    dbtCoreStatus: () =>
+      get<{ installed: boolean; version: string | null }>('/init/dbt-core-status'),
+    appendRequirement: (line: string) =>
+      post<{ ok: boolean }>('/init/append-requirement', { line }),
+    runGlobalSetup: () =>
+      post<{ ok: boolean }>('/init/global-setup'),
   },
   profiles: {
     list: (projectId: number) =>

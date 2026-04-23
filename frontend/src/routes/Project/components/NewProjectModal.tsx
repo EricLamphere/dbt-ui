@@ -22,11 +22,31 @@ const PLATFORMS = [
   { value: 'clickhouse',  label: 'ClickHouse',   icon: '🔴' },
 ];
 
-type Step = 'pick-platform' | 'terminal';
+const ADAPTER_PACKAGES: Record<string, string> = {
+  postgres: 'dbt-postgres',
+  duckdb: 'dbt-duckdb',
+  bigquery: 'dbt-bigquery',
+  snowflake: 'dbt-snowflake',
+  redshift: 'dbt-redshift',
+  databricks: 'dbt-databricks',
+  spark: 'dbt-spark',
+  trino: 'dbt-trino',
+  athena: 'dbt-athena-community',
+  clickhouse: 'dbt-clickhouse',
+};
+
+type Step = 'pick-platform' | 'check-adapter' | 'terminal';
+
+type AdapterCheckState =
+  | { status: 'loading' }
+  | { status: 'installed'; version: string }
+  | { status: 'not-installed'; requirementLine: string };
 
 export default function NewProjectModal({ onClose }: Props) {
   const [step, setStep] = useState<Step>('pick-platform');
   const [platform, setPlatform] = useState('');
+  const [adapterCheck, setAdapterCheck] = useState<AdapterCheckState>({ status: 'loading' });
+  const [skipInstall, setSkipInstall] = useState(false);
 
   const termRef = useRef<HTMLDivElement>(null);
   const termInstance = useRef<Terminal | null>(null);
@@ -35,6 +55,22 @@ export default function NewProjectModal({ onClose }: Props) {
   const [finished, setFinished] = useState(false);
   const [returnCode, setReturnCode] = useState<number | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+
+  // Check adapter when entering check-adapter step
+  useEffect(() => {
+    if (step !== 'check-adapter' || !platform) return;
+    const pkg = ADAPTER_PACKAGES[platform] ?? `dbt-${platform}`;
+    setAdapterCheck({ status: 'loading' });
+    api.init.checkPackage(pkg).then((info) => {
+      if (info.installed_version) {
+        setAdapterCheck({ status: 'installed', version: info.installed_version });
+      } else {
+        setAdapterCheck({ status: 'not-installed', requirementLine: pkg });
+      }
+    }).catch(() => {
+      setAdapterCheck({ status: 'not-installed', requirementLine: ADAPTER_PACKAGES[platform] ?? `dbt-${platform}` });
+    });
+  }, [step, platform]);
 
   // Mount terminal only once we're in the terminal step
   useEffect(() => {
@@ -72,7 +108,7 @@ export default function NewProjectModal({ onClose }: Props) {
 
     term.writeln('\x1b[2mStarting…\x1b[0m');
 
-    api.init.startSession(platform)
+    api.init.startSession(platform, undefined, skipInstall)
       .then(({ session_id }) => {
         if (cancelled) {
           api.init.stopSession(session_id).catch(() => {});
@@ -93,7 +129,7 @@ export default function NewProjectModal({ onClose }: Props) {
       ro.disconnect();
       term.dispose();
     };
-  }, [step, platform]);
+  }, [step, platform, skipInstall]);
 
   useEffect(() => {
     const term = termInstance.current;
@@ -126,7 +162,6 @@ export default function NewProjectModal({ onClose }: Props) {
     const sid = sessionIdRef.current;
     if (sid) api.init.stopSession(sid).catch(() => {});
     const projects = await api.projects.rescan().catch(() => []);
-    // Write profiles.yml into any newly-created project that doesn't have one yet
     await Promise.all(projects.map((p) => api.projects.ensureProfilesYml(p.id).catch(() => {})));
     onClose();
   };
@@ -134,8 +169,20 @@ export default function NewProjectModal({ onClose }: Props) {
   const handlePlatformSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!platform) return;
+    setStep('check-adapter');
+  };
+
+  const handleProceedInstallLatest = () => {
+    setSkipInstall(false);
     setStep('terminal');
   };
+
+  const handleProceedSkipInstall = () => {
+    setSkipInstall(true);
+    setStep('terminal');
+  };
+
+  const pkg = platform ? (ADAPTER_PACKAGES[platform] ?? `dbt-${platform}`) : '';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
@@ -147,9 +194,9 @@ export default function NewProjectModal({ onClose }: Props) {
           <div>
             <h2 className="text-sm font-semibold text-gray-100">New dbt project</h2>
             <p className="text-[10px] text-gray-500">
-              {step === 'pick-platform'
-                ? 'Choose your data platform'
-                : <>Installing adapter &amp; running <code className="font-mono">dbt init</code></>}
+              {step === 'pick-platform' && 'Choose your data platform'}
+              {step === 'check-adapter' && `Checking for ${pkg}`}
+              {step === 'terminal' && <>Installing adapter &amp; running <code className="font-mono">dbt init</code></>}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -188,7 +235,7 @@ export default function NewProjectModal({ onClose }: Props) {
 
             {platform && (
               <p className="text-xs text-gray-500">
-                Will install <code className="font-mono text-gray-400">dbt-{platform === 'athena' ? 'athena-community' : platform}</code> then run <code className="font-mono text-gray-400">dbt init</code>
+                Will check for <code className="font-mono text-gray-400">{pkg}</code> then run <code className="font-mono text-gray-400">dbt init</code>
               </p>
             )}
 
@@ -204,7 +251,52 @@ export default function NewProjectModal({ onClose }: Props) {
           </form>
         )}
 
-        {/* Step 2 — terminal */}
+        {/* Step 2 — adapter check */}
+        {step === 'check-adapter' && (
+          <div className="p-6 flex flex-col gap-5">
+            {adapterCheck.status === 'loading' && (
+              <p className="text-sm text-gray-400">Checking for <code className="font-mono">{pkg}</code>…</p>
+            )}
+
+            {adapterCheck.status === 'installed' && (
+              <div className="flex flex-col gap-4">
+                <div className="flex items-center gap-2 px-4 py-3 bg-emerald-950/40 border border-emerald-800/60 rounded-lg">
+                  <span className="text-emerald-400 text-sm">✓</span>
+                  <p className="text-sm text-emerald-300">
+                    Using installed <code className="font-mono">{pkg}</code> {adapterCheck.version}
+                  </p>
+                </div>
+                <div className="flex justify-end">
+                  <button
+                    onClick={handleProceedSkipInstall}
+                    className="px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors"
+                  >
+                    Continue →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {adapterCheck.status === 'not-installed' && (
+              <AdapterNotInstalled
+                pkg={pkg}
+                requirementLine={adapterCheck.requirementLine}
+                onInstallLatest={handleProceedInstallLatest}
+                onAddToRequirements={async (line) => {
+                  try {
+                    await api.init.appendRequirement(line);
+                  } catch {
+                    // proceed anyway — user can fix requirements file manually
+                  }
+                  setSkipInstall(false);
+                  setStep('terminal');
+                }}
+              />
+            )}
+          </div>
+        )}
+
+        {/* Step 3 — terminal */}
         {step === 'terminal' && (
           <>
             <div className="flex-1 min-h-0 bg-[#030712] p-1">
@@ -228,6 +320,78 @@ export default function NewProjectModal({ onClose }: Props) {
             )}
           </>
         )}
+      </div>
+    </div>
+  );
+}
+
+interface AdapterNotInstalledProps {
+  pkg: string;
+  requirementLine: string;
+  onInstallLatest: () => void;
+  onAddToRequirements: (line: string) => Promise<void>;
+}
+
+function AdapterNotInstalled({ pkg, requirementLine, onInstallLatest, onAddToRequirements }: AdapterNotInstalledProps) {
+  const [editedLine, setEditedLine] = useState(requirementLine);
+  const [addMode, setAddMode] = useState(false);
+  const [adding, setAdding] = useState(false);
+
+  if (addMode) {
+    return (
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-gray-300">
+          Add <code className="font-mono">{pkg}</code> to your requirements file. Edit the version pin if needed:
+        </p>
+        <input
+          type="text"
+          value={editedLine}
+          onChange={(e) => setEditedLine(e.target.value)}
+          className="bg-surface-elevated border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          placeholder="e.g. dbt-athena-community==1.9.4"
+        />
+        <div className="flex items-center justify-between">
+          <button
+            onClick={() => setAddMode(false)}
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+          >
+            ← Back
+          </button>
+          <button
+            disabled={!editedLine.trim() || adding}
+            onClick={async () => {
+              setAdding(true);
+              await onAddToRequirements(editedLine.trim());
+            }}
+            className="px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors disabled:opacity-40"
+          >
+            {adding ? 'Adding…' : 'Add & install →'}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-sm text-gray-300">
+        <code className="font-mono">{pkg}</code> is not installed. How would you like to proceed?
+      </p>
+      <div className="flex flex-col gap-2">
+        <button
+          onClick={() => setAddMode(true)}
+          className="flex flex-col gap-0.5 px-4 py-3 rounded-lg border border-gray-700 bg-gray-800 hover:border-indigo-600 hover:bg-indigo-950/30 text-left transition-colors"
+        >
+          <span className="text-sm font-medium text-gray-100">Add to requirements file</span>
+          <span className="text-xs text-gray-500">Appends a line to your global requirements.txt, then installs</span>
+        </button>
+        <button
+          onClick={onInstallLatest}
+          className="flex flex-col gap-0.5 px-4 py-3 rounded-lg border border-gray-700 bg-gray-800 hover:border-indigo-600 hover:bg-indigo-950/30 text-left transition-colors"
+        >
+          <span className="text-sm font-medium text-gray-100">Install latest version</span>
+          <span className="text-xs text-gray-500">Installs the latest <code className="font-mono">{pkg}</code> without version pinning</span>
+        </button>
       </div>
     </div>
   );

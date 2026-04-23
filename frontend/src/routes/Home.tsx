@@ -116,6 +116,13 @@ export default function Home() {
     queryFn: () => api.settings.get(),
   });
 
+  const { data: dbtCoreStatus } = useQuery({
+    queryKey: ['dbt-core-status'],
+    queryFn: () => api.init.dbtCoreStatus(),
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
+  });
+
   const isConfigured = appSettings?.configured ?? true;
 
   const { data: projects = [], isLoading, error } = useQuery({
@@ -182,6 +189,16 @@ export default function Home() {
           >
             Configure
           </button>
+        </div>
+      )}
+
+      {/* dbt not found banner */}
+      {dbtCoreStatus && !dbtCoreStatus.installed && (
+        <div className="flex items-center justify-between gap-4 px-4 py-3 bg-red-950/40 border border-red-800/60 rounded-lg">
+          <div className="flex flex-col gap-0.5">
+            <p className="text-sm font-medium text-red-300">dbt is not installed</p>
+            <p className="text-xs text-red-500">Add <code className="font-mono">dbt-core</code> and an adapter to your global requirements file, then click Run global setup in the header.</p>
+          </div>
         </div>
       )}
 

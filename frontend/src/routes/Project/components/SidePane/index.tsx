@@ -6,6 +6,7 @@ import { PropertiesTab } from './PropertiesTab';
 interface SidePaneProps {
   projectId: number;
   model: ModelNode | null;
+  selectedModels?: ModelNode[];
   graph: GraphDto | null;
   /** 'files' hides "Edit in Files" and shows "Open in DAG" instead */
   page: 'files' | 'dag';
@@ -24,6 +25,7 @@ const COLLAPSE_THRESHOLD = 80;
 export function SidePane({
   projectId,
   model,
+  selectedModels = [],
   graph,
   page,
   onNavigateToFiles,
@@ -39,10 +41,10 @@ export function SidePane({
   const startW = useRef(0);
   const lastWidthRef = useRef(DEFAULT_WIDTH);
 
-  // Auto-open when a model is selected
+  // Auto-open when a model is selected (single or multi)
   useEffect(() => {
-    if (model) setOpen(true);
-  }, [model?.unique_id]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (model || selectedModels.length > 1) setOpen(true);
+  }, [model?.unique_id, selectedModels.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -125,6 +127,7 @@ export function SidePane({
           <PropertiesTab
             projectId={projectId}
             model={model}
+            selectedModels={selectedModels}
             graph={graph}
             page={page}
             failedTestUid={failedTestUid}

@@ -1,5 +1,7 @@
 import asyncio
+import importlib.metadata
 import os
+import re
 import shlex
 import shutil
 import sys
@@ -54,6 +56,14 @@ async def _sync_steps_from_disk(
     existing = list(result.scalars().all())
     by_name = {s.name: s for s in existing}
 
+    req_var_result = await session.execute(
+        select(ProjectEnvVar).where(
+            ProjectEnvVar.project_id == project.id,
+            ProjectEnvVar.key == "REQUIREMENTS_PATH",
+        )
+    )
+    has_project_requirements = req_var_result.scalar_one_or_none() is not None
+
     order_counter = 0
 
     def next_order() -> int:
@@ -62,6 +72,27 @@ async def _sync_steps_from_disk(
         return order_counter - 1
 
     for base_name, _ in BASE_STEPS:
+        if base_name == "base: pip install":
+            existing_pip = by_name.get("base: pip install")
+            if has_project_requirements:
+                if existing_pip is None:
+                    session.add(
+                        InitStep(
+                            project_id=project.id,
+                            name=base_name,
+                            order=next_order(),
+                            is_base=True,
+                            enabled=True,
+                        )
+                    )
+                else:
+                    next_order()
+            else:
+                if existing_pip is not None:
+                    await session.delete(existing_pip)
+                    del by_name["base: pip install"]
+            continue
+
         if base_name not in by_name:
             session.add(
                 InitStep(
@@ -627,6 +658,7 @@ class InitSessionDto(BaseModel):
 class InitSessionStartDto(BaseModel):
     platform: str
     cwd: str | None = None
+    skip_install: bool = False
 
 
 class InitInputDto(BaseModel):
@@ -686,6 +718,7 @@ async def _pip_install_and_start_pty(
     session_id: str,
     package: str,
     target: Path,
+    skip_install: bool = False,
 ) -> None:
     """Run pip install in the background, stream output to the session topic, then start PTY."""
     from app.events.bus import Event, bus
@@ -703,29 +736,44 @@ async def _pip_install_and_start_pty(
             bus.publish(Event(topic=topic, type="init_output", data={"data": text}))
         )
 
-    _emit(f"\r\n\x1b[1;34mInstalling {package}…\x1b[0m\r\n")
+    if skip_install:
+        proc = await asyncio.create_subprocess_exec(
+            str(_dbt_python()), "-m", "pip", "show", package,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        stdout, _ = await proc.communicate()
+        version = None
+        for line in stdout.decode().splitlines():
+            if line.startswith("Version:"):
+                version = line.split(":", 1)[1].strip()
+                break
+        version_str = f" {version}" if version else ""
+        _emit(f"\r\n\x1b[32mUsing installed {package}{version_str}.\x1b[0m\r\n\r\n")
+    else:
+        _emit(f"\r\n\x1b[1;34mInstalling {package}…\x1b[0m\r\n")
 
-    proc = await asyncio.create_subprocess_exec(
-        str(_dbt_python()), "-m", "pip", "install", "--progress-bar", "off", package,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    assert proc.stdout is not None
-    while True:
-        chunk = await proc.stdout.read(512)
-        if not chunk:
-            break
-        _emit(chunk.decode(errors="replace").replace("\n", "\r\n"))
-    rc = await proc.wait()
+        proc = await asyncio.create_subprocess_exec(
+            str(_dbt_python()), "-m", "pip", "install", "--progress-bar", "off", package,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        assert proc.stdout is not None
+        while True:
+            chunk = await proc.stdout.read(512)
+            if not chunk:
+                break
+            _emit(chunk.decode(errors="replace").replace("\n", "\r\n"))
+        rc = await proc.wait()
 
-    if rc != 0:
-        _emit(f"\r\n\x1b[31mpip install failed (exit {rc}). Cannot continue.\x1b[0m\r\n")
-        session.finished = True
-        session.return_code = rc
-        await bus.publish(Event(topic=topic, type="init_finished", data={"return_code": rc}))
-        return
+        if rc != 0:
+            _emit(f"\r\n\x1b[31mpip install failed (exit {rc}). Cannot continue.\x1b[0m\r\n")
+            session.finished = True
+            session.return_code = rc
+            await bus.publish(Event(topic=topic, type="init_finished", data={"return_code": rc}))
+            return
 
-    _emit(f"\r\n\x1b[32m{package} installed.\x1b[0m\r\n\r\n")
+        _emit(f"\r\n\x1b[32m{package} installed.\x1b[0m\r\n\r\n")
 
     await init_manager.start_pty(session, args=(str(_dbt_bin()), "init"))
 
@@ -760,7 +808,7 @@ async def start_init_session(
     # Create a shell session immediately so the frontend gets a session_id and can subscribe to SSE.
     # The pip install + PTY start happens in the background.
     session = await init_manager.create_pending(target)
-    asyncio.create_task(_pip_install_and_start_pty(session.session_id, package, target))
+    asyncio.create_task(_pip_install_and_start_pty(session.session_id, package, target, skip_install=dto.skip_install))
     return InitSessionDto(session_id=session.session_id)
 
 
@@ -792,3 +840,114 @@ async def init_session_events(session_id: str):
         already_finished=finished,
         return_code=return_code,
     )
+
+
+# --- Global init endpoints (not project-scoped) ---
+
+global_router = APIRouter(prefix="/api/init", tags=["init"])
+
+
+class PackageInfoDto(BaseModel):
+    package: str
+    installed_version: str | None
+
+
+class DbtCoreStatusDto(BaseModel):
+    installed: bool
+    version: str | None
+
+
+class AppendRequirementDto(BaseModel):
+    line: str
+
+
+@global_router.get("/package-info", response_model=PackageInfoDto)
+async def get_package_info(package: str) -> PackageInfoDto:
+    """Check if a package is installed in dbt's Python environment."""
+    python = _dbt_python()
+    proc = await asyncio.create_subprocess_exec(
+        str(python), "-m", "pip", "show", package,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    if proc.returncode != 0:
+        return PackageInfoDto(package=package, installed_version=None)
+    for line in stdout.decode().splitlines():
+        if line.startswith("Version:"):
+            return PackageInfoDto(package=package, installed_version=line.split(":", 1)[1].strip())
+    return PackageInfoDto(package=package, installed_version=None)
+
+
+@global_router.get("/dbt-core-status", response_model=DbtCoreStatusDto)
+async def get_dbt_core_status() -> DbtCoreStatusDto:
+    """Check if dbt binary is available on PATH and return its version."""
+    dbt = shutil.which("dbt")
+    if not dbt:
+        return DbtCoreStatusDto(installed=False, version=None)
+    proc = await asyncio.create_subprocess_exec(
+        dbt, "--version",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    stdout, _ = await proc.communicate()
+    text = stdout.decode(errors="replace")
+    m = re.search(r'dbt[- ](?:Core\s+|core\s+)?(\d+\.\d+[\.\d]*)', text, re.IGNORECASE)
+    version = m.group(1) if m else None
+    return DbtCoreStatusDto(installed=True, version=version)
+
+
+@global_router.post("/append-requirement")
+async def append_requirement(dto: AppendRequirementDto) -> dict[str, bool]:
+    """Append a line to the global requirements file."""
+    path_str = await _get_global_requirements_path()
+    if not path_str:
+        raise HTTPException(status_code=400, detail="DBT_UI_GLOBAL_REQUIREMENTS_PATH is not configured")
+    req_path = Path(path_str)
+    if not req_path.exists():
+        raise HTTPException(status_code=404, detail=f"Requirements file not found: {path_str}")
+    with req_path.open("a") as f:
+        f.write(f"\n{dto.line.strip()}\n")
+    return {"ok": True}
+
+
+async def _run_global_pip_install(req_path: Path) -> None:
+    topic = "global-setup"
+    await bus.publish(Event(topic=topic, type="global_setup_started", data={}))
+    try:
+        pip = _venv_pip()
+    except RuntimeError as exc:
+        await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": f"Error: {exc}\r\n"}))
+        await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": 1}))
+        return
+    proc = await asyncio.create_subprocess_exec(
+        str(pip), "install", "-r", str(req_path), "--progress-bar", "off",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    assert proc.stdout is not None
+    while True:
+        chunk = await proc.stdout.read(512)
+        if not chunk:
+            break
+        await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": chunk.decode(errors="replace")}))
+    rc = await proc.wait()
+    await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": rc}))
+
+
+@global_router.post("/global-setup")
+async def run_global_setup() -> dict[str, bool]:
+    """Install global requirements.txt into the backend venv."""
+    path_str = await _get_global_requirements_path()
+    if not path_str:
+        raise HTTPException(status_code=400, detail="DBT_UI_GLOBAL_REQUIREMENTS_PATH is not configured")
+    req_path = Path(path_str)
+    if not req_path.exists():
+        raise HTTPException(status_code=404, detail=f"Requirements file not found: {path_str}")
+    asyncio.create_task(_run_global_pip_install(req_path))
+    return {"ok": True}
+
+
+@global_router.get("/global-setup/events")
+async def global_setup_events():
+    return sse_response("global-setup")

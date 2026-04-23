@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BookOpen, Play, Hammer, FlaskConical } from 'lucide-react';
+import { BookOpen, Play, Hammer, FlaskConical, Layers } from 'lucide-react';
 import { api, type ModelNode, type GraphDto } from '../../../../lib/api';
 
 type RunCommand = 'run' | 'build' | 'test';
@@ -18,6 +18,7 @@ const SCOPE_LABELS: Record<RunMode, string> = {
 interface PropertiesTabProps {
   projectId: number;
   model: ModelNode | null;
+  selectedModels?: ModelNode[];
   graph: GraphDto | null;
   page: 'files' | 'dag';
   failedTestUid?: string | null;
@@ -57,7 +58,7 @@ function Chip({ label, dim = false }: { label: string; dim?: boolean }) {
 }
 
 export function PropertiesTab({
-  projectId, model, graph, page, failedTestUid,
+  projectId, model, selectedModels = [], graph, page, failedTestUid,
   onNavigateToFiles, onNavigateToDag, onViewDocs, onDelete,
 }: PropertiesTabProps) {
   const [loading, setLoading] = useState<string | null>(null);
@@ -94,6 +95,10 @@ export function PropertiesTab({
       setLoading(null);
     }
   };
+
+  if (selectedModels.length > 1) {
+    return <MultiSelectionTab projectId={projectId} selectedModels={selectedModels} />;
+  }
 
   if (!model) {
     return (
@@ -305,6 +310,165 @@ export function PropertiesTab({
             Delete model
           </button>
         )}
+      </div>
+    </div>
+  );
+}
+
+// --- Multi-selection run controls ---
+
+// Execution order for sequential multi-run
+const MULTI_RUN_ORDER = ['seed', 'source', 'model', 'snapshot', 'test'] as const;
+
+const TYPE_LABELS: Partial<Record<string, string>> = {
+  seed: 'Seeds',
+  source: 'Sources',
+  model: 'Models',
+  snapshot: 'Snapshots',
+  test: 'Tests',
+};
+
+function applyMode(name: string, mode: RunMode): string {
+  if (mode === 'upstream') return `+${name}`;
+  if (mode === 'downstream') return `${name}+`;
+  if (mode === 'full') return `+${name}+`;
+  return name;
+}
+
+// Map each resource type + user command → the actual dbt command to fire
+// build handles all types in one pass, so we'll fire it once for everything
+// run/test need to be split:
+//   seeds   → seed (dbt seed --select …)
+//   sources → test (dbt test --select source:…)
+//   models/snapshots → run
+//   tests   → test
+function effectiveCommand(cmd: RunCommand, type: string): 'run' | 'build' | 'test' | 'seed' {
+  if (cmd === 'build') return 'build';
+  if (type === 'seed') return 'seed';
+  if (cmd === 'test') return 'test';
+  // cmd === 'run'
+  if (type === 'test' || type === 'source') return 'test';
+  return 'run';
+}
+
+function MultiSelectionTab({ projectId, selectedModels }: { projectId: number; selectedModels: ModelNode[] }) {
+  const [loading, setLoading] = useState<string | null>(null);
+
+  // Group nodes by resource type in display order
+  const grouped = MULTI_RUN_ORDER.reduce<Record<string, ModelNode[]>>((acc, type) => {
+    const nodes = selectedModels.filter((m) => m.resource_type === type);
+    if (nodes.length) acc[type] = nodes;
+    return acc;
+  }, {});
+  const extraTypes = [...new Set(selectedModels.map((m) => m.resource_type))]
+    .filter((t) => !(MULTI_RUN_ORDER as readonly string[]).includes(t));
+  for (const t of extraTypes) grouped[t] = selectedModels.filter((m) => m.resource_type === t);
+
+  const orderedTypes = [...MULTI_RUN_ORDER, ...extraTypes].filter((t) => grouped[t]);
+
+  const handleMultiRun = async (cmd: RunCommand, mode: RunMode) => {
+    const key = `${cmd}:${mode}`;
+    setLoading(key);
+    try {
+      if (cmd === 'build') {
+        // build handles all resource types in one command
+        const select = selectedModels.map((n) => applyMode(n.name, mode)).join(' ');
+        await api.runs.build(projectId, '', mode, select);
+      } else {
+        // run and test: sequential per type group
+        for (const type of orderedTypes) {
+          const nodes = grouped[type];
+          const select = nodes.map((n) => applyMode(n.name, mode)).join(' ');
+          const dbtCmd = effectiveCommand(cmd, type);
+          if (dbtCmd === 'seed') {
+            await api.runs.seed(projectId, '', mode, select);
+          } else if (dbtCmd === 'run') {
+            await api.runs.run(projectId, '', mode, select);
+          } else {
+            await api.runs.test(projectId, '', mode, select);
+          }
+        }
+      }
+    } finally {
+      setLoading(null);
+    }
+  };
+
+  return (
+    <div className="overflow-auto flex-1 p-4 flex flex-col gap-4">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <Layers className="w-4 h-4 text-brand-400 shrink-0" />
+        <span className="font-semibold text-gray-100 text-sm">{selectedModels.length} nodes selected</span>
+      </div>
+
+      {/* Grouped node list */}
+      <div className="flex flex-col gap-3">
+        {orderedTypes.map((type) => (
+          <div key={type}>
+            <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium block mb-1">
+              {TYPE_LABELS[type] ?? type} ({grouped[type].length})
+            </span>
+            <div className="flex flex-col gap-0.5">
+              {grouped[type].map((n) => (
+                <div key={n.unique_id} className="flex items-center gap-2 px-2 py-1 rounded bg-surface-elevated text-xs">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                      n.status === 'success' ? 'bg-emerald-400' :
+                      n.status === 'error' ? 'bg-red-400' :
+                      n.status === 'running' ? 'bg-brand-400 animate-pulse' :
+                      n.status === 'stale' ? 'bg-amber-400' :
+                      'bg-gray-600'
+                    }`}
+                  />
+                  <span className="font-mono text-gray-300 truncate">{n.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="border-t border-gray-800" />
+
+      {/* Run controls */}
+      <div className="flex flex-col gap-2">
+        <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium">Run selection</span>
+        <p className="text-[10px] text-gray-600 leading-relaxed">
+          Seeds → sources → models → tests, sequentially. Build runs all at once.
+        </p>
+        {RUN_ACTIONS.map(({ cmd, icon, label }) => (
+          <div key={cmd} className="grid grid-cols-4 gap-1">
+            {(['only', 'upstream', 'downstream', 'full'] as RunMode[]).map((mode) => {
+              const key = `${cmd}:${mode}`;
+              return (
+                <button
+                  key={mode}
+                  title={`${label} ${SCOPE_LABELS[mode]}`}
+                  onClick={() => handleMultiRun(cmd, mode)}
+                  disabled={loading !== null}
+                  className={`flex items-center justify-center gap-1.5 py-2 px-1 text-xs rounded border transition-colors disabled:opacity-50
+                    ${mode === 'only'
+                      ? 'bg-surface-elevated border-gray-700 text-gray-200 hover:border-brand-600 hover:text-brand-300'
+                      : 'bg-transparent border-gray-800 text-gray-500 hover:border-gray-600 hover:text-gray-300'
+                    }`}
+                >
+                  {loading === key ? (
+                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"/>
+                    </svg>
+                  ) : (
+                    <>
+                      {mode === 'only' && icon}
+                      <span className="truncate">{mode === 'only' ? label : SCOPE_LABELS[mode]}</span>
+                    </>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        ))}
       </div>
     </div>
   );

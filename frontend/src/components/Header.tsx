@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { GlobalSettingsModal } from './GlobalSettingsModal';
+import { GlobalSetupModal } from './GlobalSetupModal';
 
 const PLATFORM_ICONS: Record<string, string> = {
   postgres: '🐘', bigquery: '☁️', snowflake: '❄️', redshift: '🔴',
@@ -88,6 +89,7 @@ export default function Header() {
   const navigate = useNavigate();
   const location = useLocation();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [globalSetupOpen, setGlobalSetupOpen] = useState(false);
   const isHomepage = location.pathname === '/';
   // Header is outside <Routes> so useParams returns {}; extract projectId from path directly
   const projectIdMatch = location.pathname.match(/^\/projects\/(\d+)/);
@@ -139,12 +141,20 @@ export default function Header() {
           </>
         )}
         {isHomepage && (
-          <button
-            onClick={() => window.dispatchEvent(new CustomEvent('dbt-ui:new-project'))}
-            className="px-3 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
-          >
-            + New project
-          </button>
+          <>
+            <button
+              onClick={() => setGlobalSetupOpen(true)}
+              className="px-3 py-1.5 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
+            >
+              Run global setup
+            </button>
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('dbt-ui:new-project'))}
+              className="px-3 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
+            >
+              + New project
+            </button>
+          </>
         )}
         <button
           onClick={() => setSettingsOpen(true)}
@@ -159,6 +169,7 @@ export default function Header() {
       </div>
 
       {settingsOpen && <GlobalSettingsModal onClose={() => setSettingsOpen(false)} />}
+      {globalSetupOpen && <GlobalSetupModal onClose={() => setGlobalSetupOpen(false)} />}
     </header>
   );
 }

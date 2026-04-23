@@ -14,11 +14,11 @@ export function GlobalSettingsModal({ onClose }: { onClose: () => void }) {
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const rows: { key: string; label: string; value: string | null | undefined; hint?: string }[] = [
-    { key: 'dbt_projects_path', label: 'DBT_UI_PROJECTS_PATH', value: appSettings?.dbt_projects_path },
-    { key: 'global_requirements_path', label: 'DBT_UI_GLOBAL_REQUIREMENTS_PATH', value: appSettings?.global_requirements_path, hint: 'requirements.txt installed before every project init' },
-    { key: 'data_dir', label: 'DBT_UI_DATA_DIR', value: appSettings?.data_dir, hint: 'takes effect on restart' },
-    { key: 'log_level', label: 'DBT_UI_LOG_LEVEL', value: appSettings?.log_level, hint: 'takes effect on restart' },
+  const rows: { key: string; label: string; value: string | null | undefined; hint?: string; example?: string }[] = [
+    { key: 'dbt_projects_path', label: 'DBT_UI_PROJECTS_PATH', value: appSettings?.dbt_projects_path, example: '/home/user/dbt-projects' },
+    { key: 'global_requirements_path', label: 'DBT_UI_GLOBAL_REQUIREMENTS_PATH', value: appSettings?.global_requirements_path, hint: 'requirements.txt installed via Run global setup', example: '/home/user/dbt-projects/requirements.txt' },
+    { key: 'data_dir', label: 'DBT_UI_DATA_DIR', value: appSettings?.data_dir, hint: 'takes effect on restart', example: 'data/' },
+    { key: 'log_level', label: 'DBT_UI_LOG_LEVEL', value: appSettings?.log_level, hint: 'takes effect on restart', example: 'INFO' },
   ];
 
   const handleSave = async (key: string) => {
@@ -51,7 +51,7 @@ export function GlobalSettingsModal({ onClose }: { onClose: () => void }) {
             <p className="text-xs text-gray-500">Configuration shared across all projects.</p>
             <div className="flex flex-col gap-1.5">
               {!appSettings && <p className="text-xs text-gray-600">Loading…</p>}
-              {rows.map(({ key, label, value, hint }) => (
+              {rows.map(({ key, label, value, hint, example }) => (
                 <div key={key} className="flex items-center gap-2 px-3 py-2 bg-surface-elevated rounded border border-gray-800 text-xs">
                   <div className="w-60 shrink-0">
                     <span className="font-mono text-brand-300 truncate block">{label}</span>
@@ -68,7 +68,8 @@ export function GlobalSettingsModal({ onClose }: { onClose: () => void }) {
                           if (e.key === 'Enter') handleSave(key);
                           if (e.key === 'Escape') setEditingKey(null);
                         }}
-                        className="flex-1 bg-surface-panel border border-brand-500 rounded px-2 py-0.5 text-gray-100 font-mono focus:outline-none"
+                        placeholder={example ? `e.g. ${example}` : undefined}
+                        className="flex-1 bg-surface-panel border border-brand-500 rounded px-2 py-0.5 text-gray-100 font-mono focus:outline-none placeholder-gray-600"
                       />
                       <button
                         onClick={() => handleSave(key)}
@@ -84,7 +85,7 @@ export function GlobalSettingsModal({ onClose }: { onClose: () => void }) {
                       className="flex-1 font-mono text-gray-300 truncate cursor-pointer hover:text-gray-100"
                       onClick={() => { setEditingKey(key); setEditValue(value ?? ''); }}
                     >
-                      {value ?? <span className="text-gray-600 italic">not set</span>}
+                      {value ?? <span className="text-gray-600 italic">{example ? `e.g. ${example}` : 'not set'}</span>}
                     </span>
                   )}
                 </div>

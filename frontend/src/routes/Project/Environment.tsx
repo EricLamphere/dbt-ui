@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Plus, Trash2, Check, Lock, Pencil, Download } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Trash2, Check, Lock, Download } from 'lucide-react';
 import { api, type EnvVarDto, type ProfileDto, type Project } from '../../lib/api';
 import ProjectNav from './components/ProjectNav';
 
@@ -89,11 +89,11 @@ export default function EnvironmentPage() {
 // ---- Global Settings ----
 
 function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null } | null }) {
-  const rows: { label: string; value: string | null | undefined }[] = [
-    { label: 'DBT_UI_PROJECTS_PATH', value: appSettings?.dbt_projects_path },
-    { label: 'DBT_UI_GLOBAL_REQUIREMENTS_PATH', value: appSettings?.global_requirements_path },
-    { label: 'DBT_UI_DATA_DIR', value: appSettings?.data_dir },
-    { label: 'DBT_UI_LOG_LEVEL', value: appSettings?.log_level },
+  const rows: { label: string; value: string | null | undefined; example?: string }[] = [
+    { label: 'DBT_UI_PROJECTS_PATH', value: appSettings?.dbt_projects_path, example: '/home/user/dbt-projects' },
+    { label: 'DBT_UI_GLOBAL_REQUIREMENTS_PATH', value: appSettings?.global_requirements_path, example: '/home/user/dbt-projects/requirements.txt' },
+    { label: 'DBT_UI_DATA_DIR', value: appSettings?.data_dir, example: 'data/' },
+    { label: 'DBT_UI_LOG_LEVEL', value: appSettings?.log_level, example: 'INFO' },
   ];
 
   return (
@@ -102,12 +102,14 @@ function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_pa
       <p className="text-xs text-gray-500 mb-3">System-level configuration shared across all projects. Edit via the Global Settings panel.</p>
       <div className="flex flex-col gap-1.5">
         {!appSettings && <p className="text-xs text-gray-600 italic">Loading…</p>}
-        {appSettings && rows.map(({ label, value }) => (
+        {appSettings && rows.map(({ label, value, example }) => (
           <div key={label} className="flex items-center gap-2 px-3 py-2 bg-surface-panel rounded border border-gray-800/60 text-xs opacity-75">
             <Lock className="w-3 h-3 text-gray-600 shrink-0" />
             <span className="font-mono text-gray-500 w-48 shrink-0 truncate">{label}</span>
             <span className="text-gray-600">=</span>
-            <span className="flex-1 font-mono text-gray-400 truncate">{value ?? <span className="italic text-gray-600">not set</span>}</span>
+            <span className="flex-1 font-mono text-gray-400 truncate">
+              {value ?? <span className="italic text-gray-600">{example ? `e.g. ${example}` : 'not set'}</span>}
+            </span>
           </div>
         ))}
       </div>
@@ -117,26 +119,28 @@ function GlobalSettingsSection({ appSettings }: { appSettings: { dbt_projects_pa
 
 // ---- Project Settings ----
 
-function ProjectSettingsSection({ projectId, project }: { projectId: number; project: Project | null }) {
-  const qc = useQueryClient();
+interface ProjectSettingRowProps {
+  label: string;
+  value: string;
+  placeholder?: string;
+  onSave: (val: string) => Promise<void>;
+}
+
+function ProjectSettingRow({ label, value, placeholder, onSave }: ProjectSettingRowProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const currentPath = project?.init_script_path ?? 'init';
-
-  const handleEdit = () => {
-    setEditValue(currentPath);
+  const handleClick = () => {
+    setEditValue(value);
     setEditing(true);
   };
 
   const handleSave = async () => {
-    if (!editValue.trim()) return;
     setSaving(true);
     try {
-      await api.projects.updateSettings(projectId, { init_script_path: editValue.trim() });
+      await onSave(editValue.trim());
       setEditing(false);
-      qc.invalidateQueries({ queryKey: ['project', projectId] });
     } catch (e) {
       alert(String(e));
     } finally {
@@ -145,43 +149,91 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
   };
 
   return (
+    <div className="flex items-center gap-2 px-3 py-2 bg-surface-panel rounded border border-gray-800 text-xs">
+      <span className="font-mono text-brand-300 w-44 shrink-0 truncate">{label}</span>
+      <span className="text-gray-600">=</span>
+      {editing ? (
+        <>
+          <input
+            autoFocus
+            value={editValue}
+            onChange={(e) => setEditValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSave();
+              if (e.key === 'Escape') setEditing(false);
+            }}
+            placeholder={placeholder}
+            className="flex-1 bg-surface-elevated border border-brand-500 rounded px-2 py-0.5 text-gray-100 font-mono focus:outline-none"
+          />
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="text-brand-400 hover:text-brand-300 p-1 disabled:opacity-40"
+          >
+            <Check className="w-3.5 h-3.5" />
+          </button>
+          <button onClick={() => setEditing(false)} className="text-gray-600 hover:text-gray-400 p-1 text-xs">✕</button>
+        </>
+      ) : (
+        <span
+          className="flex-1 font-mono text-gray-300 truncate cursor-pointer hover:text-gray-100"
+          onClick={handleClick}
+        >
+          {value || <span className="text-gray-600 italic">{placeholder ? `e.g. ${placeholder}` : 'click to set'}</span>}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ProjectSettingsSection({ projectId, project }: { projectId: number; project: Project | null }) {
+  const qc = useQueryClient();
+
+  const { data: envVars = [] } = useQuery({
+    queryKey: ['env-vars', projectId],
+    queryFn: () => api.init.getEnvVars(projectId),
+  });
+
+  const requirementsPath = envVars.find((v) => v.key === 'REQUIREMENTS_PATH')?.value ?? '';
+
+  const handleSaveInitScriptPath = async (val: string) => {
+    await api.projects.updateSettings(projectId, { init_script_path: val || 'init' });
+    qc.invalidateQueries({ queryKey: ['project', projectId] });
+  };
+
+  const handleSaveRequirementsPath = async (val: string) => {
+    if (val) {
+      await api.init.setEnvVar(projectId, 'REQUIREMENTS_PATH', val);
+    } else {
+      await api.init.deleteEnvVar(projectId, 'REQUIREMENTS_PATH');
+    }
+    qc.invalidateQueries({ queryKey: ['env-vars', projectId] });
+    qc.invalidateQueries({ queryKey: ['init-steps', projectId] });
+  };
+
+  return (
     <div>
       <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Project</h3>
-      <p className="text-xs text-gray-500 mb-3">Configuration specific to this project.</p>
+      <p className="text-xs text-gray-500 mb-3">Configuration specific to this project. Click a value to edit.</p>
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center gap-2 px-3 py-2 bg-surface-panel rounded border border-gray-800 text-xs">
-          <span className="font-mono text-brand-300 w-44 shrink-0 truncate">INIT_SCRIPT_PATH</span>
-          <span className="text-gray-600">=</span>
-          {editing ? (
-            <>
-              <input
-                autoFocus
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleSave();
-                  if (e.key === 'Escape') setEditing(false);
-                }}
-                className="flex-1 bg-surface-elevated border border-brand-500 rounded px-2 py-0.5 text-gray-100 font-mono focus:outline-none"
-              />
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="text-brand-400 hover:text-brand-300 p-1 disabled:opacity-40"
-              >
-                <Check className="w-3.5 h-3.5" />
-              </button>
-              <button onClick={() => setEditing(false)} className="text-gray-600 hover:text-gray-400 p-1 text-xs">✕</button>
-            </>
-          ) : (
-            <>
-              <span className="flex-1 font-mono text-gray-300 truncate">{currentPath}</span>
-              <button onClick={handleEdit} className="text-gray-600 hover:text-gray-300 p-1 shrink-0">
-                <Pencil className="w-3.5 h-3.5" />
-              </button>
-            </>
-          )}
-        </div>
+        {!project ? (
+          <p className="text-xs text-gray-600 italic">Loading…</p>
+        ) : (
+          <>
+            <ProjectSettingRow
+              label="INIT_SCRIPT_PATH"
+              value={project.init_script_path ?? ''}
+              placeholder="init"
+              onSave={handleSaveInitScriptPath}
+            />
+            <ProjectSettingRow
+              label="REQUIREMENTS_PATH"
+              value={requirementsPath}
+              placeholder="/path/to/requirements.txt"
+              onSave={handleSaveRequirementsPath}
+            />
+          </>
+        )}
       </div>
     </div>
   );
