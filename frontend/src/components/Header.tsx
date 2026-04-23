@@ -4,6 +4,12 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 import { GlobalSettingsModal } from './GlobalSettingsModal';
 
+const PLATFORM_ICONS: Record<string, string> = {
+  postgres: '🐘', bigquery: '☁️', snowflake: '❄️', redshift: '🔴',
+  duckdb: '🦆', spark: '⚡', databricks: '🧱', athena: '🦉',
+  trino: '🔷', clickhouse: '🏡', unknown: '⬡',
+};
+
 function ProjectSelectors({ projectId }: { projectId: number }) {
   const qc = useQueryClient();
 
@@ -87,18 +93,36 @@ export default function Header() {
   const projectIdMatch = location.pathname.match(/^\/projects\/(\d+)/);
   const numericProjectId = projectIdMatch ? Number(projectIdMatch[1]) : null;
 
+  const { data: project } = useQuery({
+    queryKey: ['project', numericProjectId],
+    queryFn: () => api.projects.get(numericProjectId!),
+    enabled: numericProjectId !== null,
+  });
+
+  const projectEmoji = project ? (PLATFORM_ICONS[project.platform.toLowerCase()] ?? PLATFORM_ICONS.unknown) : null;
+
   return (
     <header className="flex items-center justify-between px-4 h-12 bg-surface-panel border-b border-gray-800 shrink-0 z-50">
       {/* Left — home */}
       <Link
         to="/"
-        className="flex items-center gap-2 text-brand-400 hover:text-brand-300 font-semibold text-sm transition-colors"
+        className="flex items-center gap-2 text-brand-400 hover:text-brand-300 font-semibold text-sm transition-colors shrink-0"
       >
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M3 12l2-2m0 0l7-7 7 7m-9 5v6h4v-6m-4 0H9m6 0h2" />
         </svg>
         dbt-ui
       </Link>
+
+      {/* Center — project name */}
+      <div className="absolute left-1/2 -translate-x-1/2 flex items-center gap-1.5 text-sm text-gray-300 font-medium">
+        {project && (
+          <>
+            <span>{projectEmoji}</span>
+            <span>{project.name}</span>
+          </>
+        )}
+      </div>
 
       {/* Right actions */}
       <div className="flex items-center gap-3">

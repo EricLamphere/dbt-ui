@@ -642,8 +642,12 @@ def _dbt_bin() -> Path:
 
 
 def _venv_pip() -> Path:
-    """Return absolute path to pip in the same venv as the dbt binary."""
-    return _dbt_bin().parent / "pip"
+    """Return pip inside the app's backend venv."""
+    # __file__ is backend/app/api/init.py → parents[2] is backend/
+    venv_pip = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "pip"
+    if not venv_pip.exists():
+        raise RuntimeError(f"pip not found in backend venv: {venv_pip}")
+    return venv_pip
 
 
 async def _get_global_requirements_path() -> str | None:
