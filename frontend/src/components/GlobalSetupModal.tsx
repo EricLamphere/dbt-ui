@@ -14,9 +14,13 @@ export function GlobalSetupModal({ onClose }: Props) {
   const [startError, setStartError] = useState<string | null>(null);
   const outputRef = useRef<HTMLPreElement>(null);
   const esRef = useRef<EventSource | null>(null);
+  const stateRef = useRef<SetupState>('starting');
 
   useEffect(() => {
-    // Open SSE connection first, then trigger the setup
+    stateRef.current = state;
+  }, [state]);
+
+  useEffect(() => {
     const es = new EventSource('/api/init/global-setup/events');
     esRef.current = es;
 
@@ -37,8 +41,12 @@ export function GlobalSetupModal({ onClose }: Props) {
     });
 
     es.onerror = () => {
-      // SSE connection error — if still starting, show error
-      setState((prev) => (prev === 'starting' ? 'error' : prev));
+      // Only surface the error if we haven't received any events yet.
+      // Mid-run disconnects are normal — the browser will auto-reconnect.
+      if (stateRef.current === 'starting') {
+        setState('error');
+        es.close();
+      }
     };
 
     api.init.runGlobalSetup().catch((e) => {
@@ -59,7 +67,19 @@ export function GlobalSetupModal({ onClose }: Props) {
     }
   }, [lines]);
 
+  const handleCancel = async () => {
+    esRef.current?.close();
+    try {
+      await api.init.cancelGlobalSetup();
+    } catch {
+      // best-effort
+    }
+    onClose();
+  };
+
   const outputText = lines.join('');
+  const isFinished = state === 'done' || state === 'error';
+  const isRunning = state === 'running' || state === 'starting';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
@@ -78,13 +98,22 @@ export function GlobalSetupModal({ onClose }: Props) {
           <div className="flex items-center gap-2">
             {state === 'done' && <span className="text-xs text-emerald-400">Done ✓</span>}
             {state === 'error' && <span className="text-xs text-red-400">Failed</span>}
-            <button
-              onClick={onClose}
-              disabled={state === 'running' || state === 'starting'}
-              className="px-2 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            >
-              {state === 'done' || state === 'error' ? '✕ Close' : 'Running…'}
-            </button>
+            {isRunning && (
+              <button
+                onClick={handleCancel}
+                className="px-2 py-1.5 text-xs rounded bg-gray-800 hover:bg-red-900 text-gray-400 hover:text-red-300 transition-colors"
+              >
+                Cancel
+              </button>
+            )}
+            {isFinished && (
+              <button
+                onClick={onClose}
+                className="px-2 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors"
+              >
+                ✕ Close
+              </button>
+            )}
           </div>
         </div>
 
@@ -100,7 +129,7 @@ export function GlobalSetupModal({ onClose }: Props) {
         </pre>
 
         {/* Footer */}
-        {(state === 'done' || state === 'error') && (
+        {isFinished && (
           <div className="px-4 py-3 border-t border-gray-800 flex items-center justify-between shrink-0">
             <span className={`text-xs ${state === 'done' ? 'text-emerald-400' : 'text-red-400'}`}>
               {state === 'done'

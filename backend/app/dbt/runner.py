@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from app.dbt.venv import venv_dbt
 from app.events.bus import Event, bus
 from app.logging_setup import get_logger
 from app.logs.project_logger import append_project_log
@@ -35,7 +36,7 @@ class DbtRunner:
         return lock
 
     def build_args(self, req: RunRequest) -> list[str]:
-        args = ["dbt", req.command]
+        args = [str(venv_dbt()), req.command]
         if (req.project_path / "profiles.yml").exists():
             args += ["--profiles-dir", str(req.project_path)]
         if req.select:

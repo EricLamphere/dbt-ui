@@ -4,7 +4,6 @@ import os
 import re
 import shlex
 import shutil
-import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.engine import get_session
 from app.db.models import EnvProfile, InitStep, Project, ProjectEnvVar
 from app.dbt.init_scripts import BASE_STEPS, list_scripts, save_script, delete_script
+from app.dbt.venv import venv_dbt, venv_pip, venv_python
 from app.dbt.interactive import manager as init_manager
 from app.events.bus import Event, bus
 from app.events.sse import sse_response
@@ -542,7 +542,7 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                     if not Path(req_path).exists():
                         raise FileNotFoundError(f"{label} requirements path '{req_path}' not found")
                     rc, lines = await _exec_and_capture(
-                        [str(_venv_pip()), "install", "-r", req_path], project_path, env
+                        [str(venv_pip()), "install", "-r", req_path], project_path, env
                     )
                     log_lines.extend(lines)
                     if rc != 0:
@@ -551,7 +551,7 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                         break
             elif step.name == "base: dbt deps":
                 return_code, log_lines = await _exec_and_capture(
-                    [str(_venv_dbt()), "deps"], project_path, env
+                    [str(venv_dbt()), "deps"], project_path, env
                 )
                 ok = return_code == 0
             elif step.script_path:
@@ -665,29 +665,6 @@ class InitInputDto(BaseModel):
     data: str
 
 
-def _dbt_bin() -> Path:
-    """Locate the dbt executable on PATH."""
-    dbt = shutil.which("dbt")
-    if not dbt:
-        raise RuntimeError("dbt not found on PATH")
-    return Path(dbt)
-
-
-def _venv_pip() -> Path:
-    """Return pip inside the app's backend venv."""
-    # __file__ is backend/app/api/init.py → parents[2] is backend/
-    venv_pip = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "pip"
-    if not venv_pip.exists():
-        raise RuntimeError(f"pip not found in backend venv: {venv_pip}")
-    return venv_pip
-
-
-def _venv_dbt() -> Path:
-    """Return dbt inside the app's backend venv."""
-    venv_dbt = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "dbt"
-    if not venv_dbt.exists():
-        raise RuntimeError(f"dbt not found in backend venv: {venv_dbt}")
-    return venv_dbt
 
 
 async def _get_global_requirements_path() -> str | None:
@@ -701,25 +678,6 @@ async def _get_global_requirements_path() -> str | None:
     return str(settings.global_requirements_path) if settings.global_requirements_path else None
 
 
-def _dbt_python() -> Path:
-    """Return the Python interpreter that owns the dbt binary.
-
-    Reads the shebang line so we install adapters into the same
-    Python environment that dbt actually uses — not the app's venv.
-    Falls back to the system python3 if the shebang is unreadable.
-    """
-    dbt = _dbt_bin()
-    try:
-        with dbt.open("rb") as f:
-            first = f.readline().decode(errors="replace")
-        if first.startswith("#!"):
-            interp = first[2:].split()[0].strip()
-            p = Path(interp)
-            if p.exists():
-                return p
-    except Exception:
-        pass
-    return Path(shutil.which("python3") or sys.executable)
 
 
 async def _pip_install_and_start_pty(
@@ -746,7 +704,7 @@ async def _pip_install_and_start_pty(
 
     if skip_install:
         proc = await asyncio.create_subprocess_exec(
-            str(_dbt_python()), "-m", "pip", "show", package,
+            str(venv_python()), "-m", "pip", "show", package,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -762,7 +720,7 @@ async def _pip_install_and_start_pty(
         _emit(f"\r\n\x1b[1;34mInstalling {package}…\x1b[0m\r\n")
 
         proc = await asyncio.create_subprocess_exec(
-            str(_dbt_python()), "-m", "pip", "install", "--progress-bar", "off", package,
+            str(venv_python()), "-m", "pip", "install", "--progress-bar", "off", package,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
         )
@@ -783,7 +741,7 @@ async def _pip_install_and_start_pty(
 
         _emit(f"\r\n\x1b[32m{package} installed.\x1b[0m\r\n\r\n")
 
-    await init_manager.start_pty(session, args=(str(_dbt_bin()), "init"))
+    await init_manager.start_pty(session, args=(str(venv_dbt()), "init"))
 
 
 @router.post("/init-session/start", response_model=InitSessionDto)
@@ -872,7 +830,7 @@ class AppendRequirementDto(BaseModel):
 @global_router.get("/package-info", response_model=PackageInfoDto)
 async def get_package_info(package: str) -> PackageInfoDto:
     """Check if a package is installed in dbt's Python environment."""
-    python = _dbt_python()
+    python = venv_python()
     proc = await asyncio.create_subprocess_exec(
         str(python), "-m", "pip", "show", package,
         stdout=asyncio.subprocess.PIPE,
@@ -919,11 +877,16 @@ async def append_requirement(dto: AppendRequirementDto) -> dict[str, bool]:
     return {"ok": True}
 
 
+_global_setup_task: asyncio.Task | None = None
+_global_setup_proc: asyncio.subprocess.Process | None = None
+
+
 async def _run_global_pip_install(req_path: Path) -> None:
+    global _global_setup_proc
     topic = "global-setup"
     await bus.publish(Event(topic=topic, type="global_setup_started", data={}))
     try:
-        pip = _venv_pip()
+        pip = venv_pip()
     except RuntimeError as exc:
         await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": f"Error: {exc}\r\n"}))
         await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": 1}))
@@ -933,12 +896,21 @@ async def _run_global_pip_install(req_path: Path) -> None:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
+    _global_setup_proc = proc
     assert proc.stdout is not None
-    while True:
-        chunk = await proc.stdout.read(512)
-        if not chunk:
-            break
-        await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": chunk.decode(errors="replace")}))
+    try:
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": line.decode(errors="replace")}))
+    except asyncio.CancelledError:
+        proc.kill()
+        await proc.wait()
+        await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": -1}))
+        return
+    finally:
+        _global_setup_proc = None
     rc = await proc.wait()
     await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": rc}))
 
@@ -946,13 +918,30 @@ async def _run_global_pip_install(req_path: Path) -> None:
 @global_router.post("/global-setup")
 async def run_global_setup() -> dict[str, bool]:
     """Install global requirements.txt into the backend venv."""
+    global _global_setup_task
     path_str = await _get_global_requirements_path()
     if not path_str:
         raise HTTPException(status_code=400, detail="DBT_UI_GLOBAL_REQUIREMENTS_PATH is not configured")
     req_path = Path(path_str)
     if not req_path.exists():
         raise HTTPException(status_code=404, detail=f"Requirements file not found: {path_str}")
-    asyncio.create_task(_run_global_pip_install(req_path))
+    if _global_setup_task and not _global_setup_task.done():
+        raise HTTPException(status_code=409, detail="global setup already running")
+    _global_setup_task = asyncio.create_task(_run_global_pip_install(req_path))
+    return {"ok": True}
+
+
+@global_router.post("/global-setup/cancel")
+async def cancel_global_setup() -> dict[str, bool]:
+    """Cancel a running global pip install."""
+    global _global_setup_task, _global_setup_proc
+    if _global_setup_proc is not None:
+        try:
+            _global_setup_proc.kill()
+        except ProcessLookupError:
+            pass
+    if _global_setup_task and not _global_setup_task.done():
+        _global_setup_task.cancel()
     return {"ok": True}
 
 

@@ -339,6 +339,8 @@ export const api = {
       post<{ ok: boolean }>('/init/append-requirement', { line }),
     runGlobalSetup: () =>
       post<{ ok: boolean }>('/init/global-setup'),
+    cancelGlobalSetup: () =>
+      post<{ ok: boolean }>('/init/global-setup/cancel'),
   },
   profiles: {
     list: (projectId: number) =>
