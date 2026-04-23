@@ -926,7 +926,7 @@ async def run_global_setup() -> dict[str, bool]:
     if not req_path.exists():
         raise HTTPException(status_code=404, detail=f"Requirements file not found: {path_str}")
     if _global_setup_task and not _global_setup_task.done():
-        raise HTTPException(status_code=409, detail="global setup already running")
+        _global_setup_task.cancel()
     _global_setup_task = asyncio.create_task(_run_global_pip_install(req_path))
     return {"ok": True}
 

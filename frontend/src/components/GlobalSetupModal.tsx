@@ -15,6 +15,7 @@ export function GlobalSetupModal({ onClose }: Props) {
   const outputRef = useRef<HTMLPreElement>(null);
   const esRef = useRef<EventSource | null>(null);
   const stateRef = useRef<SetupState>('starting');
+  const startedRef = useRef(false);
 
   useEffect(() => {
     stateRef.current = state;
@@ -49,11 +50,14 @@ export function GlobalSetupModal({ onClose }: Props) {
       }
     };
 
-    api.init.runGlobalSetup().catch((e) => {
-      setStartError(String(e));
-      setState('error');
-      es.close();
-    });
+    if (!startedRef.current) {
+      startedRef.current = true;
+      api.init.runGlobalSetup().catch((e) => {
+        setStartError(String(e));
+        setState('error');
+        es.close();
+      });
+    }
 
     return () => {
       es.close();
