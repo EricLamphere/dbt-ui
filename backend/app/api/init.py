@@ -551,7 +551,7 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                         break
             elif step.name == "base: dbt deps":
                 return_code, log_lines = await _exec_and_capture(
-                    ["dbt", "deps"], project_path, env
+                    [str(_venv_dbt()), "deps"], project_path, env
                 )
                 ok = return_code == 0
             elif step.script_path:
@@ -680,6 +680,14 @@ def _venv_pip() -> Path:
     if not venv_pip.exists():
         raise RuntimeError(f"pip not found in backend venv: {venv_pip}")
     return venv_pip
+
+
+def _venv_dbt() -> Path:
+    """Return dbt inside the app's backend venv."""
+    venv_dbt = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "dbt"
+    if not venv_dbt.exists():
+        raise RuntimeError(f"dbt not found in backend venv: {venv_dbt}")
+    return venv_dbt
 
 
 async def _get_global_requirements_path() -> str | None:
