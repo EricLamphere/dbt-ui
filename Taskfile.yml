@@ -30,11 +30,26 @@ tasks:
 
   # ---- Install ----
 
-  install:backend:
-    desc: Install Python dependencies into a virtualenv
-    dir: "{{.BACKEND_DIR}}"
+  install:list-pythons:
+    desc: List available python3.x interpreters on PATH
     cmds:
-      - python -m venv .venv
+      - |
+        echo "Available Python interpreters:"
+        for py in python3 python3.11 python3.12 python3.13 python3.14; do
+          if command -v "$py" >/dev/null 2>&1; then
+            echo "  $py  ($($py --version 2>&1))"
+          fi
+        done
+        echo ""
+        echo "Usage: task install PYTHON=python3.12"
+
+  install:backend:
+    desc: "Install Python dependencies into a virtualenv (override interpreter: task install:backend PYTHON=python3.12)"
+    dir: "{{.BACKEND_DIR}}"
+    vars:
+      PYTHON: '{{.PYTHON | default "python3"}}'
+    cmds:
+      - '{{.PYTHON}} -m venv .venv'
       - .venv/bin/pip install -e ".[dev]"
 
   install:frontend:
@@ -44,9 +59,11 @@ tasks:
       - npm install
 
   install:
-    desc: Install all dependencies
+    desc: "Install all dependencies (override Python: task install PYTHON=python3.12)"
     cmds:
       - task: install:backend
+        vars:
+          PYTHON: '{{.PYTHON | default "python3"}}'
       - task: install:frontend
 
   # ---- Tests ----

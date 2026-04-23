@@ -17,7 +17,8 @@
       "Bash(task dev:backend*)",
       "Bash(task dev:frontend*)",
       "Bash(cd backend && .venv/bin/pytest*)",
-      "Bash(cd frontend && npx tsc*)"
+      "Bash(cd frontend && npx tsc*)",
+      "Bash(task install:list-pythons *)"
     ]
   }
 }
