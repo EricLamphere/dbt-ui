@@ -898,18 +898,24 @@ async def _run_global_pip_install(req_path: Path) -> None:
     )
     _global_setup_proc = proc
     assert proc.stdout is not None
+    last_output_time = asyncio.get_event_loop().time()
     try:
         while True:
             try:
                 chunk = await asyncio.wait_for(proc.stdout.read(4096), timeout=2.0)
             except asyncio.TimeoutError:
-                # No output for 2s — pip is busy (downloading/building). Keep looping
-                # so we don't block indefinitely on a single read() call.
                 if proc.returncode is not None:
                     break
+                # Pip is silent (downloading/installing). Emit a dot every 5s so the
+                # frontend knows we're still alive.
+                now = asyncio.get_event_loop().time()
+                if now - last_output_time >= 5.0:
+                    await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": "."}))
+                    last_output_time = now
                 continue
             if not chunk:
                 break
+            last_output_time = asyncio.get_event_loop().time()
             await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": chunk.decode(errors="replace")}))
     except asyncio.CancelledError:
         proc.kill()
