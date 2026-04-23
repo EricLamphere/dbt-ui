@@ -8,6 +8,7 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  useReactFlow,
   type Node,
   type OnSelectionChangeParams,
   BackgroundVariant,
@@ -68,6 +69,15 @@ function applyLiveStatuses(graph: GraphDto, liveStatuses: Record<string, LiveSta
       liveStatuses[n.name] ? { ...n, status: liveStatuses[n.name] } : n,
     ),
   };
+}
+
+function FitViewOnChange({ trigger }: { trigger: unknown }) {
+  const { fitView } = useReactFlow();
+  useEffect(() => {
+    fitView({ padding: 0.2, duration: 200 });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger]);
+  return null;
 }
 
 const nodeTypes = { model: ModelNodeComponent };
@@ -237,6 +247,7 @@ export default function ModelsPage() {
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.1}
           >
+            <FitViewOnChange trigger={layoutNodes} />
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1f2937" />
             <Controls showInteractive={false} className="!bg-surface-panel !border-gray-800" />
             <MiniMap
