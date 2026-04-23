@@ -900,10 +900,17 @@ async def _run_global_pip_install(req_path: Path) -> None:
     assert proc.stdout is not None
     try:
         while True:
-            line = await proc.stdout.readline()
-            if not line:
+            try:
+                chunk = await asyncio.wait_for(proc.stdout.read(4096), timeout=2.0)
+            except asyncio.TimeoutError:
+                # No output for 2s — pip is busy (downloading/building). Keep looping
+                # so we don't block indefinitely on a single read() call.
+                if proc.returncode is not None:
+                    break
+                continue
+            if not chunk:
                 break
-            await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": line.decode(errors="replace")}))
+            await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": chunk.decode(errors="replace")}))
     except asyncio.CancelledError:
         proc.kill()
         await proc.wait()
