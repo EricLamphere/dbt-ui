@@ -233,10 +233,12 @@ async def view_docs(project_id: int) -> HTMLResponse:
 
 @router.get("/{project_id}/docs/status", response_model=DocsStatusDto)
 async def get_docs_status(project_id: int) -> DocsStatusDto:
-    index = _docs_dir(project_id) / "index.html"
-    if not index.exists():
+    # catalog.json is the canonical output — present whether we used
+    # `compile --write-catalog` (dbt >= 1.9) or `docs generate` (older).
+    catalog = _docs_dir(project_id) / "catalog.json"
+    if not catalog.exists():
         return DocsStatusDto(generated_at=None)
-    mtime = index.stat().st_mtime
+    mtime = catalog.stat().st_mtime
     generated_at = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
     return DocsStatusDto(generated_at=generated_at)
 
@@ -255,28 +257,46 @@ async def generate_docs(
 
 async def _generate_docs(project_id: int, project_path: str) -> None:
     from app.api.init import load_project_env
+    from app.dbt.runner import RunRequest, runner
 
     topic = f"project:{project_id}"
-    dbt = shutil.which("dbt") or "dbt"
     env = await load_project_env(project_id)
     await bus.publish(Event(topic=topic, type="docs_generating", data={}))
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            dbt, "docs", "generate",
-            cwd=project_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
+
+    # dbt >= 1.9 deprecated `docs generate`; use `compile --write-catalog` instead.
+    # runner.stream() handles run_log events and append_project_log automatically.
+    output_lines: list[str] = []
+
+    async def _stream_capturing(command: str, extra: tuple[str, ...] = ()) -> tuple[bool, list[str]]:
+        lines: list[str] = []
+        req = RunRequest(
+            project_id=project_id,
+            project_path=Path(project_path),
+            command=command,
+            extra=extra,
             env=env,
         )
-        stdout_bytes, _ = await proc.communicate()
-        rc = proc.returncode
-        log.info("docs_generate_result", rc=rc, output=stdout_bytes.decode(errors="replace")[-2000:])
-    except Exception as exc:
-        log.warning("docs_generate_failed", error=str(exc))
-        await bus.publish(Event(topic=topic, type="docs_generated", data={"ok": False}))
-        return
+        try:
+            async for _kind, line in runner.stream(req):
+                lines.append(line)
+        except Exception:
+            return False, lines
+        combined = "\n".join(lines).lower()
+        # dbt exits 0 with a warning for deprecated commands; treat warning-only as ok
+        failed = any(kw in combined for kw in ("error:", "compilation error", "database error"))
+        unrecognised = any(kw in combined for kw in ("unrecognized", "no such option", "invalid value"))
+        return not (failed or unrecognised), lines
 
-    if rc != 0:
+    ok, output_lines = await _stream_capturing("compile", ("--write-catalog",))
+    if not ok:
+        combined = "\n".join(output_lines).lower()
+        if any(kw in combined for kw in ("unrecognized", "no such option", "invalid value")):
+            # Older dbt — fall back to docs generate
+            ok, output_lines = await _stream_capturing("docs", ("generate",))
+
+    log.info("docs_generate_result", ok=ok, last_lines=output_lines[-10:])
+
+    if not ok:
         await bus.publish(Event(topic=topic, type="docs_generated", data={"ok": False}))
         return
 
@@ -289,8 +309,8 @@ async def _generate_docs(project_id: int, project_path: str) -> None:
         if src.exists():
             shutil.copy2(src, dest_dir / filename)
 
-    # Copy and patch index.html: inject a <base href> so Angular's pushState
-    # stays within the iframe and doesn't escape to the parent window's history.
+    # index.html is produced by `docs generate` but not `compile --write-catalog`.
+    # Copy and patch it when present (used by the iframe-based viewer).
     index_src = target_dir / "index.html"
     if index_src.exists():
         content = index_src.read_text(encoding="utf-8")

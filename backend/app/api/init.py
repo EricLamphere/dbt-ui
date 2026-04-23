@@ -3,7 +3,6 @@ import importlib.metadata
 import os
 import re
 import shlex
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -847,9 +846,10 @@ async def get_package_info(package: str) -> PackageInfoDto:
 
 @global_router.get("/dbt-core-status", response_model=DbtCoreStatusDto)
 async def get_dbt_core_status() -> DbtCoreStatusDto:
-    """Check if dbt binary is available on PATH and return its version."""
-    dbt = shutil.which("dbt")
-    if not dbt:
+    """Check if dbt binary is available in the backend venv and return its version."""
+    try:
+        dbt = str(venv_dbt())
+    except RuntimeError:
         return DbtCoreStatusDto(installed=False, version=None)
     proc = await asyncio.create_subprocess_exec(
         dbt, "--version",
@@ -898,32 +898,31 @@ async def _run_global_pip_install(req_path: Path) -> None:
     )
     _global_setup_proc = proc
     assert proc.stdout is not None
-    last_output_time = asyncio.get_event_loop().time()
-    try:
+
+    async def _drain_stdout() -> None:
+        """Read stdout continuously so the pipe never fills and blocks pip."""
         while True:
-            try:
-                chunk = await asyncio.wait_for(proc.stdout.read(4096), timeout=2.0)
-            except asyncio.TimeoutError:
-                if proc.returncode is not None:
-                    break
-                # Pip is silent (downloading/installing). Emit a dot every 5s so the
-                # frontend knows we're still alive.
-                now = asyncio.get_event_loop().time()
-                if now - last_output_time >= 5.0:
-                    await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": "."}))
-                    last_output_time = now
-                continue
+            chunk = await proc.stdout.read(4096)
             if not chunk:
                 break
-            last_output_time = asyncio.get_event_loop().time()
-            await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": chunk.decode(errors="replace")}))
+            await bus.publish(Event(
+                topic=topic,
+                type="global_setup_output",
+                data={"data": chunk.decode(errors="replace")},
+            ))
+
+    drain_task = asyncio.create_task(_drain_stdout())
+    try:
+        await asyncio.shield(drain_task)
     except asyncio.CancelledError:
+        drain_task.cancel()
         proc.kill()
         await proc.wait()
         await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": -1}))
         return
     finally:
         _global_setup_proc = None
+
     rc = await proc.wait()
     await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": rc}))
 

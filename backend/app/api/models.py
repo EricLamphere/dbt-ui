@@ -1,7 +1,6 @@
 import asyncio
 import json
 import re
-import shutil
 import sys
 from pathlib import Path
 
@@ -230,12 +229,12 @@ async def get_compiled(
     # Not in manifest — run dbt compile for just this node, then re-read
     # unique_id format is "model.project_name.model_name"; --select expects just the name
     model_name = unique_id.split(".")[-1]
-    dbt = shutil.which("dbt") or "dbt"
+    from app.dbt.venv import venv_dbt
     from app.api.init import load_project_env
     env = await load_project_env(project_id)
     try:
         proc = await asyncio.create_subprocess_exec(
-            dbt, "compile", "--select", model_name,
+            str(venv_dbt()), "compile", "--select", model_name,
             cwd=project.path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -271,13 +270,13 @@ async def show_model(
 
     # unique_id format is "model.project_name.model_name"; --select expects just the name
     model_name = unique_id.split(".")[-1]
-    dbt = shutil.which("dbt") or "dbt"
+    from app.dbt.venv import venv_dbt
     limit = max(1, min(dto.limit, 5000))
     from app.api.init import load_project_env
     env = await load_project_env(project_id)
     try:
         proc = await asyncio.create_subprocess_exec(
-            dbt, "show", "--select", model_name,
+            str(venv_dbt()), "show", "--select", model_name,
             "--limit", str(limit),
             "--output", "json",
             cwd=project.path,
@@ -347,23 +346,24 @@ async def show_model(
 async def _compile_project(project_id: int, project_path: str) -> None:
     from app.events.bus import Event, bus
     from app.api.init import load_project_env
+    from app.dbt.runner import RunRequest, runner
 
     topic = f"project:{project_id}"
-    dbt = shutil.which("dbt") or "dbt"
     env = await load_project_env(project_id)
     await bus.publish(Event(topic=topic, type="compile_started", data={}))
+    ok = False
     try:
-        proc = await asyncio.create_subprocess_exec(
-            dbt, "compile",
-            cwd=project_path,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
+        req = RunRequest(
+            project_id=project_id,
+            project_path=Path(project_path),
+            command="compile",
             env=env,
         )
-        rc = await proc.wait()
+        async for _kind, _line in runner.stream(req):
+            pass
+        ok = True
     except Exception:
-        await bus.publish(Event(topic=topic, type="compile_finished", data={"ok": False}))
-        return
-    await bus.publish(Event(topic=topic, type="compile_finished", data={"ok": rc == 0}))
-    if rc == 0:
+        pass
+    await bus.publish(Event(topic=topic, type="compile_finished", data={"ok": ok}))
+    if ok:
         await bus.publish(Event(topic=topic, type="graph_changed", data={}))

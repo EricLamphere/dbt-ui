@@ -47,10 +47,13 @@ class InteractiveInitManager:
         log.info("init_session_pending", session_id=session_id, cwd=str(cwd))
         return session
 
-    async def start_pty(self, session: "InitSession", args: tuple[str, ...] = ("dbt", "init")) -> None:
+    async def start_pty(self, session: "InitSession", args: tuple[str, ...] | None = None) -> None:
         """Spawn the PTY process for an existing pending session."""
         if not HAVE_PTY:
             raise RuntimeError("ptyprocess is not installed")
+        if args is None:
+            from app.dbt.venv import venv_dbt
+            args = (str(venv_dbt()), "init")
         env = os.environ.copy()
         env.setdefault("TERM", "xterm-256color")
         proc = ptyprocess.PtyProcess.spawn(
@@ -60,7 +63,7 @@ class InteractiveInitManager:
         session.reader_task = asyncio.create_task(self._reader(session))
         log.info("init_session_pty_started", session_id=session.session_id, args=args)
 
-    async def start(self, cwd: Path, args: tuple[str, ...] = ("dbt", "init")) -> "InitSession":
+    async def start(self, cwd: Path, args: tuple[str, ...] | None = None) -> "InitSession":
         """Create a session and immediately spawn a PTY. Legacy helper."""
         session = await self.create_pending(cwd)
         await self.start_pty(session, args)
