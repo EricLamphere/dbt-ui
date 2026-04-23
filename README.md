@@ -137,12 +137,15 @@ The following are stored in the DB via the Global Settings UI and override the e
 |---|---|
 | `dbt_projects_path` | Overrides `DBT_UI_PROJECTS_PATH` |
 | `global_requirements_path` | Path to a `requirements.txt` installed into the dbt venv on every project open |
+| `data_dir` | Overrides `DBT_UI_DATA_DIR` |
+| `log_level` | Overrides `DBT_UI_LOG_LEVEL` |
 
-Per-project env var (set in the Environment tab):
+Per-project settings (set in the Environment tab):
 
-| Key | Description |
-|---|---|
-| `REQUIREMENTS_PATH` | Path to a project-specific `requirements.txt`; installed in addition to the global one |
+| Key | Description | Default |
+|---|---|---|
+| `INIT_SCRIPT_PATH` | Directory (relative to project root) scanned for `.sh` init scripts; run after `dbt deps` on project open | `init` |
+| `REQUIREMENTS_PATH` | Path to a project-specific `requirements.txt`; installed in addition to the global one | _(none)_ |
 
 
 ## Gallery
