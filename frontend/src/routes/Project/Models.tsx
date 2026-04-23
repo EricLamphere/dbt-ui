@@ -20,7 +20,9 @@ import ModelNodeComponent from './components/ModelNode';
 import NewModelModal from './components/NewModelModal';
 import ProjectNav from './components/ProjectNav';
 import { SidePane } from './components/SidePane';
+import DagFilterBar from './components/DagFilterBar';
 import { computeLayout } from './lib/layout';
+import { type FilterState, emptyFilter, applyFilter } from './lib/dagFilter';
 
 type LiveStatus = 'running' | 'success' | 'error' | 'warn';
 
@@ -77,7 +79,7 @@ export default function ModelsPage() {
   const [searchParams] = useSearchParams();
   const qc = useQueryClient();
 
-  const [filterText, setFilterText] = useState('');
+  const [filter, setFilter] = useState<FilterState>(emptyFilter());
   const [selectedModel, setSelectedModel] = useState<ModelNode | null>(null);
   const [selectedModels, setSelectedModels] = useState<ModelNode[]>([]);
   const [newModelOpen, setNewModelOpen] = useState(false);
@@ -151,25 +153,8 @@ export default function ModelsPage() {
   const filteredGraph = useMemo(() => {
     if (!graph) return null;
     const liveGraph = applyLiveStatuses(graph, liveStatuses);
-    if (!filterText.trim()) return liveGraph;
-    const q = filterText.toLowerCase();
-    const matchingIds = new Set(
-      liveGraph.nodes
-        .filter(
-          (n) =>
-            n.name.toLowerCase().includes(q) ||
-            n.tags.some((t) => t.toLowerCase().includes(q)) ||
-            n.resource_type.toLowerCase().includes(q),
-        )
-        .map((n) => n.unique_id),
-    );
-    return {
-      nodes: liveGraph.nodes.filter((n) => matchingIds.has(n.unique_id)),
-      edges: liveGraph.edges.filter(
-        (e) => matchingIds.has(e.source) && matchingIds.has(e.target),
-      ),
-    };
-  }, [graph, filterText, liveStatuses]);
+    return applyFilter(liveGraph, filter);
+  }, [graph, filter, liveStatuses]);
 
   const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
     () =>
@@ -228,40 +213,15 @@ export default function ModelsPage() {
       {/* Main DAG area */}
       <div className="flex-1 flex flex-col overflow-hidden relative">
         {/* Filter bar */}
-        <div className="flex items-center gap-3 px-4 py-2 bg-surface-panel border-b border-gray-800">
-          <input
-            type="search"
-            placeholder="Filter by name, tag, type…"
-            value={filterText}
-            onChange={(e) => setFilterText(e.target.value)}
-            className="flex-1 bg-surface-elevated border border-gray-700 rounded px-3 py-1.5 text-sm text-gray-100 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-          />
-          <span className="text-xs text-gray-500">
-            {filteredGraph?.nodes.length ?? 0} nodes
-          </span>
-          {compiling && (
-            <span className="flex items-center gap-1.5 text-xs text-brand-400">
-              <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z" />
-              </svg>
-              Compiling…
-            </span>
-          )}
-          <button
-            onClick={handleRefreshDag}
-            disabled={compiling}
-            className="px-3 py-1.5 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-300 disabled:opacity-50 transition-colors shrink-0"
-          >
-            ↻ Refresh DAG
-          </button>
-          <button
-            onClick={() => setNewModelOpen(true)}
-            className="px-3 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors shrink-0"
-          >
-            + New model
-          </button>
-        </div>
+        <DagFilterBar
+          graph={graph ?? null}
+          filter={filter}
+          onChange={setFilter}
+          nodeCount={filteredGraph?.nodes.length ?? 0}
+          compiling={compiling}
+          onRefresh={handleRefreshDag}
+          onNewModel={() => setNewModelOpen(true)}
+        />
 
         {/* React Flow */}
         <div className="flex-1 overflow-hidden">
