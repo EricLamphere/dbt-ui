@@ -70,6 +70,11 @@ async def start_terminal(dto: TerminalStartDto) -> TerminalSessionDto:
             init_manager._reader(session)  # noqa: SLF001
         )
         log.info("terminal_started", session_id=session.session_id, shell=shell, cwd=str(cwd))
+        # Activate the backend venv so dbt and project tools are on PATH
+        venv_activate = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "activate"
+        if venv_activate.exists():
+            await asyncio.sleep(0.3)  # let the shell finish its init before sending input
+            proc.write(f"source {venv_activate}\n".encode())
 
     asyncio.create_task(_start())
     return TerminalSessionDto(session_id=session.session_id)

@@ -38,8 +38,14 @@ function ProjectSelectors({ projectId }: { projectId: number }) {
   const activeProfile = profiles?.find((p) => p.is_active);
   const activeTarget = activeTargetData?.target ?? targetsData?.default_target ?? null;
 
-  const handleProfileChange = async (profileId: number) => {
-    await api.profiles.activate(projectId, profileId);
+  const handleProfileChange = async (value: string) => {
+    if (value === '') {
+      if (activeProfile) {
+        await api.profiles.deactivate(projectId, activeProfile.id);
+      }
+    } else {
+      await api.profiles.activate(projectId, Number(value));
+    }
     qc.invalidateQueries({ queryKey: ['profiles', projectId] });
   };
 
@@ -57,9 +63,10 @@ function ProjectSelectors({ projectId }: { projectId: number }) {
           <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium">Profile</span>
           <select
             value={activeProfile?.id ?? ''}
-            onChange={(e) => handleProfileChange(Number(e.target.value))}
+            onChange={(e) => handleProfileChange(e.target.value)}
             className="bg-surface-elevated border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
           >
+            <option value="">Select a profile</option>
             {profiles.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
