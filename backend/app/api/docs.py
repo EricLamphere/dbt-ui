@@ -257,42 +257,49 @@ async def generate_docs(
 
 async def _generate_docs(project_id: int, project_path: str) -> None:
     from app.api.init import load_project_env
-    from app.dbt.runner import RunRequest, runner
+    from app.dbt.venv import venv_dbt
+    from app.logs.project_logger import append_project_log
 
     topic = f"project:{project_id}"
     env = await load_project_env(project_id)
     await bus.publish(Event(topic=topic, type="docs_generating", data={}))
 
-    # dbt >= 1.9 deprecated `docs generate`; use `compile --write-catalog` instead.
-    # runner.stream() handles run_log events and append_project_log automatically.
-    output_lines: list[str] = []
+    dbt = str(venv_dbt())
+    project = Path(project_path)
+    # --profiles-dir must come AFTER the subcommand, not between `dbt` and `docs`/`compile`
+    profiles_args = ["--profiles-dir", project_path] if (project / "profiles.yml").exists() else []
 
-    async def _stream_capturing(command: str, extra: tuple[str, ...] = ()) -> tuple[bool, list[str]]:
-        lines: list[str] = []
-        req = RunRequest(
-            project_id=project_id,
-            project_path=Path(project_path),
-            command=command,
-            extra=extra,
-            env=env,
-        )
+    async def _run_and_log(args: list[str]) -> tuple[bool, list[str]]:
+        append_project_log(project_path, f">>> {' '.join(args[1:])}")
         try:
-            async for _kind, line in runner.stream(req):
-                lines.append(line)
-        except Exception:
-            return False, lines
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                cwd=project_path,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+                env=env,
+            )
+        except Exception as exc:
+            append_project_log(project_path, f"error: {exc}")
+            return False, []
+        lines: list[str] = []
+        assert proc.stdout is not None
+        async for raw in proc.stdout:
+            line = raw.decode(errors="replace").rstrip("\n")
+            append_project_log(project_path, line)
+            lines.append(line)
+        rc = await proc.wait()
+        status = "OK" if rc == 0 else f"FAILED (rc={rc})"
+        append_project_log(project_path, f"<<< {' '.join(args[1:])} {status}")
         combined = "\n".join(lines).lower()
-        # dbt exits 0 with a warning for deprecated commands; treat warning-only as ok
-        failed = any(kw in combined for kw in ("error:", "compilation error", "database error"))
         unrecognised = any(kw in combined for kw in ("unrecognized", "no such option", "invalid value"))
-        return not (failed or unrecognised), lines
+        return rc == 0 and not unrecognised, lines
 
-    ok, output_lines = await _stream_capturing("compile", ("--write-catalog",))
-    if not ok:
-        combined = "\n".join(output_lines).lower()
-        if any(kw in combined for kw in ("unrecognized", "no such option", "invalid value")):
-            # Older dbt — fall back to docs generate
-            ok, output_lines = await _stream_capturing("docs", ("generate",))
+    # dbt >= 1.9: compile --write-catalog [--profiles-dir ...]
+    ok, output_lines = await _run_and_log([dbt, "compile", "--write-catalog"] + profiles_args)
+    if not ok and any(kw in "\n".join(output_lines).lower() for kw in ("unrecognized", "no such option", "invalid value")):
+        # Older dbt fallback: docs generate [--profiles-dir ...]
+        ok, output_lines = await _run_and_log([dbt, "docs", "generate"] + profiles_args)
 
     log.info("docs_generate_result", ok=ok, last_lines=output_lines[-10:])
 

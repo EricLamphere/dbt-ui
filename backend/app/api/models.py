@@ -346,24 +346,34 @@ async def show_model(
 async def _compile_project(project_id: int, project_path: str) -> None:
     from app.events.bus import Event, bus
     from app.api.init import load_project_env
-    from app.dbt.runner import RunRequest, runner
+    from app.dbt.venv import venv_dbt
+    from app.logs.project_logger import append_project_log
 
     topic = f"project:{project_id}"
     env = await load_project_env(project_id)
+    dbt = str(venv_dbt())
+    project = Path(project_path)
+    profiles_args = ["--profiles-dir", project_path] if (project / "profiles.yml").exists() else []
+
     await bus.publish(Event(topic=topic, type="compile_started", data={}))
+    append_project_log(project_path, ">>> dbt compile")
     ok = False
     try:
-        req = RunRequest(
-            project_id=project_id,
-            project_path=Path(project_path),
-            command="compile",
+        proc = await asyncio.create_subprocess_exec(
+            dbt, "compile", *profiles_args,
+            cwd=project_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
             env=env,
         )
-        async for _kind, _line in runner.stream(req):
-            pass
-        ok = True
+        assert proc.stdout is not None
+        async for raw in proc.stdout:
+            append_project_log(project_path, raw.decode(errors="replace").rstrip("\n"))
+        rc = await proc.wait()
+        ok = rc == 0
     except Exception:
         pass
+    append_project_log(project_path, f"<<< dbt compile {'OK' if ok else 'FAILED'}")
     await bus.publish(Event(topic=topic, type="compile_finished", data={"ok": ok}))
     if ok:
         await bus.publish(Event(topic=topic, type="graph_changed", data={}))
