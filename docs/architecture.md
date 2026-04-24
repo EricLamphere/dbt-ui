@@ -1,6 +1,6 @@
 # dbt-ui Architecture
 
-dbt-ui is a local-first web UI that wraps dbt-core. It runs as a local dev server pair (FastAPI + Vite), discovers dbt projects from a configured workspace directory, and provides a live-updating DAG view with run/build/test controls, an integrated terminal, an in-browser SQL editor, and a PTY-backed `dbt init` terminal.
+dbt-ui is a local-first web UI that wraps dbt-core. It runs as a local dev server pair (FastAPI + Vite), discovers dbt projects from a configured workspace directory, and provides a live-updating DAG view with run/build/test controls, an integrated terminal, an in-browser SQL editor, a PTY-backed `dbt init` terminal, and a native docs browser.
 
 ---
 
@@ -9,7 +9,7 @@ dbt-ui is a local-first web UI that wraps dbt-core. It runs as a local dev serve
 | Layer | Technology | Why |
 |---|---|---|
 | Backend | FastAPI (Python 3.11+) | Async, native SSE/streaming, simple subprocess management |
-| dbt execution | `subprocess` calling the system `dbt` CLI | Safe — avoids dbt Python API global state issues; one process per invocation |
+| dbt execution | `subprocess` calling the venv `dbt` binary | Safe — avoids dbt Python API global state issues; one process per invocation; always uses `backend/.venv/bin/dbt` |
 | Manifest parsing | Custom JSON parser over `manifest.json` | Direct, version-agnostic parsing of dbt's output artifacts |
 | File watching | `watchfiles` (Rust-backed) | Low-overhead, async-friendly, debounced |
 | Live push | Server-Sent Events (SSE) via `sse-starlette` | One-way server→client is sufficient; simpler than WebSockets; built-in browser reconnect |
@@ -48,13 +48,14 @@ dbt-ui/
 │   │   │   └── health.py            # /api/health
 │   │   ├── db/
 │   │   │   ├── engine.py            # Async SQLAlchemy engine, SessionLocal, get_session
-│   │   │   ├── models.py            # ORM: 8 tables (see Database Schema below)
-│   │   │   └── migrations.py        # DDL-on-startup migrations
+│   │   │   ├── models.py            # ORM: 10 tables (see Database Schema below)
+│   │   │   └── migrations.py        # DDL-on-startup migrations (idempotent; no Alembic)
 │   │   ├── dbt/
 │   │   │   ├── manifest.py          # Parse target/manifest.json → nodes + edges
 │   │   │   ├── run_results.py       # Parse target/run_results.json → statuses
 │   │   │   ├── runner.py            # DbtRunner singleton; subprocess + asyncio.Lock per project
 │   │   │   ├── select.py            # Build --select strings (only/upstream/downstream/full)
+│   │   │   ├── venv.py              # venv_dbt/venv_pip/venv_python — resolve binaries in backend/.venv/bin/
 │   │   │   ├── init_scripts.py      # Read/write init/*.sh custom scripts
 │   │   │   └── interactive.py       # InteractiveInitManager singleton (PTY sessions; reused for terminal)
 │   │   ├── events/
@@ -82,7 +83,8 @@ dbt-ui/
 │   │       └── Project/
 │   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet overflow-auto>)
 │   │           ├── index.tsx            # Project home: tiles + tabbed README/dbt_project.yml/profiles.yml viewer
-│   │           ├── Models.tsx           # React Flow DAG with real-time run overlays; ?model= deep-link; SidePane
+│   │           ├── Models.tsx           # React Flow DAG with real-time run overlays; ?model= deep-link; SidePane; DagFilterBar
+│   │           │                        #   DagFilterBar: text selector (+model, tag:x), Type/Materialization/Tag/Status dropdowns
 │   │           ├── Docs.tsx             # Native docs browser (folder tree)
 │   │           ├── Environment.tsx      # Env vars + profiles
 │   │           ├── InitScripts.tsx      # Init pipeline management
@@ -97,7 +99,8 @@ dbt-ui/
 │   │               │   ├── index.tsx        # Right-side collapsible panel (drag/collapse); renders PropertiesTab
 │   │               │   └── PropertiesTab.tsx # Model metadata + run controls + action buttons (unified, no tabs)
 │   │               ├── ModelNode.tsx
-│   │               └── NewProjectModal.tsx  # dbt init PTY terminal; writes profiles.yml after rescan
+│   │               ├── NewProjectModal.tsx  # dbt init PTY terminal; writes profiles.yml after rescan
+│   │               └── DagFilterBar.tsx     # filter bar: text selector + dropdown pills + Clear + node count
 │   ├── vite.config.ts               # Dev proxy → :8001; prod build output
 │   └── tailwind.config.ts
 ├── docs/
@@ -110,7 +113,7 @@ dbt-ui/
 
 ## Database Schema
 
-8 tables, all in `backend/app/db/models.py`:
+10 tables, all in `backend/app/db/models.py`:
 
 ```
 projects
@@ -171,6 +174,10 @@ project_env_vars
   project_id    INTEGER FK→projects
   key           TEXT(255)
   value         TEXT
+  -- Well-known keys:
+  --   dbt_target        active dbt target; passed as --target on every invocation
+  --   REQUIREMENTS_PATH path to project-specific requirements.txt
+  --   Any KEY=value exported by an init script is upserted here automatically
 
 app_settings
   key           TEXT PK          -- e.g. "dbt_projects_path", "global_requirements_path"
@@ -210,6 +217,10 @@ GET    /api/projects/{id}/events                         SSE
 GET    /api/projects/{id}/models
 POST   /api/projects/{id}/models
 GET    /api/projects/{id}/models/{unique_id}
+DELETE /api/projects/{id}/models/{unique_id}
+POST   /api/projects/{id}/compile
+GET    /api/projects/{id}/models/{unique_id}/compiled    on-demand compile + return compiled SQL
+POST   /api/projects/{id}/models/{unique_id}/show        run dbt show, return rows
 GET    /api/projects/{id}/models/{unique_id}/sql
 PUT    /api/projects/{id}/models/{unique_id}/sql
 
@@ -217,11 +228,24 @@ POST   /api/projects/{id}/run
 POST   /api/projects/{id}/build
 POST   /api/projects/{id}/test
 
+GET    /api/projects/{id}/docs/status                    timestamp of last generated docs
+POST   /api/projects/{id}/docs/generate                  runs dbt compile --write-catalog (≥1.9) or dbt docs generate
+GET    /api/projects/{id}/docs/data                      merged manifest+catalog JSON for native docs browser
+GET    /api/projects/{id}/docs/view                      patched index.html for iframe-based dbt docs viewer
+
+GET    /api/projects/{id}/env-vars                       list project_env_vars rows
+PUT    /api/projects/{id}/env-vars/{key}                 upsert a project env var
+DELETE /api/projects/{id}/env-vars/{key}                 delete a project env var
+
 POST   /api/projects/{id}/open                           runs init pipeline
 GET    /api/projects/{id}/init/steps
 POST   /api/projects/{id}/init/steps
 DELETE /api/projects/{id}/init/steps/{name}
 POST   /api/projects/{id}/init/reorder
+
+POST   /api/init/global-setup                            run global pip install (global_requirements_path)
+POST   /api/init/global-setup/cancel                     cancel a running global setup
+GET    /api/init/global-setup/events                     SSE stream for global setup output
 
 POST   /api/projects/init-session/start                  pip install adapter + spawn PTY
 POST   /api/projects/init-session/{session_id}/input
@@ -347,7 +371,7 @@ On startup and on `POST /api/projects/rescan`:
 3. For each enabled `InitStep` in order:
    - `base: pip install` — installs `global_requirements_path` (from `app_settings`) and `REQUIREMENTS_PATH` (from project env vars) into the dbt venv; skips if neither is set
    - `base: dbt deps` — runs `dbt deps` in the project directory
-   - custom steps — runs `bash -euo pipefail <script_path>` in the script's parent directory
+   - custom steps — runs `bash -euo pipefail <script_path>` in the script's parent directory; on success, sources the script again with `set -a` and `export -p` to capture any exported env vars (e.g. `SNOWFLAKE_ACCOUNT`); new/changed vars are upserted into `project_env_vars` and merged into the running env so subsequent steps see them immediately
    - Publishes `init_step` with status after each step
 4. Publishes `init_pipeline_finished`
 5. On success, fires `_compile_project` in the background to populate the DAG immediately
@@ -361,6 +385,12 @@ On startup and on `POST /api/projects/rescan`:
 4. Returns `GraphDto {nodes, edges}`
 
 The frontend runs `dagre` layout client-side and renders with React Flow. `Models.tsx` overlays a live `liveStatuses` map (populated from `run_log` SSE parsing) so models turn blue while running without waiting for `statuses_changed`.
+
+DAG filtering (`dagFilter.ts`) is purely client-side — no backend involvement:
+- **Text selector**: supports dbt-style syntax — `+model` (ancestors), `model+` (descendants), `+model+` (both), `tag:x`, `source:x`, `resource_type:model`, bare type names (`model`, `seed`, `snapshot`, `test`, `source`), and plain substring on name; space-separated tokens are unioned
+- **Dropdown filters**: Type, Materialization, Tag, Status — AND between categories, OR within each
+- BFS graph traversal builds ancestor/descendant sets using pre-computed adjacency maps
+- After filter changes, `fitView()` is called with a 200ms ease so the camera re-centers on the visible subset
 
 ### 5. Running dbt
 
@@ -401,7 +431,17 @@ The frontend runs `dagre` layout client-side and renders with React Flow. `Model
 5. On `init_finished`, frontend calls `POST /api/projects/rescan` then `POST /api/projects/{id}/ensure-profiles-yml` on each project — writes a minimal `profiles.yml` into any newly created project that doesn't have one
 6. Project appears in list with a working `profiles.yml` ready for `--profiles-dir`
 
-### 9. File Watching
+### 9. Docs Generation
+
+`POST /api/projects/{id}/docs/generate` → background task `_generate_docs()`:
+1. Publishes `docs_generating`
+2. Tries `dbt compile --write-catalog` (dbt ≥ 1.9); if the flag is unrecognised, falls back to `dbt docs generate`
+3. All output is streamed to Project Logs via `append_project_log()` — does **not** use `runner.stream()`, so no `run_started` event is emitted and the Run tab does not activate
+4. On success, copies `manifest.json`, `catalog.json` (and `index.html` if produced) to `data/docs/{project_id}/`
+5. Publishes `docs_generated {ok, generated_at}`
+6. Frontend invalidates `['docs-status', projectId]`; the native docs browser (`Docs.tsx`) re-fetches `GET /api/projects/{id}/docs/data`
+
+### 10. File Watching
 
 `WatcherManager` runs one `watchfiles.awatch` task per project. Watched paths: `models/`, `tests/`, `seeds/`, `snapshots/`, `macros/`, `analyses/`, `target/`.
 
@@ -428,23 +468,34 @@ Global settings (stored in `app_settings` table, set via UI):
 | `data_dir` | Overrides `DBT_UI_DATA_DIR` |
 | `log_level` | Overrides `DBT_UI_LOG_LEVEL` |
 
-Per-project env var (set in the Environment tab, stored in `project_env_vars`):
+Per-project env vars (stored in `project_env_vars`, injected into every dbt subprocess via `load_project_env()`):
 
-| Key | Description |
-|---|---|
-| `REQUIREMENTS_PATH` | Path to a project-specific `requirements.txt`; installed in addition to the global one during `base: pip install` |
-| `dbt_target` | Active dbt target; passed as `--target` on every dbt invocation |
+| Key | Set by | Description |
+|---|---|---|
+| `REQUIREMENTS_PATH` | Environment tab (UI) | Path to a project-specific `requirements.txt`; installed during `base: pip install` |
+| `dbt_target` | Target dropdown (UI) | Active dbt target; passed as `--target` on every dbt invocation |
+| _(any exported var)_ | Init scripts automatically | Any `export KEY=value` in a custom init script is captured and upserted here after the step succeeds; persists across restarts |
+
+`load_project_env()` builds the subprocess env as: `os.environ` + `project_env_vars` rows + active profile vars (from `env_profiles` / `profile_env_vars`).
 
 ---
 
 ## Running Locally
 
 ```bash
-task install    # create venv, pip install, npm install
-task start      # backend (:8001) + Vite dev server (:5173) in parallel
+task install          # create venv, pip install, npm install
+task start            # backend (:8001) + Vite dev server (:5173) in parallel (foreground, logs to terminal)
+task start:bg         # same but daemonized; opens browser automatically; logs to data/logs/
+task stop             # kill background daemons started by task start:bg
 ```
 
 The Vite dev server proxies all `/api` requests to `localhost:8001`. Open [http://localhost:5173](http://localhost:5173).
+
+To choose a specific Python interpreter:
+
+```bash
+task install PYTHON=python3.12
+```
 
 ---
 
@@ -474,4 +525,10 @@ The Vite dev server proxies all `/api` requests to `localhost:8001`. Open [http:
 
 **Global profiles as reusable env var templates** — `global_profiles` / `global_profile_vars` store named env var sets that are not tied to any project. They serve as templates that can be imported into project profiles, enabling teams to share common variable sets (e.g., a "prod credentials" profile) without duplicating them per project.
 
-**Requirements install in the dbt venv** — `pip install -r <requirements.txt>` targets the pip binary co-located with the `dbt` executable (`_venv_pip()`). This ensures packages install into whichever Python environment dbt actually runs in, not the app's own venv. A global path (for shared adapters or tools) and a per-project path (for project-specific packages) are both supported and installed in sequence.
+**Requirements install in the dbt venv** — `pip install -r <requirements.txt>` targets the pip binary co-located with the `dbt` executable (`venv_pip()`). This ensures packages install into whichever Python environment dbt actually runs in, not the app's own venv. A global path (for shared adapters or tools) and a per-project path (for project-specific packages) are both supported and installed in sequence.
+
+**All dbt commands use the venv binary** — `venv_dbt()` / `venv_pip()` / `venv_python()` in `dbt/venv.py` resolve binaries relative to `backend/.venv/bin/`. This ensures adapter packages installed during setup (e.g. `dbt-snowflake`) are available to every dbt invocation regardless of what's on `$PATH`.
+
+**Docs generation bypasses `runner.stream()`** — `dbt compile --write-catalog` and `dbt docs generate` are invoked directly (not via `DbtRunner`) so they emit `compile_started`/`compile_finished` or `docs_generating`/`docs_generated` events but never `run_started`. This prevents the frontend from switching to the Run tab when docs are generated.
+
+**Init-script env var capture** — exported shell vars are captured by sourcing each script a second time in a `set -a` subshell and diffing `export -p` output against the parent env. Captured vars are upserted into `project_env_vars` so they survive server restarts and are injected into all future dbt subprocesses via `load_project_env()`. This requires no changes to the shell scripts themselves.

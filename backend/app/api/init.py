@@ -559,6 +559,30 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                     ["bash", "-euo", "pipefail", step.script_path], script_dir, env
                 )
                 ok = return_code == 0
+                if ok:
+                    new_exports = await _capture_script_exports(step.script_path, script_dir, env)
+                    if new_exports:
+                        from app.db.engine import SessionLocal
+                        async with SessionLocal() as _exp_session:
+                            for key, value in new_exports.items():
+                                existing = await _exp_session.execute(
+                                    select(ProjectEnvVar).where(
+                                        ProjectEnvVar.project_id == project_id,
+                                        ProjectEnvVar.key == key,
+                                    )
+                                )
+                                row = existing.scalar_one_or_none()
+                                if row is None:
+                                    _exp_session.add(ProjectEnvVar(project_id=project_id, key=key, value=value))
+                                else:
+                                    row.value = value
+                            await _exp_session.commit()
+                        # Merge into the running env so subsequent steps see the new vars
+                        env.update(new_exports)
+                        append_project_log(
+                            project_path,
+                            f"[init] captured {len(new_exports)} exported var(s): {', '.join(new_exports.keys())}",
+                        )
             else:
                 return_code = 0
                 log_lines = []
@@ -609,6 +633,44 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
     # Run dbt compile in the background so the DAG is populated immediately
     from app.api.models import _compile_project
     asyncio.create_task(_compile_project(project_id, project_path))
+
+
+async def _capture_script_exports(
+    script_path: str, cwd: str, env: dict
+) -> dict[str, str]:
+    """Source the script in a subshell and return any newly exported vars.
+
+    We run: bash -c 'set -a; source SCRIPT; export -p'
+    Then parse the `export -p` output and return vars that weren't already
+    in the parent env (or whose values changed).  This is the only reliable
+    way to capture vars a shell script exports without modifying the scripts.
+    """
+    cmd = f"set -a; source {shlex.quote(script_path)}; export -p"
+    proc = await asyncio.create_subprocess_exec(
+        "bash", "-c", cmd,
+        cwd=cwd,
+        env=env,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    assert proc.stdout is not None
+    stdout_bytes = await proc.stdout.read()
+    await proc.wait()
+
+    exported: dict[str, str] = {}
+    # export -p lines look like: declare -x KEY="value" or declare -x KEY
+    pattern = re.compile(r'^declare -x ([A-Za-z_][A-Za-z0-9_]*)(?:="(.*)")?$')
+    for raw_line in stdout_bytes.decode(errors="replace").splitlines():
+        m = pattern.match(raw_line.strip())
+        if not m:
+            continue
+        key, value = m.group(1), m.group(2) or ""
+        # Unescape bash escape sequences in the value
+        value = value.replace('\\"', '"').replace("\\'", "'").replace("\\\\", "\\")
+        if key not in env or env[key] != value:
+            exported[key] = value
+
+    return exported
 
 
 async def _exec_and_capture(
