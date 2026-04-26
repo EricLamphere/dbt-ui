@@ -100,13 +100,13 @@ html[data-theme="light"] {
 
 /* README markdown styles */
 .prose-readme {
-  color: rgb(209 213 219); /* gray-300 */
+  color: rgb(var(--gray-300));
   font-size: 0.875rem;
   line-height: 1.6;
 }
 .prose-readme h1, .prose-readme h2, .prose-readme h3,
 .prose-readme h4, .prose-readme h5, .prose-readme h6 {
-  color: rgb(243 244 246); /* gray-100 */
+  color: rgb(var(--gray-100));
   font-weight: 600;
   margin-top: 1.5em;
   margin-bottom: 0.5em;
@@ -117,16 +117,16 @@ html[data-theme="light"] {
 .prose-readme p { margin-bottom: 0.75em; }
 /* .prose-readme a — defined below in React Flow overrides section */
 .prose-readme code {
-  background: rgb(31 41 55); /* gray-800 */
-  color: rgb(167 243 208); /* emerald-200 */
+  background: rgb(var(--bg-elevated));
+  color: rgb(var(--brand-300));
   padding: 0.1em 0.35em;
   border-radius: 3px;
   font-size: 0.8em;
   font-family: 'Menlo', 'Monaco', monospace;
 }
 .prose-readme pre {
-  background: rgb(17 24 39); /* gray-900 */
-  border: 1px solid rgb(55 65 81); /* gray-700 */
+  background: rgb(var(--bg-app));
+  border: 1px solid rgb(var(--gray-700));
   border-radius: 6px;
   padding: 1em;
   overflow-x: auto;
@@ -144,7 +144,7 @@ html[data-theme="light"] {
 .prose-readme li { margin-bottom: 0.25em; }
 /* .prose-readme blockquote — defined below in React Flow overrides section */
 .prose-readme hr {
-  border-color: rgb(55 65 81); /* gray-700 */
+  border-color: rgb(var(--gray-700));
   margin: 1.5em 0;
 }
 .prose-readme table {
@@ -154,11 +154,11 @@ html[data-theme="light"] {
   font-size: 0.8rem;
 }
 .prose-readme th, .prose-readme td {
-  border: 1px solid rgb(55 65 81);
+  border: 1px solid rgb(var(--gray-700));
   padding: 0.4em 0.75em;
   text-align: left;
 }
-.prose-readme th { background: rgb(31 41 55); color: rgb(243 244 246); }
+.prose-readme th { background: rgb(var(--bg-elevated)); color: rgb(var(--gray-100)); }
 
 /* React Flow overrides */
 .react-flow__background {
@@ -177,6 +177,6 @@ html[data-theme="light"] {
 .prose-readme blockquote {
   border-left: 3px solid rgb(var(--brand-500));
   padding-left: 1em;
-  color: rgb(156 163 175);
+  color: rgb(var(--gray-400));
   margin: 1em 0;
 }

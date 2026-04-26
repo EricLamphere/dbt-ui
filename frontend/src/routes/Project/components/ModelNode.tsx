@@ -42,7 +42,7 @@ export default memo(function ModelNodeComponent({ data, selected }: Props) {
 
   return (
     <>
-      <Handle type="target" position={Position.Left} style={{ background: '#14b8a6', border: 'none' }} />
+      <Handle type="target" position={Position.Left} style={{ background: 'rgb(var(--brand-500))', border: 'none' }} />
       <div
         className={`
           w-[200px] h-[72px] bg-surface-panel rounded-lg ring-1 px-3 py-2 flex flex-col justify-between
@@ -63,7 +63,7 @@ export default memo(function ModelNodeComponent({ data, selected }: Props) {
           <div className="text-[9px] text-gray-600 font-mono truncate">{model.materialized}</div>
         )}
       </div>
-      <Handle type="source" position={Position.Right} style={{ background: '#14b8a6', border: 'none' }} />
+      <Handle type="source" position={Position.Right} style={{ background: 'rgb(var(--brand-500))', border: 'none' }} />
     </>
   );
 });

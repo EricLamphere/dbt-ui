@@ -224,7 +224,7 @@ export default function NewProjectModal({ onClose }: Props) {
                   onClick={() => setPlatform(p.value)}
                   className={`flex items-center gap-2 px-3 py-2.5 rounded-lg border text-sm transition-colors text-left
                     ${platform === p.value
-                      ? 'border-indigo-500 bg-indigo-950/60 text-white'
+                      ? 'border-brand-500 bg-brand-950/60 text-white'
                       : 'border-gray-700 bg-gray-800 hover:border-gray-600 text-gray-300'}`}
                 >
                   <span className="text-base">{p.icon}</span>
@@ -243,7 +243,7 @@ export default function NewProjectModal({ onClose }: Props) {
               <button
                 type="submit"
                 disabled={!platform}
-                className="px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors disabled:opacity-40"
+                className="px-4 py-2 text-sm rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors disabled:opacity-40"
               >
                 Continue →
               </button>
@@ -269,7 +269,7 @@ export default function NewProjectModal({ onClose }: Props) {
                 <div className="flex justify-end">
                   <button
                     onClick={handleProceedSkipInstall}
-                    className="px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors"
+                    className="px-4 py-2 text-sm rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
                   >
                     Continue →
                   </button>
@@ -312,7 +312,7 @@ export default function NewProjectModal({ onClose }: Props) {
                 </span>
                 <button
                   onClick={returnCode === 0 ? handleDone : handleClose}
-                  className="px-3 py-1.5 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
+                  className="px-3 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white transition-colors"
                 >
                   Continue →
                 </button>
@@ -347,7 +347,7 @@ function AdapterNotInstalled({ pkg, requirementLine, onInstallLatest, onAddToReq
           type="text"
           value={editedLine}
           onChange={(e) => setEditedLine(e.target.value)}
-          className="bg-surface-elevated border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-100 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          className="bg-surface-elevated border border-gray-700 rounded px-3 py-2 text-sm font-mono text-gray-100 focus:outline-none focus:ring-2 focus:ring-brand-500"
           placeholder="e.g. dbt-athena-community==1.9.4"
         />
         <div className="flex items-center justify-between">
@@ -363,7 +363,7 @@ function AdapterNotInstalled({ pkg, requirementLine, onInstallLatest, onAddToReq
               setAdding(true);
               await onAddToRequirements(editedLine.trim());
             }}
-            className="px-4 py-2 text-sm rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors disabled:opacity-40"
+            className="px-4 py-2 text-sm rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors disabled:opacity-40"
           >
             {adding ? 'Adding…' : 'Add & install →'}
           </button>
@@ -380,14 +380,14 @@ function AdapterNotInstalled({ pkg, requirementLine, onInstallLatest, onAddToReq
       <div className="flex flex-col gap-2">
         <button
           onClick={() => setAddMode(true)}
-          className="flex flex-col gap-0.5 px-4 py-3 rounded-lg border border-gray-700 bg-gray-800 hover:border-indigo-600 hover:bg-indigo-950/30 text-left transition-colors"
+          className="flex flex-col gap-0.5 px-4 py-3 rounded-lg border border-gray-700 bg-gray-800 hover:border-brand-600 hover:bg-brand-950/30 text-left transition-colors"
         >
           <span className="text-sm font-medium text-gray-100">Add to requirements file</span>
           <span className="text-xs text-gray-500">Appends a line to your global requirements.txt, then installs</span>
         </button>
         <button
           onClick={onInstallLatest}
-          className="flex flex-col gap-0.5 px-4 py-3 rounded-lg border border-gray-700 bg-gray-800 hover:border-indigo-600 hover:bg-indigo-950/30 text-left transition-colors"
+          className="flex flex-col gap-0.5 px-4 py-3 rounded-lg border border-gray-700 bg-gray-800 hover:border-brand-600 hover:bg-brand-950/30 text-left transition-colors"
         >
           <span className="text-sm font-medium text-gray-100">Install latest version</span>
           <span className="text-xs text-gray-500">Installs the latest <code className="font-mono">{pkg}</code> without version pinning</span>

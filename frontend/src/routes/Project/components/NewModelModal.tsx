@@ -71,7 +71,7 @@ export default function NewModelModal({ projectId, onClose, onCreated }: Props) 
               onChange={(e) => setName(e.target.value)}
               placeholder="my_model"
               autoFocus
-              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
             <p className="text-[11px] text-gray-600">
               Creates <code className="font-mono text-gray-500">models/{name || 'my_model'}.sql</code>
@@ -88,7 +88,7 @@ export default function NewModelModal({ projectId, onClose, onCreated }: Props) 
               onChange={(e) => setSql(e.target.value)}
               placeholder="select&#10;    1 as id"
               rows={5}
-              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 placeholder-gray-600 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 resize-none"
+              className="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 placeholder-gray-600 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500 resize-none"
             />
           </div>
 
@@ -109,7 +109,7 @@ export default function NewModelModal({ projectId, onClose, onCreated }: Props) 
             <button
               type="submit"
               disabled={loading}
-              className="px-4 py-1.5 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition-colors disabled:opacity-50"
+              className="px-4 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors disabled:opacity-50"
             >
               {loading ? 'Creating…' : 'Create model'}
             </button>

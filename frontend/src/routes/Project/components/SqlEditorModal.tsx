@@ -76,7 +76,7 @@ export default function SqlEditorModal({ projectId, uniqueId, onClose }: Props) 
             {data?.path ?? uniqueId}
           </span>
           {isDirty && (
-            <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 shrink-0" title="Unsaved changes" />
+            <span className="w-1.5 h-1.5 rounded-full bg-brand-400 shrink-0" title="Unsaved changes" />
           )}
           <span className="text-[10px] text-gray-600 uppercase tracking-wider shrink-0">
             {language}
@@ -90,7 +90,7 @@ export default function SqlEditorModal({ projectId, uniqueId, onClose }: Props) 
           <button
             onClick={handleSave}
             disabled={saving || isLoading || !isDirty}
-            className="px-3 py-1.5 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white disabled:opacity-40 transition-colors"
+            className="px-3 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-40 transition-colors"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>

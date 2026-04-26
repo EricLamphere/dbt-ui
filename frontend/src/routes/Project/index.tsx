@@ -475,7 +475,7 @@ function AppPickerModal({
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search apps…"
-            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-xs text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
         </div>
         <div className="overflow-auto flex-1">
