@@ -16,7 +16,7 @@ interface SingleTerminalProps {
   active: boolean;
 }
 
-const TERM_THEME = {
+const TERM_THEME_DARK = {
   background: '#0a0a0f',
   foreground: '#d4d4d8',
   cursor: '#a78bfa',
@@ -40,6 +40,34 @@ const TERM_THEME = {
   brightWhite: '#ffffff',
 };
 
+const TERM_THEME_LIGHT = {
+  background: '#ffffff',
+  foreground: '#1e293b',
+  cursor: '#0f766e',
+  cursorAccent: '#ffffff',
+  selectionBackground: '#cbd5e1aa',
+  black: '#1e293b',
+  red: '#b91c1c',
+  green: '#15803d',
+  yellow: '#92400e',
+  blue: '#1d4ed8',
+  magenta: '#7c3aed',
+  cyan: '#0f766e',
+  white: '#475569',
+  brightBlack: '#64748b',
+  brightRed: '#dc2626',
+  brightGreen: '#16a34a',
+  brightYellow: '#b45309',
+  brightBlue: '#2563eb',
+  brightMagenta: '#7c3aed',
+  brightCyan: '#0d9488',
+  brightWhite: '#0f172a',
+};
+
+function getTermTheme() {
+  return document.documentElement.dataset.theme === 'light' ? TERM_THEME_LIGHT : TERM_THEME_DARK;
+}
+
 // A single persistent terminal instance. Stays mounted even when not active (display:none).
 export function SingleTerminal({ instanceId: _instanceId, projectPath, active }: SingleTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,7 +83,7 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
     if (!container) return;
 
     const term = new Terminal({
-      theme: TERM_THEME,
+      theme: getTermTheme(),
       fontSize: 13,
       fontFamily: '"SF Mono", "JetBrains Mono", Menlo, Monaco, "Courier New", monospace',
       cursorBlink: true,
@@ -173,7 +201,7 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
   };
 
   return (
-    <div className="flex flex-col w-full h-full bg-[#0a0a0f]">
+    <div className="flex flex-col w-full h-full bg-surface-panel">
       {dead && (
         <div className="flex items-center justify-between px-3 py-1 bg-gray-900 border-b border-gray-800 shrink-0">
           <span className="text-xs text-gray-500">Process exited</span>

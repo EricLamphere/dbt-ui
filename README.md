@@ -9,7 +9,7 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 ## Features
 
 - **Project discovery** — scans a directory for `dbt_project.yml` files and lists all projects; rescan on demand
-- **Interactive DAG** — dependency graph with live status badges, dbt-style selector syntax (`+model`, `tag:x`), upstream/downstream traversal, and real-time status updates while models run
+- **Interactive functional DAG** — dependency graph with live status badges, dbt-style selector syntax (`+model`, `tag:x`), upstream/downstream traversal, and real-time status updates while models run. Multi-select nodes to run, build, and test multiple models at once
 - **Run / build / test** — trigger any dbt command from the side panel with upstream/downstream/full selector support; logs stream live
 - **Docs browser** — native dbt docs viewer with searchable column list and cross-navigation to the DAG and file editor
 - **File explorer & SQL editor** — browse your project tree and edit model SQL, YAML, and config files in-browser with Monaco (the VS Code editor engine)
@@ -171,7 +171,8 @@ Per-project settings (stored in `project_env_vars`, injected into every dbt subp
 
 ![Docs Model](img/docs_model_terminal.png)
 
-
+#### Light Theme
+![Light Theme](img/light_theme.png)
 
 
 

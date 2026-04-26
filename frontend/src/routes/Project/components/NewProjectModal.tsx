@@ -77,12 +77,18 @@ export default function NewProjectModal({ onClose }: Props) {
     if (step !== 'terminal') return;
     let cancelled = false;
 
+    const isDark = document.documentElement.dataset.theme !== 'light';
     const term = new Terminal({
-      theme: {
+      theme: isDark ? {
         background: '#030712',
         foreground: '#e5e7eb',
-        cursor: '#6366f1',
+        cursor: '#a78bfa',
         selectionBackground: '#374151',
+      } : {
+        background: '#ffffff',
+        foreground: '#1e293b',
+        cursor: '#0f766e',
+        selectionBackground: '#cbd5e1aa',
       },
       fontSize: 13,
       fontFamily: 'Menlo, Monaco, "Courier New", monospace',
@@ -299,7 +305,7 @@ export default function NewProjectModal({ onClose }: Props) {
         {/* Step 3 — terminal */}
         {step === 'terminal' && (
           <>
-            <div className="flex-1 min-h-0 bg-[#030712] p-1">
+            <div className="flex-1 min-h-0 bg-surface-panel p-1">
               <div ref={termRef} className="w-full h-full" />
             </div>
 
