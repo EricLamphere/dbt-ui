@@ -117,19 +117,6 @@ export interface EnvVarDto {
   value: string;
 }
 
-export interface ProfileVarDto {
-  key: string;
-  value: string;
-}
-
-export interface ProfileDto {
-  id: number;
-  name: string;
-  is_default: boolean;
-  is_active: boolean;
-  vars: ProfileVarDto[];
-}
-
 export interface GlobalProfileVarDto {
   key: string;
   value: string;
@@ -343,28 +330,6 @@ export const api = {
       post<{ ok: boolean }>('/init/global-setup/cancel'),
   },
   profiles: {
-    list: (projectId: number) =>
-      get<ProfileDto[]>(`/projects/${projectId}/profiles`),
-    create: (projectId: number, name: string) =>
-      post<ProfileDto>(`/projects/${projectId}/profiles`, { name }),
-    rename: (projectId: number, profileId: number, name: string) =>
-      request<ProfileDto>(`/projects/${projectId}/profiles/${profileId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ name }),
-      }),
-    delete: (projectId: number, profileId: number) =>
-      request<void>(`/projects/${projectId}/profiles/${profileId}`, { method: 'DELETE' }),
-    setVar: (projectId: number, profileId: number, key: string, value: string) =>
-      request<ProfileVarDto>(`/projects/${projectId}/profiles/${profileId}/vars/${encodeURIComponent(key)}`, {
-        method: 'PUT',
-        body: JSON.stringify({ key, value }),
-      }),
-    deleteVar: (projectId: number, profileId: number, key: string) =>
-      request<void>(`/projects/${projectId}/profiles/${profileId}/vars/${encodeURIComponent(key)}`, { method: 'DELETE' }),
-    activate: (projectId: number, profileId: number) =>
-      post<ProfileDto>(`/projects/${projectId}/profiles/${profileId}/activate`),
-    deactivate: (projectId: number, profileId: number) =>
-      post<ProfileDto>(`/projects/${projectId}/profiles/${profileId}/deactivate`),
     dbtTargets: (projectId: number) =>
       get<DbtTargetsDto>(`/projects/${projectId}/dbt-targets`),
     getDbtTarget: (projectId: number) =>
@@ -398,13 +363,21 @@ export const api = {
       put<GlobalProfileVarDto>(`/global-profiles/${id}/vars/${encodeURIComponent(key)}`, { value }),
     deleteVar: (id: number, key: string) =>
       request<void>(`/global-profiles/${id}/vars/${encodeURIComponent(key)}`, { method: 'DELETE' }),
-    importIntoProject: (projectId: number, globalProfileId: number, name: string) =>
-      post<ProfileDto>(`/projects/${projectId}/profiles/import-global`, { global_profile_id: globalProfileId, name }),
+    getActiveForProject: (projectId: number) =>
+      get<{ profile_id: number | null }>(`/projects/${projectId}/active-global-profile`),
+    setActiveForProject: (projectId: number, profileId: number) =>
+      put<{ profile_id: number }>(`/projects/${projectId}/active-global-profile`, { profile_id: profileId }),
+    clearActiveForProject: (projectId: number) =>
+      del<void>(`/projects/${projectId}/active-global-profile`),
   },
   settings: {
-    get: () => get<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; configured: boolean }>('/settings'),
-    update: (body: { dbt_projects_path?: string; data_dir?: string; log_level?: string; global_requirements_path?: string }) =>
-      put<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; configured: boolean }>('/settings', body),
+    get: () => get<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; theme: string | null; configured: boolean }>('/settings'),
+    update: (body: { dbt_projects_path?: string; data_dir?: string; log_level?: string; global_requirements_path?: string; theme?: string }) =>
+      put<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; theme: string | null; configured: boolean }>('/settings', body),
+  },
+  requirementsFile: {
+    get: () => get<{ content: string }>('/settings/requirements-file'),
+    put: (content: string) => put<{ content: string }>('/settings/requirements-file', { content }),
   },
   logs: {
     projectLogs: (projectId: number, tail = 500) =>

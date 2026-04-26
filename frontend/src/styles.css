@@ -2,11 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
+:root, html[data-theme="dark"] {
   /* Surface layers */
   --bg-app:      26  29  33;   /* #1a1d21 — darkest layer */
   --bg-panel:    34  38  43;   /* #22262b — panels, sidebars */
   --bg-elevated: 42  47  53;   /* #2a2f35 — cards, dropdowns */
+
+  /* Semantic text/border tokens */
+  --text-primary:   241 245 249;  /* slate-100 */
+  --text-secondary: 156 163 175;  /* gray-400 */
+  --text-muted:      75  85  99;  /* gray-600 */
+  --border-default:  31  41  55;  /* gray-800 */
+
+  /* Gray scale — dark theme (light grays = readable on dark bg) */
+  --gray-100: 243 244 246;
+  --gray-200: 229 231 235;
+  --gray-300: 209 213 219;
+  --gray-400: 156 163 175;
+  --gray-500: 107 114 128;
+  --gray-600:  75  85  99;
+  --gray-700:  55  65  81;
+  --gray-800:  31  41  55;
+  --gray-900:  17  24  39;
 
   /* Teal accent ramp */
   --brand-50:  240 253 250;
@@ -22,6 +39,37 @@
   --brand-950: 4   47  46;
 }
 
+html[data-theme="light"] {
+  /* Surfaces — panel is white so it pops against the blue-gray app bg */
+  --bg-app:      242 244 247;
+  --bg-panel:    255 255 255;
+  --bg-elevated: 248 250 252;
+
+  --text-primary:    9  14  25;
+  --text-secondary:  30  41  59;
+  --text-muted:     71  85 105;
+  --border-default: 209 213 219;  /* gray-300 — visible but not heavy */
+
+  /* Gray scale — dark values so all text classes read on light bg */
+  --gray-100:   9  14  25;  /* near-black — headings, labels */
+  --gray-200:  17  24  39;  /* very dark */
+  --gray-300:  30  41  59;  /* dark */
+  --gray-400:  51  65  85;  /* dark-mid */
+  --gray-500:  71  85 105;  /* mid — muted text, icons */
+  --gray-600: 107 114 128;  /* mid-light — placeholders, hints */
+  --gray-700: 148 163 184;  /* light — borders */
+  --gray-800: 203 213 225;  /* very light — dividers */
+  --gray-900: 226 232 240;  /* near-white — faint backgrounds */
+
+  /* Brand teal — remapped to dark teal for legibility on light bg.
+     brand-300/400 are used for nav active text, links, headers.
+     teal-700 (#0f766e) = 5.47:1 contrast on white — passes WCAG AA. */
+  --brand-300:  15 118 110;  /* teal-700 — primary accent text */
+  --brand-400:  13 148 136;  /* teal-600 — interactive highlights */
+  --brand-500:  17  94  89;  /* teal-800 — hover states */
+  --brand-600:  19  78  74;  /* teal-900 — pressed/active */
+}
+
 @layer base {
   html {
     font-size: 17px;
@@ -33,7 +81,8 @@
 
   body {
     background-color: rgb(var(--bg-app));
-    @apply text-gray-100 font-sans antialiased;
+    color: rgb(var(--text-primary));
+    @apply font-sans antialiased;
     margin: 0;
   }
 

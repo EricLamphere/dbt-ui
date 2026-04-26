@@ -14,9 +14,15 @@ const PLATFORM_ICONS: Record<string, string> = {
 function ProjectSelectors({ projectId }: { projectId: number }) {
   const qc = useQueryClient();
 
-  const { data: profiles } = useQuery({
-    queryKey: ['profiles', projectId],
-    queryFn: () => api.profiles.list(projectId),
+  const { data: globalProfiles } = useQuery({
+    queryKey: ['global-profiles'],
+    queryFn: () => api.globalProfiles.list(),
+    refetchInterval: false,
+  });
+
+  const { data: activeProfileData } = useQuery({
+    queryKey: ['active-global-profile', projectId],
+    queryFn: () => api.globalProfiles.getActiveForProject(projectId),
     enabled: !!projectId,
     refetchInterval: false,
   });
@@ -35,18 +41,15 @@ function ProjectSelectors({ projectId }: { projectId: number }) {
     refetchInterval: false,
   });
 
-  const activeProfile = profiles?.find((p) => p.is_active);
   const activeTarget = activeTargetData?.target ?? targetsData?.default_target ?? null;
 
   const handleProfileChange = async (value: string) => {
     if (value === '') {
-      if (activeProfile) {
-        await api.profiles.deactivate(projectId, activeProfile.id);
-      }
+      await api.globalProfiles.clearActiveForProject(projectId);
     } else {
-      await api.profiles.activate(projectId, Number(value));
+      await api.globalProfiles.setActiveForProject(projectId, Number(value));
     }
-    qc.invalidateQueries({ queryKey: ['profiles', projectId] });
+    qc.invalidateQueries({ queryKey: ['active-global-profile', projectId] });
   };
 
   const handleTargetChange = async (target: string) => {
@@ -54,20 +57,20 @@ function ProjectSelectors({ projectId }: { projectId: number }) {
     qc.invalidateQueries({ queryKey: ['dbt-target', projectId] });
   };
 
-  if (!profiles?.length && !targetsData?.targets.length) return null;
+  if (!globalProfiles?.length && !targetsData?.targets.length) return null;
 
   return (
     <div className="flex items-center gap-2">
-      {profiles && profiles.length > 0 && (
+      {globalProfiles && globalProfiles.length > 0 && (
         <div className="flex items-center gap-1.5">
           <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium">Profile</span>
           <select
-            value={activeProfile?.id ?? ''}
+            value={activeProfileData?.profile_id ?? ''}
             onChange={(e) => handleProfileChange(e.target.value)}
             className="bg-surface-elevated border border-gray-700 rounded px-2 py-1 text-xs text-gray-300 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
           >
-            <option value="">Select a profile</option>
-            {profiles.map((p) => (
+            <option value="">None</option>
+            {globalProfiles.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
@@ -151,6 +154,7 @@ export default function Header() {
           <>
             <button
               onClick={() => setGlobalSetupOpen(true)}
+              title="Installs the global requirements.txt file"
               className="px-3 py-1.5 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
             >
               Run global setup

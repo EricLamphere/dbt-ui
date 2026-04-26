@@ -5,10 +5,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
 from app.db.engine import get_session
-from app.db.models import EnvProfile, GlobalProfile, ProfileEnvVar, Project, ProjectEnvVar
+from app.db.models import GlobalProfile, Project, ProjectEnvVar
 from app.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -16,266 +14,92 @@ log = get_logger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["env"])
 
 
-# ---- DTOs ----
+# ---- active global profile endpoints ----
 
-class ProfileVarDto(BaseModel):
-    key: str
-    value: str
+_ACTIVE_GLOBAL_PROFILE_KEY = "active_global_profile_id"
 
 
-class ProfileDto(BaseModel):
-    id: int
-    name: str
-    is_default: bool
-    is_active: bool
-    vars: list[ProfileVarDto]
+class ActiveGlobalProfileDto(BaseModel):
+    profile_id: int | None
 
 
-class CreateProfileDto(BaseModel):
-    name: str
+class SetActiveGlobalProfileDto(BaseModel):
+    profile_id: int
 
 
-class RenameProfileDto(BaseModel):
-    name: str | None = None
-
-
-# ---- helpers ----
-
-
-def _profile_to_dto(profile: EnvProfile) -> ProfileDto:
-    return ProfileDto(
-        id=profile.id,
-        name=profile.name,
-        is_default=profile.is_default,
-        is_active=profile.is_active,
-        vars=[ProfileVarDto(key=v.key, value=v.value) for v in profile.vars],
-    )
-
-
-async def _get_profile_with_vars(session: AsyncSession, profile_id: int) -> EnvProfile | None:
-    result = await session.execute(
-        select(EnvProfile)
-        .where(EnvProfile.id == profile_id)
-        .options(selectinload(EnvProfile.vars))
-    )
-    return result.scalar_one_or_none()
-
-
-# ---- endpoints ----
-
-@router.get("/{project_id}/profiles", response_model=list[ProfileDto])
-async def get_profiles(
+@router.get("/{project_id}/active-global-profile", response_model=ActiveGlobalProfileDto)
+async def get_active_global_profile(
     project_id: int, session: AsyncSession = Depends(get_session)
-) -> list[ProfileDto]:
+) -> ActiveGlobalProfileDto:
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
     result = await session.execute(
-        select(EnvProfile)
-        .where(EnvProfile.project_id == project_id)
-        .order_by(EnvProfile.id)
-        .options(selectinload(EnvProfile.vars))
-    )
-    profiles = result.scalars().unique().all()
-    return [_profile_to_dto(p) for p in profiles]
-
-
-@router.post("/{project_id}/profiles", response_model=ProfileDto, status_code=201)
-async def create_profile(
-    project_id: int,
-    dto: CreateProfileDto,
-    session: AsyncSession = Depends(get_session),
-) -> ProfileDto:
-    project = await session.get(Project, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="project not found")
-    name = dto.name.strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name cannot be empty")
-    # Check uniqueness
-    result = await session.execute(
-        select(EnvProfile).where(EnvProfile.project_id == project_id, EnvProfile.name == name)
-    )
-    if result.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=409, detail=f"profile '{name}' already exists")
-    profile = EnvProfile(project_id=project_id, name=name, is_default=False, is_active=False)
-    session.add(profile)
-    await session.commit()
-    loaded = await _get_profile_with_vars(session, profile.id)
-    return _profile_to_dto(loaded)  # type: ignore[arg-type]
-
-
-@router.patch("/{project_id}/profiles/{profile_id}", response_model=ProfileDto)
-async def update_profile(
-    project_id: int,
-    profile_id: int,
-    dto: RenameProfileDto,
-    session: AsyncSession = Depends(get_session),
-) -> ProfileDto:
-    profile = await session.get(EnvProfile, profile_id)
-    if profile is None or profile.project_id != project_id:
-        raise HTTPException(status_code=404, detail="profile not found")
-    if dto.name is not None:
-        name = dto.name.strip()
-        if not name:
-            raise HTTPException(status_code=422, detail="name cannot be empty")
-        profile.name = name
-    await session.commit()
-    loaded = await _get_profile_with_vars(session, profile.id)
-    return _profile_to_dto(loaded)  # type: ignore[arg-type]
-
-
-@router.delete("/{project_id}/profiles/{profile_id}", status_code=204)
-async def delete_profile(
-    project_id: int,
-    profile_id: int,
-    session: AsyncSession = Depends(get_session),
-) -> None:
-    profile = await session.get(EnvProfile, profile_id)
-    if profile is None or profile.project_id != project_id:
-        raise HTTPException(status_code=404, detail="profile not found")
-    await session.delete(profile)
-    await session.commit()
-
-
-@router.put("/{project_id}/profiles/{profile_id}/vars/{key}", response_model=ProfileVarDto)
-async def put_profile_var(
-    project_id: int,
-    profile_id: int,
-    key: str,
-    dto: ProfileVarDto,
-    session: AsyncSession = Depends(get_session),
-) -> ProfileVarDto:
-    profile = await session.get(EnvProfile, profile_id)
-    if profile is None or profile.project_id != project_id:
-        raise HTTPException(status_code=404, detail="profile not found")
-    result = await session.execute(
-        select(ProfileEnvVar).where(
-            ProfileEnvVar.profile_id == profile_id, ProfileEnvVar.key == key
+        select(ProjectEnvVar).where(
+            ProjectEnvVar.project_id == project_id,
+            ProjectEnvVar.key == _ACTIVE_GLOBAL_PROFILE_KEY,
         )
     )
     row = result.scalar_one_or_none()
     if row is None:
-        row = ProfileEnvVar(profile_id=profile_id, key=dto.key, value=dto.value)
+        return ActiveGlobalProfileDto(profile_id=None)
+    try:
+        return ActiveGlobalProfileDto(profile_id=int(row.value))
+    except (ValueError, TypeError):
+        return ActiveGlobalProfileDto(profile_id=None)
+
+
+@router.put("/{project_id}/active-global-profile", response_model=ActiveGlobalProfileDto)
+async def set_active_global_profile(
+    project_id: int,
+    dto: SetActiveGlobalProfileDto,
+    session: AsyncSession = Depends(get_session),
+) -> ActiveGlobalProfileDto:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    # Verify the global profile exists
+    gp = await session.get(GlobalProfile, dto.profile_id)
+    if gp is None:
+        raise HTTPException(status_code=404, detail="global profile not found")
+    result = await session.execute(
+        select(ProjectEnvVar).where(
+            ProjectEnvVar.project_id == project_id,
+            ProjectEnvVar.key == _ACTIVE_GLOBAL_PROFILE_KEY,
+        )
+    )
+    row = result.scalar_one_or_none()
+    if row is None:
+        row = ProjectEnvVar(
+            project_id=project_id,
+            key=_ACTIVE_GLOBAL_PROFILE_KEY,
+            value=str(dto.profile_id),
+        )
         session.add(row)
     else:
-        row.key = dto.key
-        row.value = dto.value
+        row.value = str(dto.profile_id)
     await session.commit()
-    await session.refresh(row)
-    return ProfileVarDto(key=row.key, value=row.value)
+    return ActiveGlobalProfileDto(profile_id=dto.profile_id)
 
 
-@router.delete("/{project_id}/profiles/{profile_id}/vars/{key}", status_code=204)
-async def delete_profile_var(
+@router.delete("/{project_id}/active-global-profile", status_code=204)
+async def clear_active_global_profile(
     project_id: int,
-    profile_id: int,
-    key: str,
     session: AsyncSession = Depends(get_session),
 ) -> None:
-    profile = await session.get(EnvProfile, profile_id)
-    if profile is None or profile.project_id != project_id:
-        raise HTTPException(status_code=404, detail="profile not found")
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
     result = await session.execute(
-        select(ProfileEnvVar).where(
-            ProfileEnvVar.profile_id == profile_id, ProfileEnvVar.key == key
+        select(ProjectEnvVar).where(
+            ProjectEnvVar.project_id == project_id,
+            ProjectEnvVar.key == _ACTIVE_GLOBAL_PROFILE_KEY,
         )
     )
     row = result.scalar_one_or_none()
     if row is not None:
         await session.delete(row)
         await session.commit()
-
-
-@router.post("/{project_id}/profiles/{profile_id}/deactivate", response_model=ProfileDto)
-async def deactivate_profile(
-    project_id: int,
-    profile_id: int,
-    session: AsyncSession = Depends(get_session),
-) -> ProfileDto:
-    project = await session.get(Project, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="project not found")
-    profile = await session.get(EnvProfile, profile_id)
-    if profile is None or profile.project_id != project_id:
-        raise HTTPException(status_code=404, detail="profile not found")
-    profile.is_active = False
-    await session.commit()
-    loaded = await _get_profile_with_vars(session, profile_id)
-    return _profile_to_dto(loaded)  # type: ignore[arg-type]
-
-
-@router.post("/{project_id}/profiles/{profile_id}/activate", response_model=ProfileDto)
-async def activate_profile(
-    project_id: int,
-    profile_id: int,
-    session: AsyncSession = Depends(get_session),
-) -> ProfileDto:
-    project = await session.get(Project, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="project not found")
-    profile = await session.get(EnvProfile, profile_id)
-    if profile is None or profile.project_id != project_id:
-        raise HTTPException(status_code=404, detail="profile not found")
-
-    # Deactivate all, activate this one
-    result = await session.execute(
-        select(EnvProfile).where(EnvProfile.project_id == project_id)
-    )
-    for p in result.scalars().all():
-        p.is_active = p.id == profile_id
-    await session.commit()
-    loaded = await _get_profile_with_vars(session, profile_id)
-    return _profile_to_dto(loaded)  # type: ignore[arg-type]
-
-
-# ---- import global profile ----
-
-class ImportGlobalProfileDto(BaseModel):
-    global_profile_id: int
-    name: str | None = None  # defaults to the global profile's name
-
-
-@router.post("/{project_id}/profiles/import-global", response_model=ProfileDto, status_code=201)
-async def import_global_profile(
-    project_id: int,
-    dto: ImportGlobalProfileDto,
-    session: AsyncSession = Depends(get_session),
-) -> ProfileDto:
-    """Copy a global profile's vars into a new per-project profile."""
-    project = await session.get(Project, project_id)
-    if project is None:
-        raise HTTPException(status_code=404, detail="project not found")
-
-    global_profile = await session.execute(
-        select(GlobalProfile)
-        .where(GlobalProfile.id == dto.global_profile_id)
-        .options(selectinload(GlobalProfile.vars))
-    )
-    gp = global_profile.scalar_one_or_none()
-    if gp is None:
-        raise HTTPException(status_code=404, detail="global profile not found")
-
-    name = (dto.name or gp.name).strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="name cannot be empty")
-
-    existing = await session.execute(
-        select(EnvProfile).where(EnvProfile.project_id == project_id, EnvProfile.name == name)
-    )
-    if existing.scalar_one_or_none() is not None:
-        raise HTTPException(status_code=409, detail=f"profile '{name}' already exists")
-
-    profile = EnvProfile(project_id=project_id, name=name, is_default=False, is_active=False)
-    session.add(profile)
-    await session.flush()  # get profile.id before adding vars
-
-    for v in gp.vars:
-        session.add(ProfileEnvVar(profile_id=profile.id, key=v.key, value=v.value))
-
-    await session.commit()
-    loaded = await _get_profile_with_vars(session, profile.id)
-    return _profile_to_dto(loaded)  # type: ignore[arg-type]
 
 
 # ---- dbt target endpoints ----

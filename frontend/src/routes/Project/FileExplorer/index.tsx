@@ -159,6 +159,49 @@ export default function FileExplorerPage() {
     }
   }, [openFile, SESSION_KEY]);
 
+  // Expand all ancestor directories of a file path so the file is visible in the tree.
+  // Fetches all levels upfront, then applies a single setTree update to avoid stale-closure issues.
+  const expandToPath = useCallback(async (filePath: string) => {
+    const parts = filePath.split('/');
+    const dirSegments = parts.slice(0, -1);
+    if (dirSegments.length === 0) return;
+
+    // Fetch children for every ancestor directory in parallel
+    const childrenByPath: Record<string, TreeNode[]> = {};
+    await Promise.all(
+      dirSegments.map(async (_, i) => {
+        const dirPath = dirSegments.slice(0, i + 1).join('/');
+        childrenByPath[dirPath] = (await api.files.list(id, dirPath)) as TreeNode[];
+      })
+    );
+
+    // Single tree update: walk down by segment name, expanding and injecting fetched children
+    setTree((prev) => {
+      const expand = (nodes: TreeNode[], remaining: string[], depth: number): TreeNode[] =>
+        nodes.map((n) => {
+          if (!n.is_dir || n.name !== remaining[0]) return n;
+          const dirPath = dirSegments.slice(0, depth + 1).join('/');
+          const fetchedChildren = childrenByPath[dirPath] ?? n.children ?? [];
+          if (remaining.length === 1) {
+            return { ...n, expanded: true, children: fetchedChildren };
+          }
+          return {
+            ...n,
+            expanded: true,
+            children: expand(fetchedChildren, remaining.slice(1), depth + 1),
+          };
+        });
+      return expand(prev, dirSegments, 0);
+    });
+
+    // Persist all expanded directory paths
+    const expandedPaths = getExpandedPaths();
+    dirSegments.forEach((_, i) => {
+      expandedPaths.add(dirSegments.slice(0, i + 1).join('/'));
+    });
+    saveExpandedPaths(expandedPaths);
+  }, [id, getExpandedPaths, saveExpandedPaths]);
+
   // Deep-link: ?model=<unique_id> — open the corresponding file
   // Also restore last open file from sessionStorage (if no deep-link)
   const deepLinkHandled = useRef(false);
@@ -171,6 +214,7 @@ export default function FileExplorerPage() {
     if (modelParam) {
       const node = graph.nodes.find((n) => n.unique_id === modelParam);
       if (node?.original_file_path) {
+        expandToPath(node.original_file_path);
         openFileNode(node.original_file_path);
         return;
       }
@@ -181,7 +225,7 @@ export default function FileExplorerPage() {
     if (savedPath) {
       openFileNode(savedPath);
     }
-  }, [searchParams, graph, openFileNode, SESSION_KEY]);
+  }, [searchParams, graph, openFileNode, expandToPath, SESSION_KEY]);
 
   const loadChildren = useCallback(async (node: TreeNode, pathParts: string[]) => {
     if (!node.is_dir) return;

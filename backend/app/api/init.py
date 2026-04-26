@@ -1,5 +1,4 @@
 import asyncio
-import importlib.metadata
 import os
 import re
 import shlex
@@ -12,7 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import get_session
-from app.db.models import EnvProfile, InitStep, Project, ProjectEnvVar
+from app.db.models import GlobalProfile, InitStep, Project, ProjectEnvVar
 from app.dbt.init_scripts import BASE_STEPS, list_scripts, save_script, delete_script
 from app.dbt.venv import venv_dbt, venv_pip, venv_python
 from app.dbt.interactive import manager as init_manager
@@ -483,8 +482,11 @@ async def open_project(
     return {"accepted": True}
 
 
+_ACTIVE_GLOBAL_PROFILE_KEY = "active_global_profile_id"
+
+
 async def load_project_env(project_id: int) -> dict[str, str]:
-    """Build an env dict from the current process env plus project + active-profile vars."""
+    """Build an env dict from the current process env plus project + active-global-profile vars."""
     from app.db.engine import SessionLocal
     from sqlalchemy.orm import selectinload
     env = os.environ.copy()
@@ -494,15 +496,28 @@ async def load_project_env(project_id: int) -> dict[str, str]:
         )
         for ev in ev_result.scalars().all():
             env[ev.key] = ev.value
-        active_result = await _ev_session.execute(
-            select(EnvProfile)
-            .where(EnvProfile.project_id == project_id, EnvProfile.is_active.is_(True))
-            .options(selectinload(EnvProfile.vars))
+        # Apply active global profile vars (overrides project env vars)
+        active_id_row = await _ev_session.execute(
+            select(ProjectEnvVar).where(
+                ProjectEnvVar.project_id == project_id,
+                ProjectEnvVar.key == _ACTIVE_GLOBAL_PROFILE_KEY,
+            )
         )
-        active_profile = active_result.scalar_one_or_none()
-        if active_profile is not None:
-            for pv in active_profile.vars:
-                env[pv.key] = pv.value
+        active_id_var = active_id_row.scalar_one_or_none()
+        if active_id_var is not None:
+            try:
+                global_profile_id = int(active_id_var.value)
+                gp_result = await _ev_session.execute(
+                    select(GlobalProfile)
+                    .where(GlobalProfile.id == global_profile_id)
+                    .options(selectinload(GlobalProfile.vars))
+                )
+                gp = gp_result.scalar_one_or_none()
+                if gp is not None:
+                    for pv in gp.vars:
+                        env[pv.key] = pv.value
+            except (ValueError, TypeError):
+                pass
     return env
 
 

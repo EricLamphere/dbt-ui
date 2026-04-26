@@ -314,7 +314,7 @@ export default function NewProjectModal({ onClose }: Props) {
                   onClick={returnCode === 0 ? handleDone : handleClose}
                   className="px-3 py-1.5 text-xs rounded bg-indigo-600 hover:bg-indigo-500 text-white transition-colors"
                 >
-                  Done
+                  Continue →
                 </button>
               </div>
             )}

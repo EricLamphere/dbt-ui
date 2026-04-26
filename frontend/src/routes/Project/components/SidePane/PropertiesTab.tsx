@@ -284,7 +284,7 @@ export function PropertiesTab({
             onClick={onNavigateToFiles}
             className="w-full py-2 text-sm rounded bg-brand-900/40 hover:bg-brand-800/60 text-brand-300 border border-brand-800 transition-colors"
           >
-            Edit in Files
+            Open in Files
           </button>
         )}
         {page === 'files' && (

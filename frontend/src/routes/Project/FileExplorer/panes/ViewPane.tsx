@@ -3,6 +3,7 @@ import Editor from '@monaco-editor/react';
 import { RotateCw } from 'lucide-react';
 import { format as sqlFormat } from 'sql-formatter';
 import { api, type FileContentDto } from '../../../../lib/api';
+import { useTheme } from '../../../../lib/useTheme';
 
 type ViewTab = 'code' | 'compiled' | 'preview';
 
@@ -54,6 +55,9 @@ export function ViewPane({
   projectId, openFile, edited, onEdit, onSave, onDelete,
   saving, saveStatus, saveError, isDirty, modelUid,
 }: ViewPaneProps) {
+  const theme = useTheme();
+  const monacoTheme = theme === 'light' ? 'vs-light' : 'vs-dark';
+
   const [activeTab, setActiveTab] = useState<ViewTab>('code');
   const [compiledSql, setCompiledSql] = useState<string | null>(null);
   const [compiledLoading, setCompiledLoading] = useState(false);
@@ -219,7 +223,7 @@ export function ViewPane({
             language={openFile.language}
             value={edited ?? openFile.content}
             onChange={(v) => onEdit(v ?? '')}
-            theme="vs-dark"
+            theme={monacoTheme}
             options={{
               fontSize: 13,
               fontFamily: 'Menlo, Monaco, "Courier New", monospace',
@@ -256,7 +260,7 @@ export function ViewPane({
                 key={`compiled-${openFile.path}`}
                 language="sql"
                 value={compiledSql}
-                theme="vs-dark"
+                theme={monacoTheme}
                 options={{
                   fontSize: 13,
                   fontFamily: 'Menlo, Monaco, "Courier New", monospace',

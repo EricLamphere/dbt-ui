@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Editor from '@monaco-editor/react';
 import { api } from '../../../lib/api';
+import { useTheme } from '../../../lib/useTheme';
 
 interface Props {
   projectId: number;
@@ -21,6 +22,7 @@ function detectLanguage(path: string): string {
 
 export default function SqlEditorModal({ projectId, uniqueId, onClose }: Props) {
   const qc = useQueryClient();
+  const monacoTheme = useTheme() === 'light' ? 'vs-light' : 'vs-dark';
   const [edited, setEdited] = useState<string | undefined>(undefined);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -118,7 +120,7 @@ export default function SqlEditorModal({ projectId, uniqueId, onClose }: Props) 
             language={language}
             value={content}
             onChange={(v) => setEdited(v ?? '')}
-            theme="vs-dark"
+            theme={monacoTheme}
             options={{
               fontSize: 14,
               fontFamily: 'Menlo, Monaco, "Courier New", monospace',

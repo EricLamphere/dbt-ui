@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   RefreshCw, BookOpen, Search, ChevronRight, ChevronDown,
   Database, FileCode2, Layers, FlaskConical, Sprout, Wrench,
-  Copy, Check, Folder, FolderOpen, LayoutGrid, Package, ChevronsDownUp,
+  Copy, Check, Folder, FolderOpen, LayoutGrid, Package, ChevronsDownUp, Share2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { api, type DocsNodeDto, type DocsMacroDto } from '../../lib/api';
@@ -533,7 +533,7 @@ export default function DocsPage() {
             description={docsData?.project_description ?? ''}
           />
         )}
-        {selectedNode && <NodeDetail node={selectedNode} allNodes={nodeMap} />}
+        {selectedNode && <NodeDetail node={selectedNode} allNodes={nodeMap} projectId={id} />}
         {selectedMacro && <MacroDetail macro={selectedMacro} />}
         {!isProjectOverview && !selectedNode && !selectedMacro && (
           <div className="flex items-center justify-center h-full text-gray-600 text-sm select-none">
@@ -917,7 +917,8 @@ function ProjectOverview({ projectId, projectName, description }: {
 
 type NodeTab = 'details' | 'description' | 'columns' | 'referenced_by' | 'code';
 
-function NodeDetail({ node, allNodes }: { node: DocsNodeDto; allNodes: Map<string, DocsNodeDto> }) {
+function NodeDetail({ node, allNodes, projectId }: { node: DocsNodeDto; allNodes: Map<string, DocsNodeDto>; projectId: number }) {
+  const navigate = useNavigate();
   const [tab, setTab] = useState<NodeTab>('details');
   const [codeView, setCodeView] = useState<'source' | 'compiled'>('source');
   const [copied, setCopied] = useState(false);
@@ -943,12 +944,32 @@ function NodeDetail({ node, allNodes }: { node: DocsNodeDto; allNodes: Map<strin
 
   return (
     <div className="flex flex-col h-full">
-      <div className="px-8 pt-6 pb-0 shrink-0">
-        <div className="flex items-baseline gap-3 mb-1">
-          <h1 className="text-2xl font-semibold text-gray-100 font-mono">{node.name}</h1>
-          {node.catalog_type && <span className="text-sm text-gray-500">{node.catalog_type.toLowerCase()}</span>}
-          {!node.catalog_type && node.materialized && <span className="text-sm text-gray-500">{node.materialized}</span>}
+      <div className="px-8 pt-6 pb-0 shrink-0 flex items-start justify-between">
+        <div>
+          <div className="flex items-baseline gap-3 mb-1">
+            <h1 className="text-2xl font-semibold text-gray-100 font-mono">{node.name}</h1>
+            {node.catalog_type && <span className="text-sm text-gray-500">{node.catalog_type.toLowerCase()}</span>}
+            {!node.catalog_type && node.materialized && <span className="text-sm text-gray-500">{node.materialized}</span>}
+          </div>
         </div>
+        <div className="flex items-center gap-2 mt-1 shrink-0">
+          <button
+            onClick={() => navigate(`/projects/${projectId}/files?model=${encodeURIComponent(node.unique_id)}`)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded border border-gray-700 bg-surface-elevated hover:bg-gray-700 text-gray-300 transition-colors"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            Files
+          </button>
+          <button
+            onClick={() => navigate(`/projects/${projectId}/models?model=${encodeURIComponent(node.unique_id)}`)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded border border-gray-700 bg-surface-elevated hover:bg-gray-700 text-gray-300 transition-colors"
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            DAG
+          </button>
+        </div>
+      </div>
+      <div className="px-8 shrink-0">
         <div className="flex items-center gap-0 mt-4 border-b border-gray-800">
           {tabs.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)}

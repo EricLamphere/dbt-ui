@@ -123,16 +123,15 @@ export default function ModelsPage() {
     refetchInterval: false,
   });
 
-  // Deep-link: ?model=<unique_id> — pre-select model in SidePane on load
-  const deepLinkHandled = useRef(false);
+  // Pre-select model from ?model=<unique_id> query param.
+  // Runs whenever searchParams or graph changes so navigating here from another
+  // page (without unmounting) still selects the correct node.
+  const modelParam = searchParams.get('model');
   useEffect(() => {
-    if (deepLinkHandled.current || !graph) return;
-    const modelParam = searchParams.get('model');
-    if (!modelParam) return;
-    deepLinkHandled.current = true;
+    if (!graph || !modelParam) return;
     const node = graph.nodes.find((n) => n.unique_id === modelParam);
     if (node) setSelectedModel(node);
-  }, [graph, searchParams]);
+  }, [graph, modelParam]);
 
   // SSE — react to server events
   useProjectEvents(id, useCallback((event) => {

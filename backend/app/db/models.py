@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func, PrimaryKeyConstraint
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -63,35 +63,6 @@ class ModelStatus(Base):
         UniqueConstraint("project_id", "unique_id", name="uq_status_project_unique"),
     )
 
-
-class EnvProfile(Base):
-    __tablename__ = "env_profiles"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), index=True)
-    name: Mapped[str] = mapped_column(String(255))
-    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
-    is_active: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-    vars: Mapped[list["ProfileEnvVar"]] = relationship(
-        back_populates="profile", cascade="all, delete-orphan"
-    )
-
-    __table_args__ = (UniqueConstraint("project_id", "name", name="uq_env_profile_name"),)
-
-
-class ProfileEnvVar(Base):
-    __tablename__ = "profile_env_vars"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    profile_id: Mapped[int] = mapped_column(ForeignKey("env_profiles.id", ondelete="CASCADE"), index=True)
-    key: Mapped[str] = mapped_column(String(255))
-    value: Mapped[str] = mapped_column(Text, default="")
-
-    profile: Mapped[EnvProfile] = relationship(back_populates="vars")
-
-    __table_args__ = (UniqueConstraint("profile_id", "key", name="uq_profile_env_var_key"),)
 
 
 class ProjectEnvVar(Base):

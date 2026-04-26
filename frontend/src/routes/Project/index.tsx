@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import Editor from '@monaco-editor/react';
 import { api, type Project } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
+import { useTheme } from '../../lib/useTheme';
 
 const PLATFORM_ICONS: Record<string, string> = {
   postgres: '🐘', bigquery: '☁️', snowflake: '❄️', redshift: '🔴',
@@ -331,13 +332,14 @@ const FILE_TABS: { id: FileTab; label: string; field: keyof Project; language: s
 
 function YamlViewer({ content }: { content: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const monacoTheme = useTheme() === 'light' ? 'vs-light' : 'vs-dark';
 
   return (
     <div ref={containerRef} style={{ minHeight: 100 }}>
       <Editor
         language="yaml"
         value={content}
-        theme="vs-dark"
+        theme={monacoTheme}
         onMount={(editor) => {
           const applyHeight = () => {
             const h = editor.getContentHeight();

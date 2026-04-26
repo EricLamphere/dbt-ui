@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
 import './styles.css';
 
+const savedTheme = localStorage.getItem('dbt-ui-theme') ?? 'dark';
+document.documentElement.dataset.theme = savedTheme;
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: { staleTime: 30_000, retry: 1 },
