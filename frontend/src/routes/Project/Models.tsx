@@ -23,7 +23,7 @@ import ProjectNav from './components/ProjectNav';
 import { SidePane } from './components/SidePane';
 import DagFilterBar from './components/DagFilterBar';
 import { computeLayout } from './lib/layout';
-import { type FilterState, emptyFilter, applyFilter } from './lib/dagFilter';
+import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserializeFilter } from './lib/dagFilter';
 
 type LiveStatus = 'running' | 'success' | 'error' | 'warn';
 
@@ -89,7 +89,16 @@ export default function ModelsPage() {
   const [searchParams] = useSearchParams();
   const qc = useQueryClient();
 
-  const [filter, setFilter] = useState<FilterState>(emptyFilter());
+  const filterKey = `dag-filter-${id}`;
+  const [filter, setFilter] = useState<FilterState>(() => {
+    const saved = sessionStorage.getItem(filterKey);
+    return saved ? deserializeFilter(saved) : defaultFilter();
+  });
+
+  const handleFilterChange = useCallback((f: FilterState) => {
+    setFilter(f);
+    sessionStorage.setItem(filterKey, serializeFilter(f));
+  }, [filterKey]);
   const [selectedModel, setSelectedModel] = useState<ModelNode | null>(null);
   const [selectedModels, setSelectedModels] = useState<ModelNode[]>([]);
   const [newModelOpen, setNewModelOpen] = useState(false);
@@ -225,7 +234,7 @@ export default function ModelsPage() {
         <DagFilterBar
           graph={graph ?? null}
           filter={filter}
-          onChange={setFilter}
+          onChange={handleFilterChange}
           nodeCount={filteredGraph?.nodes.length ?? 0}
           compiling={compiling}
           onRefresh={handleRefreshDag}

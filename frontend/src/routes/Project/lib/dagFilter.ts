@@ -18,6 +18,16 @@ export function emptyFilter(): FilterState {
   };
 }
 
+export function defaultFilter(): FilterState {
+  return {
+    selector: '',
+    resourceTypes: new Set(['model']),
+    materializations: new Set(),
+    tags: new Set(),
+    statuses: new Set(),
+  };
+}
+
 export function isFilterActive(f: FilterState): boolean {
   return (
     f.selector.trim() !== '' ||
@@ -26,6 +36,32 @@ export function isFilterActive(f: FilterState): boolean {
     f.tags.size > 0 ||
     f.statuses.size > 0
   );
+}
+
+
+export function serializeFilter(f: FilterState): string {
+  return JSON.stringify({
+    selector: f.selector,
+    resourceTypes: [...f.resourceTypes],
+    materializations: [...f.materializations],
+    tags: [...f.tags],
+    statuses: [...f.statuses],
+  });
+}
+
+export function deserializeFilter(raw: string): FilterState {
+  try {
+    const obj = JSON.parse(raw);
+    return {
+      selector: obj.selector ?? '',
+      resourceTypes: new Set(obj.resourceTypes ?? []),
+      materializations: new Set(obj.materializations ?? []),
+      tags: new Set(obj.tags ?? []),
+      statuses: new Set(obj.statuses ?? []),
+    };
+  } catch {
+    return defaultFilter();
+  }
 }
 
 export interface AvailableFilters {

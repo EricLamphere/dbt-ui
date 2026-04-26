@@ -99,7 +99,7 @@ export default function DagFilterBar({
     [graph],
   );
 
-  const active = isFilterActive(filter);
+  const anyActive = isFilterActive(filter);
 
   const set = <K extends keyof FilterState>(key: K, value: FilterState[K]) =>
     onChange({ ...filter, [key]: value });
@@ -142,7 +142,7 @@ export default function DagFilterBar({
       />
 
       {/* Clear */}
-      {active && (
+      {anyActive && (
         <button
           onClick={() => onChange(emptyFilter())}
           className="flex items-center gap-1 px-2 py-1.5 text-xs rounded text-gray-400 hover:text-gray-200 hover:bg-gray-800 transition-colors"
