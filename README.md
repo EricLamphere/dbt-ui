@@ -171,7 +171,7 @@ Per-project settings (stored in `project_env_vars`, injected into every dbt subp
 ![Project Homepage](img/project_home.png)
 
 #### File Explorer
-![File Explorer](img/files_model.png)
+![File Explorer](img/files_model_exec_dag.png)
 
 #### DAG
 ![DAG](img/dag_logs.png)
@@ -179,7 +179,7 @@ Per-project settings (stored in `project_env_vars`, injected into every dbt subp
 #### Docs
 ![Docs Overview](img/docs_overview.png)
 
-![Docs Model](img/docs_model.png)
+![Docs Model](img/docs_model_terminal.png)
 
 
 
