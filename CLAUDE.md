@@ -300,6 +300,8 @@ Single test file: `cd backend && .venv/bin/pytest tests/test_x.py -xvs`
 - [ ] If event means stale data: `qc.invalidateQueries(...)` in the handler
 - [ ] Add typed API helper to `lib/api.ts` if new endpoint
 - [ ] Write backend test with `override_db` fixture (autouse — no declaration needed)
+- [ ] Update `docs/architecture.md` → API Routes and Key Flows if user-facing
+- [ ] Update `docs/how-to/run-models.md` if run/build/test controls changed
 
 ## Checklist: Adding a New Global Setting
 
@@ -311,6 +313,7 @@ Single test file: `cd backend && .venv/bin/pytest tests/test_x.py -xvs`
 - [ ] Call `_effective_workspace()` in `projects/service.py` to resolve final workspace path
 - [ ] Update frontend `api.settings.get()` type if response shape changed
 - [ ] Update `docs/architecture.md` → Configuration table and `README.md` → Environment Variables table
+- [ ] Update `docs/how-to/configure-environment.md` → Global settings section
 
 ## Checklist: Adding a New Terminal Feature
 
@@ -320,6 +323,7 @@ Single test file: `cd backend && .venv/bin/pytest tests/test_x.py -xvs`
 - [ ] Add `useTerminalEvents(sessionId, onEvent, onClose)` call in frontend component
 - [ ] Events: `terminal_output` (chunks), `terminal_finished`
 - [ ] TerminalPanel multi-instance tabs managed in BottomPane/index.tsx
+- [ ] Update `docs/how-to/use-terminal.md` if terminal behavior or UX changed
 
 ## Checklist: Adding dbt Target Support to a New Feature
 
@@ -328,3 +332,24 @@ Single test file: `cd backend && .venv/bin/pytest tests/test_x.py -xvs`
 - [ ] Frontend: add target-aware logic to run controls (grid layout, button behavior)
 - [ ] If storing per-run metadata: include target in historical record (e.g., run_invocations)
 - [ ] Test with multiple profiles.yml scenarios (project-local vs global)
+- [ ] Update `docs/how-to/configure-environment.md` → dbt Targets section if dropdown behavior changed
+
+## Checklist: Updating Documentation
+
+Run `/update-docs` after any session with code changes. Manual checklist:
+- [ ] `CLAUDE.md` Database Tables matches `backend/app/db/models.py`
+- [ ] `docs/architecture.md` API Routes match `backend/app/main.py` router registrations
+- [ ] `docs/architecture.md` Configuration table matches `backend/app/config.py`
+- [ ] `README.md` Environment Variables table matches above
+- [ ] `README.md` Features list covers new user-facing features
+- [ ] Relevant `docs/how-to/` guide updated if a user-facing flow changed
+- [ ] `docs/how-to/README.md` index updated if a new guide was added
+
+How-to guides live in `docs/how-to/`:
+- `create-project.md` — New Project modal, dbt init PTY, profiles.yml setup
+- `run-models.md` — Run/build/test, SidePane grid, RunPanel
+- `configure-environment.md` — Env vars, targets, profiles, requirements
+- `init-pipeline.md` — Init steps, scripts, env var capture
+- `navigate-dag.md` — DAG view, filter bar, SidePane
+- `use-file-explorer.md` — File browser, Monaco editor
+- `use-terminal.md` — TerminalPanel, multi-tab sessions
