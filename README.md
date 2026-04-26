@@ -8,25 +8,15 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 
 ## Features
 
-- **Project discovery** — scans a configured directory for `dbt_project.yml` files and lists all projects
-- **Interactive DAG** — React Flow graph of all models and their lineage with live status badges; models turn blue in real time while running; dbt-style filter bar (`+model`, `tag:x`, type/materialization/tag/status dropdowns) with upstream/downstream graph traversal
-- **Run / build / test** — trigger dbt commands from any model tile with upstream / downstream / full selector support; logs stream live in the bottom pane
-- **Execution DAG** — bottom pane shows only the models that ran, with real-time running/success/error status
-- **Side panel** — collapsible right-side panel on both the DAG and File Explorer pages; shows model metadata, run controls, and action buttons in a single unified view
-- **Profile & target selectors** — header dropdowns to switch environment profiles and dbt targets on any project page; target is passed as `--target` on every dbt invocation
-- **Project homepage files** — README, `dbt_project.yml`, and `profiles.yml` rendered in a tabbed Monaco viewer on the project homepage
-- **Integrated terminal** — VSCode-style multi-tab terminal in the bottom pane (bash/zsh)
-- **SQL editor** — view and edit model SQL in-browser with Monaco (VS Code engine); saves to disk
-- **Live updates** — file watcher resets stale model tiles within ~200ms of a file change; manifest/run_results parsed on the fly
-- **Init pipeline** — configurable, sortable initialization steps (`dbt deps` + custom shell scripts) shown in a step-status modal
-- **Interactive `dbt init`** — create new projects in a full xterm.js terminal modal; writes `profiles.yml` into the new project directory automatically
-- **Project-local profiles** — `profiles.yml` co-located in the project directory; dbt invocations use `--profiles-dir` automatically when the file is present
-- **Global settings** — configure your dbt projects path, global requirements file, and other options from within the UI
-- **Requirements install** — init pipeline installs a global `requirements.txt` and an optional per-project `REQUIREMENTS_PATH` into the dbt venv automatically before running `dbt deps`
-- **Global env profiles** — define named environment variable sets globally and import them into any project as a starting point
-- **Project ignore** — mark projects as ignored so they are hidden from the project list without being deleted
-- **Init-script env var capture** — `export KEY=value` statements in init scripts are automatically captured and stored per-project; injected into all dbt commands (e.g. `SNOWFLAKE_ACCOUNT`) without manual configuration
-- **Headless mode** — `task start:bg` daemonizes both servers and opens the browser; `task stop` frees the ports
+- **Project discovery** — scans a directory for `dbt_project.yml` files and lists all projects; rescan on demand
+- **Interactive DAG** — dependency graph with live status badges, dbt-style selector syntax (`+model`, `tag:x`), upstream/downstream traversal, and real-time status updates while models run
+- **Run / build / test** — trigger any dbt command from the side panel with upstream/downstream/full selector support; logs stream live
+- **Docs browser** — native dbt docs viewer with searchable column list and cross-navigation to the DAG and file editor
+- **File explorer & SQL editor** — browse your project tree and edit model SQL, YAML, and config files in-browser with Monaco (the VS Code editor engine)
+- **Integrated terminal** — multi-tab bash/zsh terminal in the bottom pane for running dbt commands directly
+- **Init pipeline** — configurable initialization steps (`pip install`, `dbt deps`, custom shell scripts) that run automatically when a project is opened; env vars exported from scripts are captured and injected into all dbt invocations
+- **Environment profiles** — define named env var sets globally and apply them per-project; switch profiles and dbt targets from the header
+- **Interactive project creation** — `dbt init` runs in a full in-browser terminal; adapter install, profiles.yml setup, and project discovery all handled automatically
 
 ## Quickstart
 
