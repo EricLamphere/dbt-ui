@@ -142,6 +142,14 @@ export default function ModelsPage() {
     if (node) setSelectedModel(node);
   }, [graph, modelParam]);
 
+  // When graph refreshes (e.g. after dbt show writes manifest.json), keep selectedModel
+  // data current without clearing the selection.
+  useEffect(() => {
+    if (!graph || !selectedModel) return;
+    const refreshed = graph.nodes.find((n) => n.unique_id === selectedModel.unique_id);
+    if (refreshed) setSelectedModel(refreshed);
+  }, [graph]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // SSE — react to server events
   useProjectEvents(id, useCallback((event) => {
     if (event.type === 'statuses_changed' || event.type === 'graph_changed') {
@@ -186,9 +194,12 @@ export default function ModelsPage() {
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
 
   useEffect(() => {
-    setNodes(layoutNodes);
+    setNodes(layoutNodes.map((n) => ({
+      ...n,
+      selected: selectedModel ? (n.data?.model as ModelNode | undefined)?.unique_id === selectedModel.unique_id : false,
+    })));
     setEdges(layoutEdges);
-  }, [layoutNodes, layoutEdges, setNodes, setEdges]);
+  }, [layoutNodes, layoutEdges, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
