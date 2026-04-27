@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { type ModelNode, type GraphDto } from '../../../../lib/api';
-import { PropertiesTab } from './PropertiesTab';
+import { PropertiesTab, type ShowRows } from './PropertiesTab';
 
 interface SidePaneProps {
   projectId: number;
@@ -15,6 +15,9 @@ interface SidePaneProps {
   onViewDocs?: () => void;
   onDelete?: () => void;
   failedTestUid?: string | null;
+  onFailedTestConsumed?: () => void;
+  showRows?: ShowRows | null;
+  onShowRows?: (uid: string, rows: ShowRows | null) => void;
 }
 
 const MIN_WIDTH = 200;
@@ -33,6 +36,9 @@ export function SidePane({
   onViewDocs,
   onDelete,
   failedTestUid,
+  onFailedTestConsumed,
+  showRows,
+  onShowRows,
 }: SidePaneProps) {
   const [open, setOpen] = useState(false);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
@@ -131,6 +137,9 @@ export function SidePane({
             graph={graph}
             page={page}
             failedTestUid={failedTestUid}
+            onFailedTestConsumed={onFailedTestConsumed}
+            showRows={showRows}
+            onShowRows={onShowRows}
             onNavigateToFiles={onNavigateToFiles}
             onNavigateToDag={onNavigateToDag}
             onViewDocs={onViewDocs}

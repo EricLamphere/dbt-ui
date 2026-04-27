@@ -21,6 +21,7 @@ import ModelNodeComponent from './components/ModelNode';
 import NewModelModal from './components/NewModelModal';
 import ProjectNav from './components/ProjectNav';
 import { SidePane } from './components/SidePane';
+import { type ShowRows } from './components/SidePane/PropertiesTab';
 import DagFilterBar from './components/DagFilterBar';
 import { computeLayout } from './lib/layout';
 import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserializeFilter } from './lib/dagFilter';
@@ -104,6 +105,7 @@ export default function ModelsPage() {
   const [newModelOpen, setNewModelOpen] = useState(false);
   const [compiling, setCompiling] = useState(false);
   const [failedTestUid, setFailedTestUid] = useState<string | null>(null);
+  const [testShowRows, setTestShowRows] = useState<Record<string, ShowRows>>({});
   // Live run status overlay: model name → status, applied on top of cached graph data
   const [liveStatuses, setLiveStatuses] = useState<Record<string, LiveStatus>>({});
 
@@ -296,6 +298,9 @@ export default function ModelsPage() {
         onViewDocs={() => selectedModel && navigate(`/projects/${id}/docs?node=${encodeURIComponent(selectedModel.unique_id)}`)}
         onDelete={() => selectedModel && handleDeleteModel(selectedModel)}
         failedTestUid={failedTestUid}
+        onFailedTestConsumed={() => setFailedTestUid(null)}
+        showRows={selectedModel ? (testShowRows[selectedModel.unique_id] ?? null) : null}
+        onShowRows={(uid, rows) => setTestShowRows((prev) => rows ? { ...prev, [uid]: rows } : prev)}
       />
 
       {/* New model modal */}

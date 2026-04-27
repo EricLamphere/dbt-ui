@@ -15,6 +15,8 @@ const SCOPE_LABELS: Record<RunMode, string> = {
   only: 'Only', upstream: '+ Upstream', downstream: '+ Downstream', full: 'Full',
 };
 
+export type ShowRows = { columns: string[]; rows: unknown[][] };
+
 interface PropertiesTabProps {
   projectId: number;
   model: ModelNode | null;
@@ -22,6 +24,9 @@ interface PropertiesTabProps {
   graph: GraphDto | null;
   page: 'files' | 'dag';
   failedTestUid?: string | null;
+  onFailedTestConsumed?: () => void;
+  showRows?: ShowRows | null;
+  onShowRows?: (uid: string, rows: ShowRows | null) => void;
   onNavigateToFiles?: () => void;
   onNavigateToDag?: () => void;
   onViewDocs?: () => void;
@@ -58,28 +63,24 @@ function Chip({ label, dim = false }: { label: string; dim?: boolean }) {
 }
 
 export function PropertiesTab({
-  projectId, model, selectedModels = [], graph, page, failedTestUid,
+  projectId, model, selectedModels = [], graph, page, failedTestUid, onFailedTestConsumed,
+  showRows, onShowRows,
   onNavigateToFiles, onNavigateToDag, onViewDocs, onDelete,
 }: PropertiesTabProps) {
   const [loading, setLoading] = useState<string | null>(null);
-  const [showRows, setShowRows] = useState<{ columns: string[]; rows: unknown[][] } | null>(null);
   const [loadingShow, setLoadingShow] = useState(false);
 
-  // Auto-fetch failing test rows when this test just failed
+  // Auto-fetch failing test rows when this test just failed (one-shot: clear after consuming)
   useEffect(() => {
     if (!model || model.resource_type !== 'test') return;
     if (failedTestUid !== model.unique_id) return;
+    onFailedTestConsumed?.();
     setLoadingShow(true);
     api.models.show(projectId, model.unique_id, 100)
-      .then((r) => setShowRows(r))
-      .catch(() => setShowRows(null))
+      .then((r) => onShowRows?.(model.unique_id, r))
+      .catch(() => onShowRows?.(model.unique_id, null))
       .finally(() => setLoadingShow(false));
   }, [failedTestUid, model?.unique_id, model?.resource_type, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset showRows when model changes
-  useEffect(() => {
-    setShowRows(null);
-  }, [model?.unique_id]);
 
   const handleRun = async (cmd: RunCommand, mode: RunMode) => {
     if (!model) return;
