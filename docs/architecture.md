@@ -58,6 +58,9 @@ dbt-ui/
 │   │   │   ├── venv.py              # venv_dbt/venv_pip/venv_python — resolve binaries in backend/.venv/bin/
 │   │   │   ├── init_scripts.py      # Read/write init/*.sh custom scripts
 │   │   │   └── interactive.py       # InteractiveInitManager singleton (PTY sessions; reused for terminal)
+│   │   ├── git/
+│   │   │   ├── runner.py            # GitRunner singleton; subprocess + asyncio.Lock per project
+│   │   │   └── repo.py              # find_repo_root, parse_porcelain_v2, BranchInfo / FileChange dataclasses
 │   │   ├── events/
 │   │   │   ├── bus.py               # In-process pub/sub EventBus singleton
 │   │   │   └── sse.py               # SSE response helpers (standard + with-replay)
@@ -89,6 +92,7 @@ dbt-ui/
 │   │           ├── Environment.tsx      # Env vars + profiles
 │   │           ├── InitScripts.tsx      # Init pipeline management
 │   │           ├── FileExplorer/        # File browser + Monaco editor; SidePane replaces old tab bar
+│   │           ├── Git/                 # Source Control page (VSCode-style SCM)
 │   │           └── components/
 │   │               ├── BottomPane/
 │   │               │   ├── index.tsx        # Drag-to-resize pane; tab management; terminal instances
@@ -275,6 +279,20 @@ POST   /api/global-profiles
 DELETE /api/global-profiles/{profile_id}
 PUT    /api/global-profiles/{profile_id}/vars/{key}
 DELETE /api/global-profiles/{profile_id}/vars/{key}
+
+GET    /api/projects/{id}/git/status                 repo root, current branch, ahead/behind, changes list
+GET    /api/projects/{id}/git/diff                   unified diff for one file (?path=&staged=)
+GET    /api/projects/{id}/git/file-at-head           HEAD blob for Monaco DiffEditor original (?path=)
+POST   /api/projects/{id}/git/stage                  git add -- <paths>
+POST   /api/projects/{id}/git/unstage                git restore --staged -- <paths>
+POST   /api/projects/{id}/git/discard                git restore -- <paths>
+POST   /api/projects/{id}/git/commit                 git commit -m <message>
+GET    /api/projects/{id}/git/branches               list local + remote branches
+POST   /api/projects/{id}/git/branches               create branch
+POST   /api/projects/{id}/git/checkout               switch branch
+POST   /api/projects/{id}/git/pull                   SSE-streamed git pull
+POST   /api/projects/{id}/git/push                   SSE-streamed git push
+GET    /api/projects/{id}/git/log                    commit history (?path= &limit=)
 ```
 
 ---
@@ -322,6 +340,11 @@ Each SSE client gets its own queue. `publish` is non-blocking (`put_nowait`); ev
 | `init_pipeline_started` | `init.py` | Init modal shows step list |
 | `init_step` | `init.py` | Init modal updates step status |
 | `init_pipeline_finished` | `init.py` | Init modal shows success/error |
+| `git_status_changed` | `git/api.py`, `watcher.py` | Invalidates git status + branches queries |
+| `git_started` | `git/runner.py` | Source Control shows sync in progress |
+| `git_log` | `git/runner.py` | Appends push/pull output line to sync log |
+| `git_finished` | `git/runner.py` | Source Control re-fetches status after push/pull |
+| `git_error` | `git/runner.py` | Source Control shows error (e.g. git not on PATH) |
 
 ### Init Session Event Types
 

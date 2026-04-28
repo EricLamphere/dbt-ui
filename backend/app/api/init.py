@@ -482,6 +482,25 @@ async def open_project(
     return {"accepted": True}
 
 
+class RunStepRequest(BaseModel):
+    step_name: str
+
+
+@router.post("/{project_id}/init/run-step")
+async def run_single_step(
+    project_id: int, body: RunStepRequest, session: AsyncSession = Depends(get_session)
+) -> dict[str, bool]:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    rows = await _sync_steps_from_disk(session, project)
+    matching = [r for r in rows if r.name == body.step_name]
+    if not matching:
+        raise HTTPException(status_code=404, detail="step not found")
+    asyncio.create_task(_run_init_steps(project_id, project.path, matching))
+    return {"accepted": True}
+
+
 _ACTIVE_GLOBAL_PROFILE_KEY = "active_global_profile_id"
 
 

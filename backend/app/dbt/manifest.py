@@ -21,6 +21,7 @@ class ModelNode:
     original_file_path: str | None
     raw_sql: str | None
     compiled_sql: str | None = None
+    source_name: str | None = None  # set for resource_type == "source"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +34,7 @@ class ModelNode:
             "tags": list(self.tags),
             "description": self.description,
             "original_file_path": self.original_file_path,
+            "source_name": self.source_name,
         }
 
 
@@ -70,6 +72,7 @@ def _extract_node(unique_id: str, raw: dict[str, Any]) -> ModelNode | None:
         original_file_path=raw.get("original_file_path"),
         raw_sql=raw.get("raw_code") or raw.get("raw_sql"),
         compiled_sql=raw.get("compiled_code") or raw.get("compiled_sql"),
+        source_name=raw.get("source_name") if resource_type == "source" else None,
     )
 
 

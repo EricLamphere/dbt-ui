@@ -1,6 +1,6 @@
 import { Link, NavLink } from 'react-router-dom';
 
-export type CurrentPage = 'dag' | 'init' | 'files' | 'environment' | 'docs';
+export type CurrentPage = 'dag' | 'init' | 'files' | 'environment' | 'docs' | 'git';
 
 interface Props {
   projectId: number;
@@ -37,15 +37,23 @@ const DOCS_ICON = (
   </svg>
 );
 
+const GIT_ICON = (
+  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <path strokeLinecap="round" strokeLinejoin="round"
+      d="M12 5v7m0 0l-3-3m3 3l3-3M6 19a2 2 0 100-4 2 2 0 000 4zm12 0a2 2 0 100-4 2 2 0 000 4zM6 7a2 2 0 100-4 2 2 0 000 4z" />
+  </svg>
+);
+
 const SETUP_ITEMS: { key: CurrentPage; label: string; icon: React.ReactNode; path: string }[] = [
   { key: 'environment',  label: 'Environment',    icon: ENV_ICON,  path: 'environment' },
   { key: 'init',         label: 'Initialization', icon: INIT_ICON, path: 'init' },
 ];
 
 const PROJECT_ITEMS: { key: CurrentPage; label: string; icon: React.ReactNode; path: string }[] = [
-  { key: 'files', label: 'Files', icon: FILES_ICON, path: 'files' },
-  { key: 'dag',   label: 'DAG',   icon: DAG_ICON,   path: 'models' },
-  { key: 'docs',  label: 'Docs',  icon: DOCS_ICON,  path: 'docs' },
+  { key: 'files',  label: 'Files',          icon: FILES_ICON, path: 'files' },
+  { key: 'dag',    label: 'DAG',            icon: DAG_ICON,   path: 'models' },
+  { key: 'docs',   label: 'Docs',           icon: DOCS_ICON,  path: 'docs' },
+  { key: 'git',    label: 'Source Control', icon: GIT_ICON,   path: 'git' },
 ];
 
 function NavSection({

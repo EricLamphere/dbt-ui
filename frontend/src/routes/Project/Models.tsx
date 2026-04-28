@@ -105,7 +105,13 @@ export default function ModelsPage() {
   const [newModelOpen, setNewModelOpen] = useState(false);
   const [compiling, setCompiling] = useState(false);
   const [failedTestUid, setFailedTestUid] = useState<string | null>(null);
-  const [testShowRows, setTestShowRows] = useState<Record<string, ShowRows>>({});
+  const SHOW_ROWS_KEY = `dag-show-rows-${id}`;
+  const [testShowRows, setTestShowRows] = useState<Record<string, ShowRows>>(() => {
+    try {
+      const saved = sessionStorage.getItem(`dag-show-rows-${id}`);
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
   // Live run status overlay: model name → status, applied on top of cached graph data
   const [liveStatuses, setLiveStatuses] = useState<Record<string, LiveStatus>>({});
 
@@ -156,6 +162,8 @@ export default function ModelsPage() {
   useProjectEvents(id, useCallback((event) => {
     if (event.type === 'statuses_changed' || event.type === 'graph_changed') {
       setLiveStatuses({});
+      setTestShowRows({});
+      try { sessionStorage.removeItem(`dag-show-rows-${id}`); } catch {}
       qc.invalidateQueries({ queryKey: ['models', id] });
     }
     if (event.type === 'compile_started') setCompiling(true);
@@ -195,13 +203,81 @@ export default function ModelsPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
 
+  // Compute the set of uids that are upstream OR downstream of any selected node.
+  // Walk forwards (descendants) and backwards (ancestors) SEPARATELY from each seed —
+  // never mix directions, otherwise every weakly-connected node gets included.
+  const connectedUids = useMemo(() => {
+    const seeds = selectedModels.length > 0
+      ? selectedModels.map((m) => m.unique_id)
+      : selectedModel ? [selectedModel.unique_id] : [];
+    if (seeds.length === 0) return null;
+
+    const fwd = new Map<string, string[]>(); // source → targets (downstream)
+    const bwd = new Map<string, string[]>(); // target → sources (upstream)
+    for (const e of layoutEdges) {
+      if (!fwd.has(e.source)) fwd.set(e.source, []);
+      fwd.get(e.source)!.push(e.target);
+      if (!bwd.has(e.target)) bwd.set(e.target, []);
+      bwd.get(e.target)!.push(e.source);
+    }
+
+    const connected = new Set<string>(seeds);
+
+    // Walk DOWNSTREAM only from each seed
+    const downQueue = [...seeds];
+    while (downQueue.length > 0) {
+      const uid = downQueue.shift()!;
+      for (const next of fwd.get(uid) ?? []) {
+        if (!connected.has(next)) { connected.add(next); downQueue.push(next); }
+      }
+    }
+
+    // Walk UPSTREAM only from each seed
+    const upQueue = [...seeds];
+    while (upQueue.length > 0) {
+      const uid = upQueue.shift()!;
+      for (const next of bwd.get(uid) ?? []) {
+        if (!connected.has(next)) { connected.add(next); upQueue.push(next); }
+      }
+    }
+
+    return connected;
+  }, [selectedModel, selectedModels, layoutEdges]);
+
+  // Sync layout + dimming into React Flow's node state.
+  // Do NOT force `selected` from selectedModel — that breaks multi-select; let React Flow
+  // manage its own selection state via onNodesChange.
   useEffect(() => {
-    setNodes(layoutNodes.map((n) => ({
-      ...n,
-      selected: selectedModel ? (n.data?.model as ModelNode | undefined)?.unique_id === selectedModel.unique_id : false,
-    })));
+    setNodes((prev) => {
+      const prevSelected = new Map(prev.map((n) => [n.id, n.selected ?? false]));
+      return layoutNodes.map((n) => {
+        const uid = (n.data?.model as ModelNode | undefined)?.unique_id ?? '';
+        return {
+          ...n,
+          selected: prevSelected.get(n.id) ?? false,
+          data: { ...n.data, dimmed: connectedUids !== null && !connectedUids.has(uid) },
+        };
+      });
+    });
     setEdges(layoutEdges);
-  }, [layoutNodes, layoutEdges, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layoutNodes, layoutEdges, connectedUids, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When deep-link param changes, push selection through React Flow's state.
+  useEffect(() => {
+    if (!selectedModel) return;
+    setNodes((prev) => prev.map((n) => ({
+      ...n,
+      selected: n.id === selectedModel.unique_id ? true : n.selected,
+    })));
+  }, [selectedModel?.unique_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleShowRows = useCallback((uid: string, rows: ShowRows | null) => {
+    setTestShowRows((prev) => {
+      const next = rows ? { ...prev, [uid]: rows } : prev;
+      try { sessionStorage.setItem(SHOW_ROWS_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
+  }, [SHOW_ROWS_KEY]);
 
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
@@ -300,7 +376,7 @@ export default function ModelsPage() {
         failedTestUid={failedTestUid}
         onFailedTestConsumed={() => setFailedTestUid(null)}
         showRows={selectedModel ? (testShowRows[selectedModel.unique_id] ?? null) : null}
-        onShowRows={(uid, rows) => setTestShowRows((prev) => rows ? { ...prev, [uid]: rows } : prev)}
+        onShowRows={handleShowRows}
       />
 
       {/* New model modal */}

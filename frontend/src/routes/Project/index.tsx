@@ -359,7 +359,7 @@ function YamlViewer({ content }: { content: string }) {
           scrollBeyondLastLine: false,
           readOnly: true,
           automaticLayout: true,
-          scrollbar: { vertical: 'hidden', horizontal: 'auto', handleMouseWheel: false },
+          scrollbar: { vertical: 'hidden', horizontal: 'auto' },
           overviewRulerLanes: 0,
           renderLineHighlight: 'none',
           padding: { top: 12, bottom: 12 },

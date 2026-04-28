@@ -261,15 +261,17 @@ export default function InitScriptsPage() {
             <p className="text-sm text-gray-600 py-4">No steps configured yet.</p>
           )}
 
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-3">
             {localSteps.map((step, idx) => (
-              <StepRow
+              <StepTile
                 key={step.name}
                 step={step}
+                projectId={id}
                 runState={stepStates[step.name] ?? null}
                 onToggle={(enabled) =>
                   api.init.toggleStep(id, step.name, enabled).then(invalidate)
                 }
+                onRunStep={() => api.init.runStep(id, step.name)}
                 onEdit={!step.is_base ? () => setEditStep(step) : undefined}
                 onDelete={!step.is_base ? () => handleDelete(step) : undefined}
                 onDragStart={() => handleDragStart(idx)}
@@ -352,12 +354,19 @@ function PageShell({ id, children }: { id: number; children: React.ReactNode }) 
   );
 }
 
-// ---- step row ----
+// ---- step tile ----
 
-interface StepRowProps {
+const BASE_STEP_PREVIEWS: Record<string, string> = {
+  'pip install': '# Install Python requirements\n# Reads global + project requirements.txt',
+  'dbt deps':    '# Install dbt package dependencies\n# Runs: dbt deps',
+};
+
+interface StepTileProps {
   step: InitStepDto;
+  projectId: number;
   runState: StepRunState | null;
   onToggle: (enabled: boolean) => void;
+  onRunStep: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
   onDragStart: () => void;
@@ -367,10 +376,30 @@ interface StepRowProps {
   isDragging: boolean;
 }
 
-function StepRow({ step, runState, onToggle, onEdit, onDelete, onDragStart, onDragOver, onDrop, onDragEnd, isDragging }: StepRowProps) {
+function StepTile({ step, projectId, runState, onToggle, onRunStep, onEdit, onDelete, onDragStart, onDragOver, onDrop, onDragEnd, isDragging }: StepTileProps) {
   const displayName = step.name.replace(/^(base|custom):\s*/, '');
   const prefix = step.is_base ? 'base' : 'custom';
   const status: StepStatus = runState?.status ?? 'idle';
+  const [preview, setPreview] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    if (step.is_base) {
+      setPreview(BASE_STEP_PREVIEWS[displayName] ?? null);
+    } else {
+      api.init.getScriptContent(projectId, displayName)
+        .then((content) => {
+          const lines = content.split('\n').slice(0, 4).join('\n');
+          setPreview(lines || null);
+        })
+        .catch(() => setPreview(null));
+    }
+  }, [step.name]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleRun = async () => {
+    setRunning(true);
+    try { await onRunStep(); } finally { setRunning(false); }
+  };
 
   return (
     <div
@@ -379,50 +408,77 @@ function StepRow({ step, runState, onToggle, onEdit, onDelete, onDragStart, onDr
       onDragOver={onDragOver}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
-      className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-all
-        ${isDragging ? 'opacity-40 scale-[0.98]' : ''}
+      className={`rounded-xl border px-4 py-3 flex flex-col gap-2 transition-all
+        ${isDragging ? 'opacity-40 scale-[0.99]' : ''}
         ${step.enabled
           ? 'bg-surface-panel border-gray-800'
           : 'bg-surface-panel/50 border-gray-800/50 opacity-60'}`}
     >
-      {/* Drag handle */}
-      <span className="text-gray-700 hover:text-gray-500 cursor-grab active:cursor-grabbing shrink-0 select-none text-sm leading-none">⠿</span>
+      {/* Header row */}
+      <div className="flex items-center gap-2.5">
+        <span className="text-gray-700 hover:text-gray-500 cursor-grab active:cursor-grabbing shrink-0 select-none text-sm leading-none">⠿</span>
 
-      {/* Enable toggle */}
-      <button
-        onClick={() => onToggle(!step.enabled)}
-        title={step.enabled ? 'Disable' : 'Enable'}
-        className={`w-8 h-4 rounded-full transition-colors shrink-0 flex items-center px-0.5
-          ${step.enabled ? 'bg-brand-600 justify-end' : 'bg-gray-700 justify-start'}`}
-      >
-        <span className="w-3 h-3 rounded-full bg-white shadow" />
-      </button>
+        {/* Enable toggle */}
+        <button
+          onClick={() => onToggle(!step.enabled)}
+          title={step.enabled ? 'Disable' : 'Enable'}
+          className={`w-8 h-4 rounded-full transition-colors shrink-0 flex items-center px-0.5
+            ${step.enabled ? 'bg-brand-600 justify-end' : 'bg-gray-700 justify-start'}`}
+        >
+          <span className="w-3 h-3 rounded-full bg-white shadow" />
+        </button>
 
-      {/* Name */}
-      <div className="flex-1 min-w-0">
-        <span className="text-[10px] text-gray-600 font-mono mr-1.5">{prefix}:</span>
-        <span className="text-sm text-gray-200">{displayName}</span>
+        {/* Name */}
+        <div className="flex-1 min-w-0">
+          <span className="text-[10px] text-gray-600 font-mono mr-1.5">{prefix}:</span>
+          <span className="text-sm font-medium text-gray-200">{displayName}</span>
+        </div>
+
+        {/* Run this step */}
+        <button
+          onClick={handleRun}
+          disabled={running || status === 'running'}
+          title="Run this step"
+          className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-surface-elevated hover:bg-brand-900/40 text-gray-400 hover:text-brand-300 disabled:opacity-40 transition-colors shrink-0"
+        >
+          {(running || status === 'running') ? (
+            <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" />
+            </svg>
+          ) : (
+            <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clipRule="evenodd" />
+            </svg>
+          )}
+          Run
+        </button>
+
+        <StatusIcon status={status} log={runState?.log ?? ''} />
       </div>
 
-      {onEdit && (
-        <button
-          onClick={onEdit}
-          className="text-xs text-gray-500 hover:text-brand-400 transition-colors px-1"
-        >
-          Edit
-        </button>
-      )}
-      {onDelete && (
-        <button
-          onClick={onDelete}
-          className="text-xs text-gray-500 hover:text-red-400 transition-colors px-1"
-        >
-          Delete
-        </button>
+      {/* Code preview */}
+      {preview && (
+        <pre className="text-[11px] text-gray-500 font-mono bg-surface-elevated/60 rounded px-3 py-2 overflow-hidden leading-relaxed max-h-[4.5rem] select-none whitespace-pre-wrap break-all">
+          {preview}
+        </pre>
       )}
 
-      {/* Run status icon */}
-      <StatusIcon status={status} log={runState?.log ?? ''} />
+      {/* Action buttons */}
+      {(onEdit || onDelete) && (
+        <div className="flex gap-3 pt-0.5">
+          {onEdit && (
+            <button onClick={onEdit} className="text-xs text-gray-500 hover:text-brand-400 transition-colors">
+              Edit
+            </button>
+          )}
+          {onDelete && (
+            <button onClick={onDelete} className="text-xs text-gray-500 hover:text-red-400 transition-colors">
+              Delete
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

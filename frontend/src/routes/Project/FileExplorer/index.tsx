@@ -202,6 +202,11 @@ export default function FileExplorerPage() {
     saveExpandedPaths(expandedPaths);
   }, [id, getExpandedPaths, saveExpandedPaths]);
 
+  const navigateToFile = useCallback(async (path: string) => {
+    await expandToPath(path);
+    await openFileNode(path);
+  }, [expandToPath, openFileNode]);
+
   // Deep-link: ?model=<unique_id> — open the corresponding file
   // Also restore last open file from sessionStorage (if no deep-link)
   const deepLinkHandled = useRef(false);
@@ -477,6 +482,8 @@ export default function FileExplorerPage() {
             saveError={saveError}
             isDirty={isDirty}
             modelUid={modelUid}
+            graph={graph ?? null}
+            onNavigateToFile={navigateToFile}
           />
         ) : (
           <div className="flex items-center justify-center text-gray-600 text-sm select-none h-full">

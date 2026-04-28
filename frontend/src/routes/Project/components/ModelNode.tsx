@@ -1,4 +1,3 @@
-import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelNode } from '../../../lib/api';
 
@@ -31,11 +30,11 @@ const TYPE_ICON: Record<string, string> = {
 };
 
 interface Props extends NodeProps {
-  data: { model: ModelNode };
+  data: { model: ModelNode; dimmed?: boolean };
 }
 
-export default memo(function ModelNodeComponent({ data, selected }: Props) {
-  const { model } = data;
+export default function ModelNodeComponent({ data, selected }: Props) {
+  const { model, dimmed } = data;
   const ring = STATUS_RING[model.status] ?? STATUS_RING.idle;
   const dot = STATUS_DOT[model.status] ?? STATUS_DOT.idle;
   const icon = TYPE_ICON[model.resource_type] ?? '▣';
@@ -44,6 +43,7 @@ export default memo(function ModelNodeComponent({ data, selected }: Props) {
     <>
       <Handle type="target" position={Position.Left} style={{ background: 'rgb(var(--brand-500))', border: 'none' }} />
       <div
+        style={{ opacity: dimmed ? 0.2 : 1 }}
         className={`
           w-[200px] h-[72px] bg-surface-panel rounded-lg ring-1 px-3 py-2 flex flex-col justify-between
           cursor-pointer select-none transition-all duration-150
@@ -66,4 +66,4 @@ export default memo(function ModelNodeComponent({ data, selected }: Props) {
       <Handle type="source" position={Position.Right} style={{ background: 'rgb(var(--brand-500))', border: 'none' }} />
     </>
   );
-});
+}

@@ -7,12 +7,16 @@ from watchfiles import Change, awatch
 from app.db.engine import SessionLocal
 from app.db.models import ModelStatus, Project
 from app.events.bus import Event, bus
+from app.git.repo import find_repo_root
 from app.logging_setup import get_logger
 
 log = get_logger(__name__)
 
 WATCHED_SUBDIRS = ("models", "tests", "seeds", "snapshots", "macros", "analyses")
 TARGET_FILES = ("target/manifest.json", "target/run_results.json")
+
+# .git paths whose changes indicate branch/index state flipped
+_GIT_STATUS_FILES = {"HEAD", "index", "ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD", "CHERRY_PICK_HEAD"}
 
 
 class WatcherManager:
@@ -56,11 +60,19 @@ class WatcherManager:
     async def _watch(self, project_id: int, project_path: Path) -> None:
         log.info("watcher_start", project_id=project_id, path=str(project_path))
         topic = f"project:{project_id}"
+
+        # Determine extra watch roots: the .git dir if the project lives in a repo
+        repo_root = find_repo_root(project_path)
+        git_dir = (repo_root / ".git") if repo_root is not None else None
+        watch_roots: list[Path] = [project_path]
+        if git_dir is not None and git_dir.is_dir() and git_dir not in [project_path]:
+            watch_roots.append(git_dir)
+
         try:
             async for changes in awatch(
-                project_path, stop_event=self._stop, debounce=200, recursive=True
+                *watch_roots, stop_event=self._stop, debounce=200, recursive=True
             ):
-                await self._handle_changes(project_id, project_path, topic, changes)
+                await self._handle_changes(project_id, project_path, git_dir, topic, changes)
         except asyncio.CancelledError:
             pass
         except Exception as exc:
@@ -70,10 +82,27 @@ class WatcherManager:
         self,
         project_id: int,
         project_path: Path,
+        git_dir: Path | None,
         topic: str,
         changes: set[tuple[Change, str]],
     ) -> None:
         changed_files = [Path(p) for _, p in changes]
+
+        # Git index/branch changes
+        if git_dir is not None:
+            for f in changed_files:
+                try:
+                    rel = f.relative_to(git_dir)
+                except ValueError:
+                    continue
+                parts = rel.parts
+                if not parts:
+                    continue
+                # HEAD, index, ORIG_HEAD, FETCH_HEAD, or anything under refs/
+                if parts[0] in _GIT_STATUS_FILES or parts[0] == "refs":
+                    await bus.publish(Event(topic=topic, type="git_status_changed", data={}))
+                    break
+
         manifest_or_results = any(
             str(p).endswith(("manifest.json", "run_results.json")) for p in changed_files
         )
@@ -108,7 +137,6 @@ class WatcherManager:
                 select(ModelStatus).where(ModelStatus.project_id == project_id)
             )
             rows = list(result.scalars().all())
-            changed = False
             for row in rows:
                 pass
             await session.commit()

@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import Editor from '@monaco-editor/react';
+import { useEffect, useRef, useState } from 'react';
+import Editor, { type Monaco } from '@monaco-editor/react';
 import { RotateCw } from 'lucide-react';
 import { format as sqlFormat } from 'sql-formatter';
-import { api, type FileContentDto } from '../../../../lib/api';
+import { api, type FileContentDto, type GraphDto } from '../../../../lib/api';
 import { useTheme } from '../../../../lib/useTheme';
 
 type ViewTab = 'code' | 'compiled' | 'preview';
@@ -20,6 +20,10 @@ interface ViewPaneProps {
   isDirty: boolean;
   /** unique_id of the model this file belongs to, if known */
   modelUid: string | null;
+  /** graph data for ref/source link navigation */
+  graph: GraphDto | null;
+  /** called when a ref/source link is cmd+clicked */
+  onNavigateToFile: (path: string) => void;
 }
 
 function isSqlFile(path: string) {
@@ -53,10 +57,16 @@ function formatSql(sql: string): string {
 
 export function ViewPane({
   projectId, openFile, edited, onEdit, onSave, onDelete,
-  saving, saveStatus, saveError, isDirty, modelUid,
+  saving, saveStatus, saveError, isDirty, modelUid, graph, onNavigateToFile,
 }: ViewPaneProps) {
   const theme = useTheme();
   const monacoTheme = theme === 'light' ? 'vs-light' : 'vs-dark';
+
+  const graphRef = useRef(graph);
+  useEffect(() => { graphRef.current = graph; }, [graph]);
+
+  const onNavigateToFileRef = useRef(onNavigateToFile);
+  useEffect(() => { onNavigateToFileRef.current = onNavigateToFile; }, [onNavigateToFile]);
 
   const [activeTab, setActiveTab] = useState<ViewTab>('code');
   const [compiledSql, setCompiledSql] = useState<string | null>(null);
@@ -224,6 +234,89 @@ export function ViewPane({
             value={edited ?? openFile.content}
             onChange={(v) => onEdit(v ?? '')}
             theme={monacoTheme}
+            onMount={(editor, monacoInstance: Monaco) => {
+              type IRange = Monaco['Range'] extends new (...a: infer _) => infer R ? R : never;
+
+              // Compute spans for all ref/source calls in the current model text
+              function computeRefSpans(text: string): Array<{ filePath: string; startOffset: number; endOffset: number }> {
+                const spans: Array<{ filePath: string; startOffset: number; endOffset: number }> = [];
+                const refRe = /ref\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+                let m: RegExpExecArray | null;
+                while ((m = refRe.exec(text)) !== null) {
+                  const node = graphRef.current?.nodes.find((n) => n.name === m![1] && n.resource_type !== 'source');
+                  if (node?.original_file_path) {
+                    spans.push({ filePath: node.original_file_path, startOffset: m.index, endOffset: m.index + m[0].length });
+                  }
+                }
+                const srcRe = /source\s*\(\s*['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]\s*\)/g;
+                while ((m = srcRe.exec(text)) !== null) {
+                  const node = graphRef.current?.nodes.find(
+                    (n) => n.resource_type === 'source' && n.source_name === m![1] && n.name === m![2]
+                  );
+                  if (node?.original_file_path) {
+                    spans.push({ filePath: node.original_file_path, startOffset: m.index, endOffset: m.index + m[0].length });
+                  }
+                }
+                return spans;
+              }
+
+              // Decoration collection for cmd-hover underlines
+              let decorations = editor.createDecorationsCollection([]);
+
+              function applyDecorations() {
+                const mdl = editor.getModel();
+                if (!mdl) return;
+                const text = mdl.getValue();
+                const spans = computeRefSpans(text);
+                const newDecos = spans.map(({ startOffset, endOffset }) => {
+                  const start = mdl.getPositionAt(startOffset);
+                  const end = mdl.getPositionAt(endOffset);
+                  return {
+                    range: new monacoInstance.Range(start.lineNumber, start.column, end.lineNumber, end.column) as IRange,
+                    options: { inlineClassName: 'dbt-ref-link' },
+                  };
+                });
+                decorations.set(newDecos);
+              }
+
+              function clearDecorations() {
+                decorations.clear();
+              }
+
+              // Track Cmd/Ctrl state on window so releases outside the editor are caught
+              const handleWindowKeyDown = (e: KeyboardEvent) => {
+                if (e.key === 'Meta' || e.key === 'Control') applyDecorations();
+              };
+              const handleWindowKeyUp = (e: KeyboardEvent) => {
+                if (e.key === 'Meta' || e.key === 'Control') clearDecorations();
+              };
+              window.addEventListener('keydown', handleWindowKeyDown);
+              window.addEventListener('keyup', handleWindowKeyUp);
+
+              // Cmd+click → navigate
+              const onMouseDown = editor.onMouseDown((e) => {
+                if (!e.event.metaKey && !e.event.ctrlKey) return;
+                const pos = e.target.position;
+                if (!pos) return;
+                const mdl = editor.getModel();
+                if (!mdl) return;
+                const clickOffset = mdl.getOffsetAt(pos);
+                const text = mdl.getValue();
+                const spans = computeRefSpans(text);
+                const hit = spans.find((s) => clickOffset >= s.startOffset && clickOffset <= s.endOffset);
+                if (hit) {
+                  e.event.preventDefault();
+                  onNavigateToFileRef.current(hit.filePath);
+                }
+              });
+
+              return () => {
+                window.removeEventListener('keydown', handleWindowKeyDown);
+                window.removeEventListener('keyup', handleWindowKeyUp);
+                onMouseDown.dispose();
+                decorations.clear();
+              };
+            }}
             options={{
               fontSize: 13,
               fontFamily: 'Menlo, Monaco, "Courier New", monospace',

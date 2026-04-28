@@ -172,6 +172,13 @@ html[data-theme="light"] {
   stroke: rgb(var(--brand-400) / 1) !important;
 }
 
+/* Monaco dbt ref/source cmd-hover underline */
+.dbt-ref-link {
+  text-decoration: underline;
+  text-decoration-color: rgb(var(--brand-400) / 0.7);
+  cursor: pointer;
+}
+
 /* README prose — update accent from indigo to teal */
 .prose-readme a { color: rgb(var(--brand-300)); text-decoration: underline; }
 .prose-readme blockquote {

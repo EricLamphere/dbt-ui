@@ -70,6 +70,7 @@ export interface ModelNode {
   tags: string[];
   description: string;
   original_file_path: string | null;
+  source_name: string | null;
   status: 'idle' | 'pending' | 'running' | 'success' | 'error' | 'stale' | 'warn';
   message: string | null;
 }
@@ -213,6 +214,70 @@ export interface DocsDataDto {
   project_description: string;
 }
 
+// ---- git interfaces ----
+
+export interface GitBranchInfo {
+  name: string | null;
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+  oid: string | null;
+}
+
+export interface GitFileChange {
+  path: string;
+  index_status: string;
+  worktree_status: string;
+  staged: boolean;
+  is_untracked: boolean;
+  is_conflict: boolean;
+  renamed_from: string | null;
+}
+
+export interface GitStatusDto {
+  repo_root: string;
+  branch: GitBranchInfo;
+  changes: GitFileChange[];
+}
+
+export interface GitDiffDto {
+  path: string;
+  staged: boolean;
+  diff: string;
+}
+
+export interface GitFileAtHeadDto {
+  path: string;
+  content: string;
+}
+
+export interface GitBranchDto {
+  name: string;
+  current: boolean;
+  remote: boolean;
+  upstream: string | null;
+}
+
+export interface GitBranchesDto {
+  branches: GitBranchDto[];
+}
+
+export interface GitCommitLogEntry {
+  hash: string;
+  short_hash: string;
+  author: string;
+  date: string;
+  message: string;
+}
+
+export interface GitCommitLogDto {
+  entries: GitCommitLogEntry[];
+}
+
+export interface GitAcceptedDto {
+  accepted: boolean;
+}
+
 export const api = {
   projects: {
     list: () => get<Project[]>('/projects'),
@@ -303,6 +368,8 @@ export const api = {
       post(`/projects/${projectId}/init/reorder`, { ordered_names }),
     linkStep: (projectId: number, path: string) =>
       post<InitStepDto>(`/projects/${projectId}/init/steps/link`, { path }),
+    runStep: (projectId: number, stepName: string) =>
+      post<void>(`/projects/${projectId}/init/run-step`, { step_name: stepName }),
     getEnvVars: (projectId: number) =>
       get<EnvVarDto[]>(`/projects/${projectId}/init/env`),
     setEnvVar: (projectId: number, key: string, value: string) =>
@@ -369,6 +436,32 @@ export const api = {
       put<{ profile_id: number }>(`/projects/${projectId}/active-global-profile`, { profile_id: profileId }),
     clearActiveForProject: (projectId: number) =>
       del<void>(`/projects/${projectId}/active-global-profile`),
+  },
+  git: {
+    status: (projectId: number) =>
+      get<GitStatusDto>(`/projects/${projectId}/git/status`),
+    diff: (projectId: number, path: string, staged = false) =>
+      get<GitDiffDto>(`/projects/${projectId}/git/diff?path=${encodeURIComponent(path)}&staged=${staged}`),
+    fileAtHead: (projectId: number, path: string) =>
+      get<GitFileAtHeadDto>(`/projects/${projectId}/git/file-at-head?path=${encodeURIComponent(path)}`),
+    stage: (projectId: number, paths: string[]) =>
+      post<GitAcceptedDto>(`/projects/${projectId}/git/stage`, { paths }),
+    unstage: (projectId: number, paths: string[]) =>
+      post<GitAcceptedDto>(`/projects/${projectId}/git/unstage`, { paths }),
+    discard: (projectId: number, paths: string[]) =>
+      post<GitAcceptedDto>(`/projects/${projectId}/git/discard`, { paths }),
+    commit: (projectId: number, message: string, amend = false) =>
+      post<GitAcceptedDto>(`/projects/${projectId}/git/commit`, { message, amend }),
+    branches: (projectId: number) =>
+      get<GitBranchesDto>(`/projects/${projectId}/git/branches`),
+    createBranch: (projectId: number, name: string, fromRef?: string) =>
+      post<GitAcceptedDto>(`/projects/${projectId}/git/branches`, { name, from_ref: fromRef ?? null }),
+    checkout: (projectId: number, name: string) =>
+      post<GitAcceptedDto>(`/projects/${projectId}/git/checkout`, { name }),
+    log: (projectId: number, path?: string, limit = 50) =>
+      get<GitCommitLogDto>(
+        `/projects/${projectId}/git/log?limit=${limit}${path ? `&path=${encodeURIComponent(path)}` : ''}`
+      ),
   },
   settings: {
     get: () => get<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; theme: string | null; configured: boolean }>('/settings'),

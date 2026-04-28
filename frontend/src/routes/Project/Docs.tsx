@@ -235,7 +235,21 @@ function resourceColor(type: string) {
 
 // ---- persistent expanded state ----
 
-function useExpandedSet(storageKey: string): [Set<string>, (key: string, open: boolean) => void, () => void] {
+/** Find the path keys that must be open to reveal a leaf uid in the tree */
+function findPathToUid(node: TreeDir, targetUid: string, prefix: string): string[] | null {
+  for (const child of node.children) {
+    if (child.kind === 'leaf') {
+      if (child.uid === targetUid) return [prefix];
+    } else {
+      const childPath = prefix + '/' + child.name;
+      const found = findPathToUid(child, targetUid, childPath);
+      if (found) return [prefix, ...found];
+    }
+  }
+  return null;
+}
+
+function useExpandedSet(storageKey: string): [Set<string>, (key: string, open: boolean) => void, () => void, (keys: string[]) => void] {
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     try {
       const raw = sessionStorage.getItem(storageKey);
@@ -261,12 +275,21 @@ function useExpandedSet(storageKey: string): [Set<string>, (key: string, open: b
     });
   }, [storageKey]);
 
+  const expandMany = useCallback((keys: string[]) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      for (const k of keys) next.add(k);
+      sessionStorage.setItem(storageKey, JSON.stringify([...next]));
+      return next;
+    });
+  }, [storageKey]);
+
   const collapseAll = useCallback(() => {
     setExpanded(new Set());
     sessionStorage.removeItem(storageKey);
   }, [storageKey]);
 
-  return [expanded, toggle, collapseAll];
+  return [expanded, toggle, collapseAll, expandMany];
 }
 
 // ---- tab type ----
@@ -290,9 +313,9 @@ export default function DocsPage() {
   const [docsTab, setDocsTab] = useState<DocsTab>('project');
   const autoGenerateTriggered = useRef(false);
 
-  const [projectExpanded, setProjectExpanded, collapseProject] = useExpandedSet(`docs-expanded-project-${id}`);
-  const [databaseExpanded, setDatabaseExpanded, collapseDatabase] = useExpandedSet(`docs-expanded-database-${id}`);
-  const [groupExpanded, setGroupExpanded, collapseGroup] = useExpandedSet(`docs-expanded-group-${id}`);
+  const [projectExpanded, setProjectExpanded, collapseProject, expandProjectMany] = useExpandedSet(`docs-expanded-project-${id}`);
+  const [databaseExpanded, setDatabaseExpanded, collapseDatabase, expandDatabaseMany] = useExpandedSet(`docs-expanded-database-${id}`);
+  const [groupExpanded, setGroupExpanded, collapseGroup, expandGroupMany] = useExpandedSet(`docs-expanded-group-${id}`);
 
   const collapseAll = docsTab === 'project' ? collapseProject : docsTab === 'database' ? collapseDatabase : collapseGroup;
 
@@ -391,6 +414,26 @@ export default function DocsPage() {
       setSearchParams({ node: '__project__' }, { replace: true });
     }
   }, [docsData, selectedUid, setSearchParams]);
+
+  // When a node is selected (e.g. via ReferencedBy link), expand the tree to reveal it
+  useEffect(() => {
+    if (!selectedUid || selectedUid === '__project__' || !docsData) return;
+    // Project tab: sections like "type:model/folder/..."
+    for (const section of projectSections) {
+      const paths = findPathToUid(section.tree, selectedUid, section.id);
+      if (paths) {
+        expandProjectMany(paths);
+        break;
+      }
+    }
+    // Database tab
+    const dbPaths = findPathToUid(databaseTree, selectedUid, '');
+    if (dbPaths) expandDatabaseMany(dbPaths.filter(Boolean));
+    // Group tab
+    const grpPaths = findPathToUid(groupTree, selectedUid, '');
+    if (grpPaths) expandGroupMany(grpPaths.filter(Boolean));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUid, docsData]);
 
   // Clear filter when switching tabs
   useEffect(() => { setFilter(''); }, [docsTab]);
@@ -919,6 +962,7 @@ type NodeTab = 'details' | 'description' | 'columns' | 'referenced_by' | 'code';
 
 function NodeDetail({ node, allNodes, projectId }: { node: DocsNodeDto; allNodes: Map<string, DocsNodeDto>; projectId: number }) {
   const navigate = useNavigate();
+  const [, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<NodeTab>('details');
   const [codeView, setCodeView] = useState<'source' | 'compiled'>('source');
   const [copied, setCopied] = useState(false);
@@ -1014,7 +1058,7 @@ function NodeDetail({ node, allNodes, projectId }: { node: DocsNodeDto; allNodes
             {(node.child_models.length > 0 || node.child_tests.length > 0) && (
               <section>
                 <h2 className="text-sm font-semibold text-gray-200 mb-3">Referenced By</h2>
-                <ReferencedBy childModels={node.child_models} childTests={node.child_tests} allNodes={allNodes} />
+                <ReferencedBy childModels={node.child_models} childTests={node.child_tests} allNodes={allNodes} onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })} />
               </section>
             )}
             {!isTest && (node.raw_code || node.compiled_code) && (
@@ -1051,7 +1095,7 @@ function NodeDetail({ node, allNodes, projectId }: { node: DocsNodeDto; allNodes
         {tab === 'referenced_by' && (
           <div className="flex flex-col gap-3">
             <h2 className="text-sm font-semibold text-gray-200">Referenced By</h2>
-            <ReferencedBy childModels={node.child_models} childTests={node.child_tests} allNodes={allNodes} />
+            <ReferencedBy childModels={node.child_models} childTests={node.child_tests} allNodes={allNodes} onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })} />
           </div>
         )}
         {tab === 'code' && (
@@ -1233,10 +1277,11 @@ function TestBadge({ name }: { name: string }) {
   );
 }
 
-function ReferencedBy({ childModels, childTests, allNodes }: {
+function ReferencedBy({ childModels, childTests, allNodes, onSelect }: {
   childModels: string[];
   childTests: string[];
   allNodes: Map<string, DocsNodeDto>;
+  onSelect: (uid: string) => void;
 }) {
   const [tab, setTab] = useState<'models' | 'tests'>('models');
   return (
@@ -1256,7 +1301,15 @@ function ReferencedBy({ childModels, childTests, allNodes }: {
             ? <p className="text-xs text-gray-600 italic">No models reference this node.</p>
             : childModels.map((uid) => {
                 const n = allNodes.get(uid);
-                return <span key={uid} className="text-xs font-mono text-brand-400">{n?.name ?? uid.split('.').pop()}</span>;
+                return (
+                  <button
+                    key={uid}
+                    onClick={() => onSelect(uid)}
+                    className="text-left text-xs font-mono text-brand-400 hover:text-brand-300 hover:underline transition-colors"
+                  >
+                    {n?.name ?? uid.split('.').pop()}
+                  </button>
+                );
               })
         )}
         {tab === 'tests' && (
@@ -1264,7 +1317,15 @@ function ReferencedBy({ childModels, childTests, allNodes }: {
             ? <p className="text-xs text-gray-600 italic">No data tests for this node.</p>
             : childTests.map((uid) => {
                 const n = allNodes.get(uid);
-                return <span key={uid} className="text-xs font-mono text-gray-400">{n?.name ?? uid.split('.').pop()}</span>;
+                return (
+                  <button
+                    key={uid}
+                    onClick={() => onSelect(uid)}
+                    className="text-left text-xs font-mono text-gray-400 hover:text-gray-200 hover:underline transition-colors"
+                  >
+                    {n?.name ?? uid.split('.').pop()}
+                  </button>
+                );
               })
         )}
       </div>

@@ -19,7 +19,7 @@ Backend on `:8001`, frontend on `:5173`.
 
 ```
 backend/app/
-  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles)
+  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git)
   db/
     models.py     — All SQLAlchemy models (10 tables)
     engine.py     — get_session dependency
@@ -37,8 +37,11 @@ backend/app/
   projects/
     discovery.py  — Walk workspace for dbt_project.yml
     service.py    — Upsert projects to DB; _effective_workspace() for DBT_UI_PROJECTS_PATH
+  git/
+    runner.py     — GitRunner singleton; subprocess + serialization lock per project; stream() publishes git_started/git_log/git_finished
+    repo.py       — find_repo_root() walks upward for .git/; parse_porcelain_v2() parses git status --porcelain=v2 -z
   watcher/
-    service.py    — WatcherManager (watchfiles, per-project)
+    service.py    — WatcherManager (watchfiles, per-project); also watches .git/HEAD, .git/index, .git/refs/ to emit git_status_changed
 
 frontend/src/
   lib/
@@ -52,6 +55,7 @@ frontend/src/
       Models.tsx         — React Flow DAG page (/projects/:projectId/models); supports ?model=<uid> deep-link; uses SidePane(page="dag")
       Docs.tsx           — Native docs browser (folder tree)
       FileExplorer/      — File browser + editor; uses SidePane(page="files") with navigation to DAG
+      Git/               — Source Control page (VSCode-style SCM): ChangesList, DiffView (Monaco DiffEditor), CommitBox, BranchPicker, HistoryPanel
       Environment.tsx    — Env vars + profiles
       InitScripts.tsx    — Init pipeline management
       components/
@@ -82,6 +86,27 @@ All 10 in `backend/app/db/models.py`:
 - `global_profile_vars` — key/value vars belonging to a global profile
 
 ## Critical Architecture Rules
+
+### Git Execution — SUBPROCESS ONLY (GitRunner)
+
+```python
+# CORRECT — always go through git_runner
+from app.git.runner import git_runner, GitRequest
+req = GitRequest(project_id=id, repo_root=repo_path, args=("status", "--porcelain=v2", "--branch", "-z"))
+rc, output = await git_runner.run(req)          # short ops (status, diff, stage, commit, …)
+async for kind, line in git_runner.stream(req): # long ops (push, pull)
+    ...  # bus publishes git_started/git_log/git_finished automatically
+
+# Find repo root (walks upward from project_path)
+from app.git.repo import find_repo_root
+repo = find_repo_root(Path(project.path))  # returns None if not a git repo
+```
+
+- `git_runner` (`app.git.runner.git_runner`) is a **module-level singleton** — never instantiate another
+- Each `project_id` gets its own `asyncio.Lock` — git ops are serialized per project
+- **Never** `import git` or use GitPython — shell out only; same rule as dbt
+- `find_repo_root()` walks upward from the project path, so projects inside a mono-repo are handled correctly
+- After mutating ops (stage/unstage/commit/checkout/push/pull): call `_publish_status_changed(project_id)` to emit `git_status_changed`
 
 ### dbt Execution — SUBPROCESS ONLY
 
@@ -148,6 +173,11 @@ finally:
 | `init_finished` | init | PTY process exited (dbt init interactive) |
 | `terminal_output` | terminal | PTY terminal chunk (bash terminal) |
 | `terminal_finished` | terminal | PTY process exited (bash terminal) |
+| `git_status_changed` | project | git index/branch changed — frontend re-fetches git status |
+| `git_started` | project | git push/pull started |
+| `git_log` | project | one line of git push/pull output |
+| `git_finished` | project | git push/pull exited |
+| `git_error` | project | git executable not found on PATH |
 
 ### Init Pipeline System
 

@@ -8,6 +8,7 @@ import InitScriptsPage from './routes/Project/InitScripts';
 import FileExplorerPage from './routes/Project/FileExplorer';
 import EnvironmentPage from './routes/Project/Environment';
 import DocsPage from './routes/Project/Docs';
+import GitPage from './routes/Project/Git';
 
 export default function App() {
   return (
@@ -24,6 +25,7 @@ export default function App() {
               <Route path="files" element={<FileExplorerPage />} />
               <Route path="environment" element={<EnvironmentPage />} />
               <Route path="docs" element={<DocsPage />} />
+              <Route path="git" element={<GitPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

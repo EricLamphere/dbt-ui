@@ -20,6 +20,7 @@ from app.api import projects as projects_api
 from app.api import runs as runs_api
 from app.api import settings as settings_api
 from app.api import sql as sql_api
+from app.api import git as git_api
 from app.api import terminal as terminal_api
 from app.config import settings
 from app.db.engine import SessionLocal
@@ -74,6 +75,7 @@ app.include_router(files_api.fs_router)
 app.include_router(global_profiles_api.router)
 app.include_router(logs_api.router)
 app.include_router(terminal_api.router)
+app.include_router(git_api.router)
 
 
 @app.middleware("http")
