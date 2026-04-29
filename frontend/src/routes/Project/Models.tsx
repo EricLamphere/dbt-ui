@@ -123,6 +123,9 @@ export default function ModelsPage() {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   // Active column selections: Set of "uid::colname" keys. Supports multi-select via cmd/ctrl+click.
   const [activeColumnSels, setActiveColumnSels] = useState<Set<string>>(new Set());
+  // Lineage trace mode: 'direct' shows only immediate upstream/downstream of the clicked column;
+  // 'full' follows the complete transitive closure (can pull in sibling columns via shared nodes).
+  const [lineageMode, setLineageMode] = useState<'direct' | 'full'>('direct');
 
   // Resizable nav rail
   const [navWidth, setNavWidth] = useState(192);
@@ -290,10 +293,42 @@ export default function ModelsPage() {
   }, [columnLineage]);
 
   // For a given (nodeId, column) seed, return all connected {uid, col} pairs
-  // (both upstream and downstream) including the seed itself.
+  // including the seed itself.
+  //
+  // 'direct': one hop upstream + one hop downstream only — never recurses into discovered nodes.
+  //   Prevents sibling columns from being highlighted when they share a downstream dependency.
+  // 'full': full transitive closure in both directions.
   const traceColumn = useCallback((nodeId: string, column: string): Array<{ n: string; c: string }> => {
     if (!columnLineage) return [{ n: nodeId, c: column }];
     const lineage = columnLineage.lineage;
+    const seedKey = `${nodeId}::${column}`;
+
+    if (lineageMode === 'direct') {
+      const seen = new Set<string>([seedKey]);
+      const result: Array<{ n: string; c: string }> = [{ n: nodeId, c: column }];
+
+      // Walk upstream only (follow lineage refs recursively, never reverse direction)
+      const walkUp = (n: string, c: string) => {
+        for (const ref of lineage[n]?.[c] ?? []) {
+          const k = `${ref.node}::${ref.column}`;
+          if (!seen.has(k)) { seen.add(k); result.push({ n: ref.node, c: ref.column }); walkUp(ref.node, ref.column); }
+        }
+      };
+
+      // Walk downstream only (follow reverse index recursively, never reverse direction)
+      const walkDown = (n: string, c: string) => {
+        const k = `${n}::${c}`;
+        for (const entry of reverseLineageIndex.get(k) ?? []) {
+          const ek = `${entry.n}::${entry.c}`;
+          if (!seen.has(ek)) { seen.add(ek); result.push({ n: entry.n, c: entry.c }); walkDown(entry.n, entry.c); }
+        }
+      };
+
+      walkUp(nodeId, column);
+      walkDown(nodeId, column);
+      return result;
+    }
+
     const all: Array<{ n: string; c: string }> = [];
     const visited = new Set<string>();
 
@@ -302,15 +337,13 @@ export default function ModelsPage() {
       if (visited.has(key)) return;
       visited.add(key);
       all.push({ n, c });
-      // upstream
       for (const ref of lineage[n]?.[c] ?? []) enqueue(ref.node, ref.column);
-      // downstream
       for (const entry of reverseLineageIndex.get(key) ?? []) enqueue(entry.n, entry.c);
     };
 
     enqueue(nodeId, column);
     return all;
-  }, [columnLineage, reverseLineageIndex]);
+  }, [columnLineage, reverseLineageIndex, lineageMode]);
 
   // Compute connected node UIDs and related columns for all active selections combined.
   const { columnConnectedUids, relatedColumnsMap } = useMemo(() => {
@@ -491,14 +524,28 @@ export default function ModelsPage() {
             minZoom={0.1}
           >
             <FitViewOnFirstLoad trigger={layoutNodes} />
-            {columnLineageLoading && (
-              <Panel position="top-center">
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/90 border border-zinc-700 text-xs text-zinc-400 shadow-lg">
-                  <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
-                  Column lineage loading…
-                </div>
-              </Panel>
-            )}
+            <Panel position="top-center">
+              <div className="flex items-center gap-2">
+                {columnLineageLoading && (
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/90 border border-zinc-700 text-xs text-zinc-400 shadow-lg">
+                    <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
+                    Column lineage loading…
+                  </div>
+                )}
+                {activeColumnSels.size > 0 && (
+                  <button
+                    onClick={() => setLineageMode((m) => m === 'direct' ? 'full' : 'direct')}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/90 border border-zinc-700 text-xs shadow-lg transition-colors hover:bg-zinc-700/90"
+                    title={lineageMode === 'direct' ? 'Switch to full transitive closure' : 'Switch to direct lineage only'}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${lineageMode === 'direct' ? 'bg-brand-400' : 'bg-amber-400'}`} />
+                    <span className={lineageMode === 'direct' ? 'text-zinc-300' : 'text-amber-300'}>
+                      {lineageMode === 'direct' ? 'Direct lineage' : 'Full lineage'}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </Panel>
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1f2937" />
             <Controls showInteractive={false} className="!bg-surface-panel !border-gray-800" />
             <MiniMap
