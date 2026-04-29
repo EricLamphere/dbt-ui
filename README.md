@@ -19,6 +19,12 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 - **Interactive project creation** — `dbt init` runs in a full in-browser terminal; adapter install, profiles.yml setup, and project discovery all handled automatically
 - **Source control (Git)** — VSCode-style source control panel: view changed files, stage/unstage, Monaco diff viewer, commit, push/pull with live streaming output, branch switch/create, and commit history
 
+## Stack highlights
+- Backend: FastAPI, SQLAlchemy (async), aiosqlite, sse-starlette, watchfiles, ptyprocess
+- Frontend: React 18, Vite, TypeScript, @xyflow/react, dagre, Monaco, xterm.js, TanStack Query, Tailwind CSS
+- DB: SQLite (10 tables)
+- dbt invocation: subprocess only via `backend/.venv/bin/dbt` (serialized per project via asyncio.Lock)
+
 ## Quickstart
 
 ### Prerequisites
@@ -61,87 +67,15 @@ export DBT_UI_PROJECTS_PATH=$HOME/dbt-projects
 task start
 ```
 
-## Development
-
-### Run dev servers
-
-```bash
-task start          # backend + frontend in parallel (foreground)
-task start:bg       # headless daemon mode; logs → data/logs/
-task stop           # kill headless daemons
-```
-
-Or run separately:
-
-```bash
-task dev:backend    # FastAPI with hot reload (:8001)
-task dev:frontend   # Vite dev server, proxies /api → :8001 (:5173)
-```
-
-### Tests
-
-```bash
-task test           # backend pytest + frontend tsc check
-task test:backend   # pytest with coverage report
-```
-
-### Lint
-
-```bash
-task lint
-```
-
-### Reset database
-
-```bash
-task db:reset
-```
-
-## Architecture
-
-```
-dbt-ui/
-├── backend/          FastAPI, SQLAlchemy/aiosqlite, watchfiles, sse-starlette, ptyprocess
-│   └── app/
-│       ├── api/      REST endpoints + SSE (projects, models, runs, init, terminal, docs, settings, …)
-│       ├── db/       SQLAlchemy models (10 tables) + idempotent startup migrations
-│       ├── dbt/      manifest parser, run_results, subprocess runner, venv binary helpers, init scripts, PTY manager
-│       ├── events/   in-process pub/sub EventBus, SSE helpers
-│       ├── projects/ discovery + service (_effective_workspace)
-│       └── watcher/  watchfiles per-project task
-├── frontend/         React + Vite + TypeScript
-│   └── src/
-│       ├── routes/   Home, Project/index, Models (DAG + filter), Docs, FileExplorer, Environment, InitScripts
-│       ├── components/ Header, StatusBadge, GlobalSetupModal, shared UI
-│       └── lib/      api.ts, sse.ts (useProjectEvents, useInitSessionEvents, useTerminalEvents)
-├── docs/
-│   └── architecture.md
-├── data/             SQLite database + daemon pid files + logs (git-ignored)
-└── Taskfile.yml
-```
-
-**Stack highlights:**
-- Backend: FastAPI, SQLAlchemy (async), aiosqlite, sse-starlette, watchfiles, ptyprocess
-- Frontend: React 18, Vite, TypeScript, @xyflow/react, dagre, Monaco, xterm.js, TanStack Query, Tailwind CSS
-- DB: SQLite (10 tables)
-- dbt invocation: subprocess only via `backend/.venv/bin/dbt` (serialized per project via asyncio.Lock)
 
 ## Environment Variables
 
 | Variable | Default | Description |
 |---|---|---|
 | `DBT_UI_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects (overridable via UI) |
+| `DBT_UI_GLOBAL_REQUIREMENTS_PATH` | _(none)_ | Path to a `requirements.txt` installed into the dbt venv on every project open |
 | `DBT_UI_DATA_DIR` | `data/` | SQLite storage directory |
 | `DBT_UI_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
-
-The following are stored in the DB via the Global Settings UI and override the environment variables above:
-
-| Setting key | Description |
-|---|---|
-| `dbt_projects_path` | Overrides `DBT_UI_PROJECTS_PATH` |
-| `global_requirements_path` | Path to a `requirements.txt` installed into the dbt venv on every project open |
-| `data_dir` | Overrides `DBT_UI_DATA_DIR` |
-| `log_level` | Overrides `DBT_UI_LOG_LEVEL` |
 
 Per-project settings (stored in `project_env_vars`, injected into every dbt subprocess):
 
