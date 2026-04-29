@@ -104,7 +104,9 @@ async def get_models(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    manifest: Manifest | None = load_manifest(Path(project.path) / "target" / "manifest.json")
+    loop = asyncio.get_event_loop()
+    manifest_path = Path(project.path) / "target" / "manifest.json"
+    manifest: Manifest | None = await loop.run_in_executor(None, load_manifest, manifest_path)
     if manifest is None:
         return GraphDto(nodes=[], edges=[])
 
@@ -123,7 +125,8 @@ async def get_column_lineage(
         raise HTTPException(status_code=404, detail="project not found")
 
     manifest_path = Path(project.path) / "target" / "manifest.json"
-    raw = build_column_lineage(manifest_path)
+    loop = asyncio.get_event_loop()
+    raw = await loop.run_in_executor(None, build_column_lineage, manifest_path)
 
     lineage: dict[str, dict[str, list[ColumnLineageEntryDto]]] = {
         uid: {
@@ -144,7 +147,8 @@ async def get_model(
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
-    manifest = load_manifest(Path(project.path) / "target" / "manifest.json")
+    loop = asyncio.get_event_loop()
+    manifest = await loop.run_in_executor(None, load_manifest, Path(project.path) / "target" / "manifest.json")
     if manifest is None:
         raise HTTPException(status_code=404, detail="manifest not found")
     node = next((n for n in manifest.nodes if n.unique_id == unique_id), None)
@@ -204,7 +208,8 @@ async def delete_model(
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
-    manifest = load_manifest(Path(project.path) / "target" / "manifest.json")
+    loop = asyncio.get_event_loop()
+    manifest = await loop.run_in_executor(None, load_manifest, Path(project.path) / "target" / "manifest.json")
     if manifest is None:
         raise HTTPException(status_code=404, detail="manifest not found")
     node = next((n for n in manifest.nodes if n.unique_id == unique_id), None)
@@ -264,7 +269,8 @@ async def get_compiled(
         raise HTTPException(status_code=404, detail="project not found")
 
     if not force:
-        manifest = load_manifest(Path(project.path) / "target" / "manifest.json")
+        loop = asyncio.get_event_loop()
+        manifest = await loop.run_in_executor(None, load_manifest, Path(project.path) / "target" / "manifest.json")
         if manifest is not None:
             node = next((n for n in manifest.nodes if n.unique_id == unique_id), None)
             if node and node.compiled_sql:
@@ -300,7 +306,8 @@ async def get_compiled(
         raise HTTPException(status_code=422, detail=f"dbt compile failed:\n{stdout_str[-1000:]}")
     append_project_log(project.path, f"<<< dbt compile --select {model_name} OK", project_id)
 
-    manifest2 = load_manifest(Path(project.path) / "target" / "manifest.json")
+    loop = asyncio.get_event_loop()
+    manifest2 = await loop.run_in_executor(None, load_manifest, Path(project.path) / "target" / "manifest.json")
     if manifest2 is not None:
         node2 = next((n for n in manifest2.nodes if n.unique_id == unique_id), None)
         if node2 and node2.compiled_sql:
