@@ -665,9 +665,6 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
             data={"status": "success"},
         )
     )
-    # Run dbt compile in the background so the DAG is populated immediately
-    from app.api.models import _compile_project
-    asyncio.create_task(_compile_project(project_id, project_path))
 
 
 async def _capture_script_exports(
