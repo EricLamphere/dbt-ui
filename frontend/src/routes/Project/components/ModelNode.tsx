@@ -30,14 +30,30 @@ const TYPE_ICON: Record<string, string> = {
 };
 
 interface Props extends NodeProps {
-  data: { model: ModelNode; dimmed?: boolean };
+  data: {
+    model: ModelNode;
+    dimmed?: boolean;
+    expanded?: boolean;
+    // Set of column names on this node that are actively selected
+    activeColumns?: Set<string>;
+    // Set of column names on this node that are lineage-connected but not selected
+    relatedColumns?: Set<string>;
+    onColumnClick?: (nodeId: string, column: string, multi: boolean) => void;
+    onToggleExpand?: (nodeId: string) => void;
+  };
 }
 
 export default function ModelNodeComponent({ data, selected }: Props) {
-  const { model, dimmed } = data;
+  const {
+    model, dimmed, expanded,
+    activeColumns = new Set<string>(),
+    relatedColumns = new Set<string>(),
+    onColumnClick, onToggleExpand,
+  } = data;
   const ring = STATUS_RING[model.status] ?? STATUS_RING.idle;
   const dot = STATUS_DOT[model.status] ?? STATUS_DOT.idle;
   const icon = TYPE_ICON[model.resource_type] ?? '▣';
+  const hasColumns = model.columns.length > 0;
 
   return (
     <>
@@ -45,23 +61,85 @@ export default function ModelNodeComponent({ data, selected }: Props) {
       <div
         style={{ opacity: dimmed ? 0.2 : 1 }}
         className={`
-          w-[200px] h-[72px] rounded-lg ring-2 px-3 py-2 flex flex-col justify-between
+          w-[200px] rounded-lg ring-2 px-3 py-2 flex flex-col
           cursor-pointer select-none transition-all duration-150
           ${selected
             ? 'node-selected ring-2 shadow-lg'
             : `bg-surface-panel ${ring} ring-1 hover:brightness-105`}
         `}
       >
+        {/* Header row */}
         <div className="flex items-center justify-between gap-2">
           <span className="text-gray-400 text-xs">{icon}</span>
           <span className="text-[10px] text-gray-500 font-mono truncate flex-1">{model.resource_type}</span>
           <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
         </div>
-        <div className={`node-name font-medium text-xs truncate ${selected ? 'text-white' : 'text-gray-100'}`} title={model.name}>
+
+        {/* Model name */}
+        <div
+          className={`node-name font-medium text-xs truncate mt-1 ${selected ? 'text-white' : 'text-gray-100'}`}
+          title={model.name}
+        >
           {model.name}
         </div>
+
+        {/* Materialization */}
         {model.materialized && (
-          <div className="text-[9px] text-gray-600 font-mono truncate">{model.materialized}</div>
+          <div className="text-[9px] text-gray-600 font-mono truncate mt-0.5">{model.materialized}</div>
+        )}
+
+        {/* Expand/collapse toggle */}
+        {hasColumns && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleExpand?.(model.unique_id);
+            }}
+            className="w-full text-center text-[9px] text-gray-600 hover:text-gray-400 py-0.5 border-t border-zinc-700 mt-1.5 leading-none"
+          >
+            {expanded ? `▲ hide` : `▼ ${model.columns.length} columns`}
+          </button>
+        )}
+
+        {/* Column list */}
+        {expanded && hasColumns && (
+          <div
+            className="border-t border-zinc-700 mt-1 pt-1 max-h-[150px] overflow-y-auto"
+            onWheelCapture={(e) => e.stopPropagation()}
+          >
+            {model.columns.map((col) => {
+              const isActive = activeColumns.has(col.name);
+              const isRelated = !isActive && relatedColumns.has(col.name);
+              return (
+                <div
+                  key={col.name}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onColumnClick?.(model.unique_id, col.name, e.metaKey || e.ctrlKey);
+                  }}
+                  className={`
+                    px-1 py-0.5 cursor-pointer rounded text-[10px] font-mono
+                    flex justify-between items-center gap-1
+                    ${isActive
+                      ? 'bg-brand-500/20 text-white ring-1 ring-brand-500/40'
+                      : isRelated
+                        ? 'text-gray-100 font-semibold bg-zinc-700/50 hover:bg-zinc-700'
+                        : 'text-gray-400 hover:bg-zinc-700 hover:text-gray-300'}
+                  `}
+                >
+                  <span className="truncate flex items-center gap-1">
+                    {isRelated && (
+                      <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-400/70 shrink-0" />
+                    )}
+                    {col.name}
+                  </span>
+                  {col.data_type && (
+                    <span className="text-[8px] text-gray-600 shrink-0 font-sans">{col.data_type}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         )}
       </div>
       <Handle type="source" position={Position.Right} style={{ background: 'rgb(var(--brand-500))', border: 'none' }} />

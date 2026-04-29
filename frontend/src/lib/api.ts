@@ -68,6 +68,12 @@ export interface Project {
   profiles_yml: string | null;
 }
 
+export interface ColumnInfo {
+  name: string;
+  description: string;
+  data_type: string;
+}
+
 export interface ModelNode {
   unique_id: string;
   name: string;
@@ -81,6 +87,16 @@ export interface ModelNode {
   source_name: string | null;
   status: 'idle' | 'pending' | 'running' | 'success' | 'error' | 'stale' | 'warn';
   message: string | null;
+  columns: ColumnInfo[];
+}
+
+export interface ColumnLineageEntry {
+  node: string;
+  column: string;
+}
+
+export interface ColumnLineageDto {
+  lineage: Record<string, Record<string, ColumnLineageEntry[]>>;
 }
 
 export interface Edge {
@@ -307,6 +323,8 @@ export const api = {
   },
   models: {
     graph: (projectId: number) => get<GraphDto>(`/projects/${projectId}/models`),
+    columnLineage: (projectId: number) =>
+      get<ColumnLineageDto>(`/projects/${projectId}/column-lineage`),
     sql: (projectId: number, uniqueId: string) =>
       get<SqlDto>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/sql`),
     saveSql: (projectId: number, uniqueId: string, content: string) =>

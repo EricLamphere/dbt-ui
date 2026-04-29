@@ -1,11 +1,18 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from app.logging_setup import get_logger
 
 log = get_logger(__name__)
+
+
+@dataclass(frozen=True)
+class ColumnInfo:
+    name: str
+    description: str
+    data_type: str
 
 
 @dataclass(frozen=True)
@@ -22,6 +29,7 @@ class ModelNode:
     raw_sql: str | None
     compiled_sql: str | None = None
     source_name: str | None = None  # set for resource_type == "source"
+    columns: tuple[ColumnInfo, ...] = field(default_factory=tuple)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -35,6 +43,10 @@ class ModelNode:
             "description": self.description,
             "original_file_path": self.original_file_path,
             "source_name": self.source_name,
+            "columns": [
+                {"name": c.name, "description": c.description, "data_type": c.data_type}
+                for c in self.columns
+            ],
         }
 
 
@@ -60,6 +72,15 @@ def _extract_node(unique_id: str, raw: dict[str, Any]) -> ModelNode | None:
     if resource_type not in {"model", "seed", "snapshot", "test", "source"}:
         return None
     config = raw.get("config") or {}
+    raw_columns: dict[str, Any] = raw.get("columns") or {}
+    columns = tuple(
+        ColumnInfo(
+            name=k,
+            description=v.get("description") or "" if isinstance(v, dict) else "",
+            data_type=v.get("data_type") or "" if isinstance(v, dict) else "",
+        )
+        for k, v in raw_columns.items()
+    )
     return ModelNode(
         unique_id=unique_id,
         name=raw.get("name") or unique_id.split(".")[-1],
@@ -73,6 +94,7 @@ def _extract_node(unique_id: str, raw: dict[str, Any]) -> ModelNode | None:
         raw_sql=raw.get("raw_code") or raw.get("raw_sql"),
         compiled_sql=raw.get("compiled_code") or raw.get("compiled_sql"),
         source_name=raw.get("source_name") if resource_type == "source" else None,
+        columns=columns,
     )
 
 

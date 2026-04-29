@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.engine import get_session
 from app.db.models import ModelStatus, Project
 from app.dbt.manifest import Manifest, ModelNode, load_manifest
+from app.dbt.column_lineage import build_column_lineage, ColumnRef
 from app.logs.project_logger import append_project_log
 
 router = APIRouter(prefix="/api/projects", tags=["models"])
@@ -26,6 +27,12 @@ class NewModelResponseDto(BaseModel):
     path: str
 
 
+class ColumnDto(BaseModel):
+    name: str
+    description: str = ""
+    data_type: str = ""
+
+
 class ModelDto(BaseModel):
     unique_id: str
     name: str
@@ -38,8 +45,18 @@ class ModelDto(BaseModel):
     original_file_path: str | None = None
     status: str = "idle"
     message: str | None = None
+    columns: list[ColumnDto] = []
 
     model_config = ConfigDict(populate_by_name=True)
+
+
+class ColumnLineageEntryDto(BaseModel):
+    node: str
+    column: str
+
+
+class ColumnLineageDto(BaseModel):
+    lineage: dict[str, dict[str, list[ColumnLineageEntryDto]]]
 
 
 class EdgeDto(BaseModel):
@@ -65,6 +82,10 @@ def _node_to_dto(node: ModelNode, status: ModelStatus | None) -> ModelDto:
         original_file_path=node.original_file_path,
         status=status.status if status else "idle",
         message=status.message if status else None,
+        columns=[
+            ColumnDto(name=c.name, description=c.description, data_type=c.data_type)
+            for c in node.columns
+        ],
     )
 
 
@@ -91,6 +112,27 @@ async def get_models(
     nodes = [_node_to_dto(n, statuses.get(n.unique_id)) for n in manifest.nodes]
     edges = [EdgeDto(source=s, target=t) for s, t in manifest.edges()]
     return GraphDto(nodes=nodes, edges=edges)
+
+
+@router.get("/{project_id}/column-lineage", response_model=ColumnLineageDto)
+async def get_column_lineage(
+    project_id: int, session: AsyncSession = Depends(get_session)
+) -> ColumnLineageDto:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+
+    manifest_path = Path(project.path) / "target" / "manifest.json"
+    raw = build_column_lineage(manifest_path)
+
+    lineage: dict[str, dict[str, list[ColumnLineageEntryDto]]] = {
+        uid: {
+            col: [ColumnLineageEntryDto(node=ref.node, column=ref.column) for ref in refs]
+            for col, refs in col_map.items()
+        }
+        for uid, col_map in raw.items()
+    }
+    return ColumnLineageDto(lineage=lineage)
 
 
 @router.get("/{project_id}/models/{unique_id}", response_model=ModelDto)

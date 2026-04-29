@@ -23,7 +23,7 @@ import ProjectNav from './components/ProjectNav';
 import { SidePane } from './components/SidePane';
 import { type ShowRows } from './components/SidePane/PropertiesTab';
 import DagFilterBar from './components/DagFilterBar';
-import { computeLayout } from './lib/layout';
+import { computeLayout, NODE_HEIGHT } from './lib/layout';
 import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserializeFilter } from './lib/dagFilter';
 
 type LiveStatus = 'running' | 'success' | 'error' | 'warn';
@@ -115,6 +115,11 @@ export default function ModelsPage() {
   // Live run status overlay: model name → status, applied on top of cached graph data
   const [liveStatuses, setLiveStatuses] = useState<Record<string, LiveStatus>>({});
 
+  // Column lineage state
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  // Active column selections: Set of "uid::colname" keys. Supports multi-select via cmd/ctrl+click.
+  const [activeColumnSels, setActiveColumnSels] = useState<Set<string>>(new Set());
+
   // Resizable nav rail
   const [navWidth, setNavWidth] = useState(192);
   const navResizing = useRef(false);
@@ -137,6 +142,12 @@ export default function ModelsPage() {
   const { data: graph } = useQuery({
     queryKey: ['models', id],
     queryFn: () => api.models.graph(id),
+    refetchInterval: false,
+  });
+
+  const { data: columnLineage } = useQuery({
+    queryKey: ['column-lineage', id],
+    queryFn: () => api.models.columnLineage(id),
     refetchInterval: false,
   });
 
@@ -165,6 +176,7 @@ export default function ModelsPage() {
       setTestShowRows({});
       try { sessionStorage.removeItem(`dag-show-rows-${id}`); } catch {}
       qc.invalidateQueries({ queryKey: ['models', id] });
+      qc.invalidateQueries({ queryKey: ['column-lineage', id] });
     }
     if (event.type === 'compile_started') setCompiling(true);
     if (event.type === 'compile_finished') setCompiling(false);
@@ -192,20 +204,32 @@ export default function ModelsPage() {
     return applyFilter(liveGraph, filter);
   }, [graph, filter, liveStatuses]);
 
+  // Per-node heights for expanded nodes (used by dagre layout)
+  const nodeHeights = useMemo(() => {
+    if (!graph) return new Map<string, number>();
+    const heights = new Map<string, number>();
+    for (const node of graph.nodes) {
+      if (expandedNodes.has(node.unique_id) && node.columns.length > 0) {
+        const colHeight = Math.min(node.columns.length * 22, 150);
+        // base height + toggle button (~20px) + column list
+        heights.set(node.unique_id, NODE_HEIGHT + 20 + colHeight);
+      }
+    }
+    return heights;
+  }, [graph, expandedNodes]);
+
   const { nodes: layoutNodes, edges: layoutEdges } = useMemo(
     () =>
       filteredGraph
-        ? computeLayout(filteredGraph.nodes, filteredGraph.edges)
+        ? computeLayout(filteredGraph.nodes, filteredGraph.edges, nodeHeights)
         : { nodes: [], edges: [] },
-    [filteredGraph],
+    [filteredGraph, nodeHeights],
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
 
-  // Compute the set of uids that are upstream OR downstream of any selected node.
-  // Walk forwards (descendants) and backwards (ancestors) SEPARATELY from each seed —
-  // never mix directions, otherwise every weakly-connected node gets included.
+  // Compute the set of uids connected to the selected model via standard graph edges
   const connectedUids = useMemo(() => {
     const seeds = selectedModels.length > 0
       ? selectedModels.map((m) => m.unique_id)
@@ -244,23 +268,134 @@ export default function ModelsPage() {
     return connected;
   }, [selectedModel, selectedModels, layoutEdges]);
 
+  // Precompute a reverse lineage index once per lineage fetch:
+  // upstream_uid::col → [{downNode, downCol}]
+  const reverseLineageIndex = useMemo(() => {
+    const idx = new Map<string, Array<{ n: string; c: string }>>();
+    if (!columnLineage) return idx;
+    for (const [downNode, colMap] of Object.entries(columnLineage.lineage)) {
+      for (const [downCol, refs] of Object.entries(colMap)) {
+        for (const ref of refs) {
+          const key = `${ref.node}::${ref.column}`;
+          if (!idx.has(key)) idx.set(key, []);
+          idx.get(key)!.push({ n: downNode, c: downCol });
+        }
+      }
+    }
+    return idx;
+  }, [columnLineage]);
+
+  // For a given (nodeId, column) seed, return all connected {uid, col} pairs
+  // (both upstream and downstream) including the seed itself.
+  const traceColumn = useCallback((nodeId: string, column: string): Array<{ n: string; c: string }> => {
+    if (!columnLineage) return [{ n: nodeId, c: column }];
+    const lineage = columnLineage.lineage;
+    const all: Array<{ n: string; c: string }> = [];
+    const visited = new Set<string>();
+
+    const enqueue = (n: string, c: string) => {
+      const key = `${n}::${c}`;
+      if (visited.has(key)) return;
+      visited.add(key);
+      all.push({ n, c });
+      // upstream
+      for (const ref of lineage[n]?.[c] ?? []) enqueue(ref.node, ref.column);
+      // downstream
+      for (const entry of reverseLineageIndex.get(key) ?? []) enqueue(entry.n, entry.c);
+    };
+
+    enqueue(nodeId, column);
+    return all;
+  }, [columnLineage, reverseLineageIndex]);
+
+  // Compute connected node UIDs and related columns for all active selections combined.
+  const { columnConnectedUids, relatedColumnsMap } = useMemo(() => {
+    if (activeColumnSels.size === 0 || !columnLineage) {
+      return { columnConnectedUids: null, relatedColumnsMap: new Map<string, Set<string>>() };
+    }
+
+    const connectedUidSet = new Set<string>();
+    // related: uid → set of column names that are lineage-connected (but not selected)
+    const related = new Map<string, Set<string>>();
+
+    for (const key of activeColumnSels) {
+      const sep = key.indexOf('::');
+      const nodeId = key.slice(0, sep);
+      const col = key.slice(sep + 2);
+      for (const { n, c } of traceColumn(nodeId, col)) {
+        connectedUidSet.add(n);
+        // Mark as related unless it is one of the selected columns itself
+        if (!activeColumnSels.has(`${n}::${c}`)) {
+          if (!related.has(n)) related.set(n, new Set());
+          related.get(n)!.add(c);
+        }
+      }
+    }
+
+    return { columnConnectedUids: connectedUidSet, relatedColumnsMap: related };
+  }, [activeColumnSels, columnLineage, traceColumn]);
+
+  // Handlers for column expand/collapse and selection — stable references
+  const handleColumnClick = useCallback((nodeId: string, column: string, multi: boolean) => {
+    const key = `${nodeId}::${column}`;
+    setActiveColumnSels((prev) => {
+      if (multi) {
+        const next = new Set(prev);
+        if (next.has(key)) next.delete(key); else next.add(key);
+        return next;
+      }
+      // Single click: toggle off if already the only selection, else replace
+      if (prev.size === 1 && prev.has(key)) return new Set();
+      return new Set([key]);
+    });
+  }, []);
+
+  const handleToggleExpand = useCallback((nodeId: string) => {
+    setExpandedNodes((prev) => {
+      const next = new Set(prev);
+      if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
+      return next;
+    });
+    // Clear any column selections owned by this node when collapsing
+    setActiveColumnSels((prev) => {
+      const next = new Set(prev);
+      for (const key of prev) {
+        if (key.startsWith(`${nodeId}::`)) next.delete(key);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, []);
+
   // Sync layout + dimming into React Flow's node state.
-  // Do NOT force `selected` from selectedModel — that breaks multi-select; let React Flow
-  // manage its own selection state via onNodesChange.
+  // Column lineage dimming takes precedence over model-level dimming when columns are selected.
   useEffect(() => {
+    const effectiveConnected = columnConnectedUids ?? connectedUids;
     setNodes((prev) => {
       const prevSelected = new Map(prev.map((n) => [n.id, n.selected ?? false]));
       return layoutNodes.map((n) => {
         const uid = (n.data?.model as ModelNode | undefined)?.unique_id ?? '';
+        // Collect selected column names for this node
+        const activeColumns = new Set<string>();
+        for (const key of activeColumnSels) {
+          if (key.startsWith(`${uid}::`)) activeColumns.add(key.slice(uid.length + 2));
+        }
         return {
           ...n,
           selected: prevSelected.get(n.id) ?? false,
-          data: { ...n.data, dimmed: connectedUids !== null && !connectedUids.has(uid) },
+          data: {
+            ...n.data,
+            dimmed: effectiveConnected !== null && !effectiveConnected.has(uid),
+            expanded: expandedNodes.has(uid),
+            activeColumns,
+            relatedColumns: relatedColumnsMap.get(uid) ?? new Set<string>(),
+            onColumnClick: handleColumnClick,
+            onToggleExpand: handleToggleExpand,
+          },
         };
       });
     });
     setEdges(layoutEdges);
-  }, [layoutNodes, layoutEdges, connectedUids, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layoutNodes, layoutEdges, connectedUids, columnConnectedUids, relatedColumnsMap, expandedNodes, activeColumnSels, handleColumnClick, handleToggleExpand, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When deep-link param changes, push selection through React Flow's state.
   useEffect(() => {
@@ -282,7 +417,11 @@ export default function ModelsPage() {
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       const model = node.data?.model as ModelNode | undefined;
-      if (model) setSelectedModel(model);
+      if (model) {
+        setSelectedModel(model);
+        // Clicking the node canvas (not a column) clears column selections
+        setActiveColumnSels(new Set());
+      }
     },
     [],
   );
@@ -293,7 +432,10 @@ export default function ModelsPage() {
       .filter((m): m is ModelNode => m !== undefined);
     setSelectedModels(models);
     if (models.length === 1) setSelectedModel(models[0]);
-    if (models.length === 0) setSelectedModel(null);
+    if (models.length === 0) {
+      setSelectedModel(null);
+      setActiveColumnSels(new Set());
+    }
   }, []);
 
   const handleRefreshDag = async () => {
