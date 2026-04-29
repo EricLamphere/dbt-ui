@@ -31,6 +31,22 @@ export default function FileExplorerPage() {
   const [selectedModel, setSelectedModel] = useState<ModelNode | null>(null);
   /** unique_id of the model corresponding to the open file, for ViewPane compiled SQL */
   const [modelUid, setModelUid] = useState<string | null>(null);
+  const PREVIEW_CACHE_KEY = `file-explorer-preview-${id}`;
+
+  /** dbt show results keyed by modelUid — persisted to sessionStorage so it survives route navigation */
+  const [previewCache, setPreviewCache] = useState<Map<string, { columns: string[]; rows: unknown[][] }>>(() => {
+    try {
+      const raw = sessionStorage.getItem(`file-explorer-preview-${id}`);
+      return raw ? new Map(JSON.parse(raw) as [string, { columns: string[]; rows: unknown[][] }][]) : new Map();
+    } catch {
+      return new Map();
+    }
+  });
+
+  // File navigation history (max 10, session-scoped in component state)
+  const [fileHistory, setFileHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const historyIndexRef = useRef(-1);
 
   // Resizable panels
   const [treeWidth, setTreeWidth] = useState(256);
@@ -127,7 +143,7 @@ export default function FileExplorerPage() {
     reloadDir();
   }, [reloadDir]);
 
-  const openFileNode = useCallback(async (path: string) => {
+  const openFileNode = useCallback(async (path: string, skipHistory = false) => {
     setLoadingPath(path);
     setEdited(undefined);
     setSaveStatus('idle');
@@ -144,6 +160,16 @@ export default function FileExplorerPage() {
           setModelUid(null);
           setSelectedModel(null);
         }
+      }
+      if (!skipHistory) {
+        setFileHistory((prev) => {
+          const base = prev.slice(0, historyIndexRef.current + 1);
+          const next = [...base, path].slice(-10);
+          const newIndex = next.length - 1;
+          historyIndexRef.current = newIndex;
+          setHistoryIndex(newIndex);
+          return next;
+        });
       }
     } catch (e) {
       console.error(e);
@@ -175,20 +201,23 @@ export default function FileExplorerPage() {
       })
     );
 
-    // Single tree update: walk down by segment name, expanding and injecting fetched children
+    // Single tree update: walk down by segment name, expanding and injecting fetched children.
+    // We only replace children for a directory when it has no children yet (first open); otherwise
+    // we keep the existing subtree so already-expanded nested folders are not collapsed.
     setTree((prev) => {
       const expand = (nodes: TreeNode[], remaining: string[], depth: number): TreeNode[] =>
         nodes.map((n) => {
           if (!n.is_dir || n.name !== remaining[0]) return n;
           const dirPath = dirSegments.slice(0, depth + 1).join('/');
-          const fetchedChildren = childrenByPath[dirPath] ?? n.children ?? [];
+          const existingChildren = n.children ?? [];
+          const children = existingChildren.length > 0 ? existingChildren : ((childrenByPath[dirPath] ?? []) as TreeNode[]);
           if (remaining.length === 1) {
-            return { ...n, expanded: true, children: fetchedChildren };
+            return { ...n, expanded: true, children };
           }
           return {
             ...n,
             expanded: true,
-            children: expand(fetchedChildren, remaining.slice(1), depth + 1),
+            children: expand(children, remaining.slice(1), depth + 1),
           };
         });
       return expand(prev, dirSegments, 0);
@@ -206,6 +235,26 @@ export default function FileExplorerPage() {
     await expandToPath(path);
     await openFileNode(path);
   }, [expandToPath, openFileNode]);
+
+  const goBack = useCallback(async () => {
+    const newIndex = historyIndexRef.current - 1;
+    if (newIndex < 0 || newIndex >= fileHistory.length) return;
+    const path = fileHistory[newIndex];
+    historyIndexRef.current = newIndex;
+    setHistoryIndex(newIndex);
+    await expandToPath(path);
+    await openFileNode(path, true);
+  }, [fileHistory, expandToPath, openFileNode]);
+
+  const goForward = useCallback(async () => {
+    const newIndex = historyIndexRef.current + 1;
+    if (newIndex >= fileHistory.length) return;
+    const path = fileHistory[newIndex];
+    historyIndexRef.current = newIndex;
+    setHistoryIndex(newIndex);
+    await expandToPath(path);
+    await openFileNode(path, true);
+  }, [fileHistory, expandToPath, openFileNode]);
 
   // Deep-link: ?model=<unique_id> — open the corresponding file
   // Also restore last open file from sessionStorage (if no deep-link)
@@ -228,6 +277,7 @@ export default function FileExplorerPage() {
     // Restore last open file from sessionStorage
     const savedPath = sessionStorage.getItem(SESSION_KEY);
     if (savedPath) {
+      expandToPath(savedPath);
       openFileNode(savedPath);
     }
   }, [searchParams, graph, openFileNode, expandToPath, SESSION_KEY]);
@@ -270,11 +320,19 @@ export default function FileExplorerPage() {
         e.preventDefault();
         if (openFile && edited !== undefined) handleSave();
       }
+      if (e.altKey && e.key === 'ArrowLeft') {
+        e.preventDefault();
+        goBack();
+      }
+      if (e.altKey && e.key === 'ArrowRight') {
+        e.preventDefault();
+        goForward();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openFile, edited]);
+  }, [openFile, edited, goBack, goForward]);
 
   const handleSave = async () => {
     if (!openFile) return;
@@ -484,6 +542,16 @@ export default function FileExplorerPage() {
             modelUid={modelUid}
             graph={graph ?? null}
             onNavigateToFile={navigateToFile}
+            canGoBack={historyIndex > 0}
+            canGoForward={historyIndex < fileHistory.length - 1}
+            onGoBack={goBack}
+            onGoForward={goForward}
+            previewCache={previewCache}
+            onPreviewCached={(uid, data) => setPreviewCache((prev) => {
+              const next = new Map(prev).set(uid, data);
+              try { sessionStorage.setItem(PREVIEW_CACHE_KEY, JSON.stringify([...next])); } catch { /* quota */ }
+              return next;
+            })}
           />
         ) : (
           <div className="flex items-center justify-center text-gray-600 text-sm select-none h-full">

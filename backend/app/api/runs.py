@@ -29,6 +29,11 @@ class RunRequestDto(BaseModel):
     model: str | None = None
     mode: SelectMode = "only"
     select: str | None = None  # explicit pass-through if provided
+    full_refresh: bool = False
+    threads: int | None = None
+    debug: bool = False
+    empty: bool = False
+    vars: dict[str, str] | None = None
 
 
 class RunResponseDto(BaseModel):
@@ -117,10 +122,30 @@ async def _load_active_target(project_id: int) -> str | None:
         return row.value if row else None
 
 
-async def _run_dbt_and_persist(project: Project, command: str, select: str | None) -> None:
+async def _run_dbt_and_persist(
+    project: Project,
+    command: str,
+    select: str | None,
+    full_refresh: bool = False,
+    threads: int | None = None,
+    debug: bool = False,
+    empty: bool = False,
+    vars: dict[str, str] | None = None,
+) -> None:
+    import json
     env = await load_project_env(project.id)
     target = await _load_active_target(project.id)
     extra: tuple[str, ...] = ("--target", target) if target else ()
+    if full_refresh:
+        extra += ("--full-refresh",)
+    if threads is not None:
+        extra += ("--threads", str(threads))
+    if debug:
+        extra += ("--debug",)
+    if empty:
+        extra += ("--empty",)
+    if vars:
+        extra += ("--vars", json.dumps(vars))
     req = RunRequest(
         project_id=project.id,
         project_path=Path(project.path),
@@ -138,7 +163,12 @@ async def _launch(
     project: Project, command: str, dto: RunRequestDto
 ) -> RunResponseDto:
     select = _resolve_selector(dto)
-    asyncio.create_task(_run_dbt_and_persist(project, command, select))
+    asyncio.create_task(
+        _run_dbt_and_persist(
+            project, command, select,
+            dto.full_refresh, dto.threads, dto.debug, dto.empty, dto.vars,
+        )
+    )
     return RunResponseDto(accepted=True, command=command, select=select)
 
 

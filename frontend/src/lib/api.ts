@@ -46,6 +46,14 @@ export function patch<T>(path: string, body?: unknown): Promise<T> {
 
 // ---- typed helpers ----
 
+export interface RunOpts {
+  full_refresh?: boolean;
+  threads?: number | null;
+  debug?: boolean;
+  empty?: boolean;
+  vars?: Record<string, string> | null;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -309,20 +317,20 @@ export const api = {
       request<void>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}`, { method: 'DELETE' }),
     compile: (projectId: number) =>
       post<{ status: string }>(`/projects/${projectId}/compile`),
-    getCompiled: (projectId: number, uniqueId: string) =>
-      get<{ compiled_sql: string }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/compiled`),
+    getCompiled: (projectId: number, uniqueId: string, force = false) =>
+      get<{ compiled_sql: string }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/compiled${force ? '?force=true' : ''}`),
     show: (projectId: number, uniqueId: string, limit = 1000) =>
       post<{ columns: string[]; rows: unknown[][] }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/show`, { limit }),
   },
   runs: {
-    run: (projectId: number, model: string, mode: string, select?: string) =>
-      post(`/projects/${projectId}/run`, { model: model || null, mode, select: select ?? null }),
-    build: (projectId: number, model: string, mode: string, select?: string) =>
-      post(`/projects/${projectId}/build`, { model: model || null, mode, select: select ?? null }),
-    test: (projectId: number, model: string, mode: string, select?: string) =>
-      post(`/projects/${projectId}/test`, { model: model || null, mode, select: select ?? null }),
-    seed: (projectId: number, model: string, mode: string, select?: string) =>
-      post(`/projects/${projectId}/seed`, { model: model || null, mode, select: select ?? null }),
+    run: (projectId: number, model: string, mode: string, opts?: RunOpts, select?: string) =>
+      post(`/projects/${projectId}/run`, { model: model || null, mode, select: select ?? null, ...opts }),
+    build: (projectId: number, model: string, mode: string, opts?: RunOpts, select?: string) =>
+      post(`/projects/${projectId}/build`, { model: model || null, mode, select: select ?? null, ...opts }),
+    test: (projectId: number, model: string, mode: string, opts?: RunOpts, select?: string) =>
+      post(`/projects/${projectId}/test`, { model: model || null, mode, select: select ?? null, ...opts }),
+    seed: (projectId: number, model: string, mode: string, opts?: RunOpts, select?: string) =>
+      post(`/projects/${projectId}/seed`, { model: model || null, mode, select: select ?? null, ...opts }),
   },
   files: {
     list: (projectId: number, path = '') =>

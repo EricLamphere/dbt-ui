@@ -45,10 +45,11 @@ export default function ModelNodeComponent({ data, selected }: Props) {
       <div
         style={{ opacity: dimmed ? 0.2 : 1 }}
         className={`
-          w-[200px] h-[72px] bg-surface-panel rounded-lg ring-1 px-3 py-2 flex flex-col justify-between
+          w-[200px] h-[72px] rounded-lg ring-2 px-3 py-2 flex flex-col justify-between
           cursor-pointer select-none transition-all duration-150
-          ${ring}
-          ${selected ? 'ring-2 brightness-110' : 'hover:brightness-105'}
+          ${selected
+            ? 'node-selected ring-2 shadow-lg'
+            : `bg-surface-panel ${ring} ring-1 hover:brightness-105`}
         `}
       >
         <div className="flex items-center justify-between gap-2">
@@ -56,7 +57,7 @@ export default function ModelNodeComponent({ data, selected }: Props) {
           <span className="text-[10px] text-gray-500 font-mono truncate flex-1">{model.resource_type}</span>
           <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
         </div>
-        <div className="font-medium text-xs text-gray-100 truncate" title={model.name}>
+        <div className={`node-name font-medium text-xs truncate ${selected ? 'text-white' : 'text-gray-100'}`} title={model.name}>
           {model.name}
         </div>
         {model.materialized && (

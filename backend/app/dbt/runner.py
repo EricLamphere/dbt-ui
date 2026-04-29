@@ -62,8 +62,9 @@ class DbtRunner:
                 )
             )
             log.info("dbt_invoke", project=req.project_id, args=args, cwd=str(req.project_path))
+            pid = req.project_id
             selector_part = f" --select {req.select}" if req.select else ""
-            append_project_log(str(req.project_path), f">>> dbt {req.command}{selector_part}")
+            append_project_log(str(req.project_path), f">>> dbt {req.command}{selector_part}", pid)
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *args,
@@ -80,7 +81,7 @@ class DbtRunner:
                         data={"message": "dbt executable not found on PATH"},
                     )
                 )
-                append_project_log(str(req.project_path), "ERROR: dbt executable not found on PATH")
+                append_project_log(str(req.project_path), "ERROR: dbt executable not found on PATH", pid)
                 yield ("stderr", "dbt executable not found on PATH\n")
                 return
 
@@ -93,7 +94,7 @@ class DbtRunner:
                 await bus.publish(
                     Event(topic=topic, type="run_log", data={"line": line})
                 )
-                append_project_log(str(req.project_path), line)
+                append_project_log(str(req.project_path), line, pid)
                 yield ("stdout", line)
             return_code = await proc.wait()
             finished_at = datetime.now(timezone.utc).isoformat()
@@ -110,7 +111,7 @@ class DbtRunner:
                 )
             )
             status = "OK" if return_code == 0 else f"FAILED (rc={return_code})"
-            append_project_log(str(req.project_path), f"<<< dbt {req.command} {status}")
+            append_project_log(str(req.project_path), f"<<< dbt {req.command} {status}", pid)
 
 
 runner = DbtRunner()

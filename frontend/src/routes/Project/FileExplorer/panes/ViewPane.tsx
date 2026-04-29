@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Editor, { type Monaco } from '@monaco-editor/react';
-import { RotateCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
 import { format as sqlFormat } from 'sql-formatter';
 import { api, type FileContentDto, type GraphDto } from '../../../../lib/api';
 import { useTheme } from '../../../../lib/useTheme';
@@ -24,6 +24,13 @@ interface ViewPaneProps {
   graph: GraphDto | null;
   /** called when a ref/source link is cmd+clicked */
   onNavigateToFile: (path: string) => void;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  onGoBack: () => void;
+  onGoForward: () => void;
+  /** session-scoped dbt show cache from parent (survives route navigation) */
+  previewCache: Map<string, { columns: string[]; rows: unknown[][] }>;
+  onPreviewCached: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
 }
 
 function isSqlFile(path: string) {
@@ -58,6 +65,8 @@ function formatSql(sql: string): string {
 export function ViewPane({
   projectId, openFile, edited, onEdit, onSave, onDelete,
   saving, saveStatus, saveError, isDirty, modelUid, graph, onNavigateToFile,
+  canGoBack, canGoForward, onGoBack, onGoForward,
+  previewCache, onPreviewCached,
 }: ViewPaneProps) {
   const theme = useTheme();
   const monacoTheme = theme === 'light' ? 'vs-light' : 'vs-dark';
@@ -72,17 +81,16 @@ export function ViewPane({
   const [compiledSql, setCompiledSql] = useState<string | null>(null);
   const [compiledLoading, setCompiledLoading] = useState(false);
   const [compiledError, setCompiledError] = useState<string | null>(null);
-  const [previewData, setPreviewData] = useState<{ columns: string[]; rows: unknown[][] } | null>(null);
+  const previewData = modelUid ? (previewCache.get(modelUid) ?? null) : null;
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
 
   const canCompile = !!modelUid && isSqlFile(openFile.path);
 
-  // Reset sub-tabs when file changes
+  // Reset sub-tabs when file changes (preview data is in the parent cache, not reset here)
   useEffect(() => {
     setActiveTab('code');
     setCompiledSql(null);
-    setPreviewData(null);
     setCompiledError(null);
     setPreviewError(null);
   }, [openFile.path]);
@@ -107,8 +115,8 @@ export function ViewPane({
     setCompiledLoading(true);
     setCompiledError(null);
     try {
-      await api.models.compile(projectId);
-      const result = await api.models.getCompiled(projectId, modelUid);
+      // force=true skips the manifest cache and recompiles just this model synchronously
+      const result = await api.models.getCompiled(projectId, modelUid, true);
       setCompiledSql(result.compiled_sql);
     } catch (e) {
       setCompiledError(String(e));
@@ -117,17 +125,31 @@ export function ViewPane({
     }
   };
 
+  const handleRefreshPreview = async () => {
+    if (!canCompile || !modelUid) return;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    try {
+      const result = await api.models.show(projectId, modelUid, 1000);
+      onPreviewCached(modelUid, result);
+    } catch (e) {
+      setPreviewError(String(e));
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   const handleTabChange = async (tab: ViewTab) => {
     setActiveTab(tab);
     if (tab === 'compiled' && !compiledSql && canCompile && modelUid) {
       await fetchCompiledSql();
     }
-    if (tab === 'preview' && !previewData && canCompile && modelUid) {
+    if (tab === 'preview' && !previewCache.get(modelUid!) && canCompile && modelUid) {
       setPreviewLoading(true);
       setPreviewError(null);
       try {
         const result = await api.models.show(projectId, modelUid, 1000);
-        setPreviewData(result);
+        onPreviewCached(modelUid, result);
       } catch (e) {
         setPreviewError(String(e));
       } finally {
@@ -162,6 +184,22 @@ export function ViewPane({
       {/* Tab bar + actions */}
       <div className="flex items-center justify-between px-4 py-2 bg-surface-panel border-b border-gray-800 shrink-0 gap-3">
         <div className="flex items-center gap-1">
+          <button
+            onClick={onGoBack}
+            disabled={!canGoBack}
+            title="Go back (Alt+Left)"
+            className="p-0.5 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onGoForward}
+            disabled={!canGoForward}
+            title="Go forward (Alt+Right)"
+            className="p-0.5 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors mr-2"
+          >
+            <ChevronRight className="w-4 h-4" />
+          </button>
           {tabs.map((t) => (
             <button
               key={t.id}
@@ -220,6 +258,17 @@ export function ViewPane({
             title="Recompile and refresh"
           >
             <RotateCw className={`w-3 h-3 ${compiledLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </button>
+        )}
+        {activeTab === 'preview' && canCompile && (
+          <button
+            onClick={handleRefreshPreview}
+            disabled={previewLoading}
+            className="ml-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 transition-colors shrink-0"
+            title="Re-run dbt show"
+          >
+            <RotateCw className={`w-3 h-3 ${previewLoading ? 'animate-spin' : ''}`} />
             Refresh
           </button>
         )}

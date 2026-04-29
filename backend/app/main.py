@@ -1,6 +1,6 @@
+import re
 import time
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,6 +78,9 @@ app.include_router(terminal_api.router)
 app.include_router(git_api.router)
 
 
+_PROJECT_ID_RE = re.compile(r"/api/projects/(\d+)/")
+
+
 @app.middleware("http")
 async def _log_requests(request: Request, call_next):
     start = time.monotonic()
@@ -86,7 +89,9 @@ async def _log_requests(request: Request, call_next):
     # Skip SSE streams and noisy health checks from the log file
     if not request.url.path.endswith("/events") and request.url.path != "/api/health":
         line = f"{request.method} {request.url.path} → {response.status_code} ({elapsed_ms}ms)"
-        append_api_log(line)
+        m = _PROJECT_ID_RE.search(request.url.path)
+        project_id = int(m.group(1)) if m else None
+        append_api_log(line, project_id=project_id)
     return response
 
 

@@ -1,7 +1,6 @@
 import asyncio
 import json
 import re
-import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.engine import get_session
 from app.db.models import ModelStatus, Project
 from app.dbt.manifest import Manifest, ModelNode, load_manifest
+from app.logs.project_logger import append_project_log
 
 router = APIRouter(prefix="/api/projects", tags=["models"])
 
@@ -214,24 +214,27 @@ class ShowResponseDto(BaseModel):
 async def get_compiled(
     project_id: int,
     unique_id: str,
+    force: bool = False,
     session: AsyncSession = Depends(get_session),
 ) -> dict[str, str]:
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    manifest = load_manifest(Path(project.path) / "target" / "manifest.json")
-    if manifest is not None:
-        node = next((n for n in manifest.nodes if n.unique_id == unique_id), None)
-        if node and node.compiled_sql:
-            return {"compiled_sql": node.compiled_sql}
+    if not force:
+        manifest = load_manifest(Path(project.path) / "target" / "manifest.json")
+        if manifest is not None:
+            node = next((n for n in manifest.nodes if n.unique_id == unique_id), None)
+            if node and node.compiled_sql:
+                return {"compiled_sql": node.compiled_sql}
 
-    # Not in manifest — run dbt compile for just this node, then re-read
+    # Not in manifest, or force-recompile requested — run dbt compile for just this node
     # unique_id format is "model.project_name.model_name"; --select expects just the name
     model_name = unique_id.split(".")[-1]
     from app.dbt.venv import venv_dbt
     from app.api.init import load_project_env
     env = await load_project_env(project_id)
+    append_project_log(project.path, f">>> dbt compile --select {model_name}", project_id)
     try:
         proc = await asyncio.create_subprocess_exec(
             str(venv_dbt()), "compile", "--select", model_name,
@@ -242,11 +245,18 @@ async def get_compiled(
         )
         stdout_bytes, _ = await proc.communicate()
     except Exception as exc:
+        append_project_log(project.path, f"ERROR: dbt compile failed: {exc}", project_id)
         raise HTTPException(status_code=422, detail=f"dbt compile failed: {exc}")
 
+    stdout_str = stdout_bytes.decode(errors="replace")
+    for line in stdout_str.splitlines():
+        if line.strip():
+            append_project_log(project.path, line, project_id)
+
     if proc.returncode != 0:
-        err = stdout_bytes.decode(errors="replace")[-1000:]
-        raise HTTPException(status_code=422, detail=f"dbt compile failed:\n{err}")
+        append_project_log(project.path, f"<<< dbt compile --select {model_name} FAILED", project_id)
+        raise HTTPException(status_code=422, detail=f"dbt compile failed:\n{stdout_str[-1000:]}")
+    append_project_log(project.path, f"<<< dbt compile --select {model_name} OK", project_id)
 
     manifest2 = load_manifest(Path(project.path) / "target" / "manifest.json")
     if manifest2 is not None:
@@ -268,12 +278,16 @@ async def show_model(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    # unique_id format is "model.project_name.model_name"; --select expects just the name
-    model_name = unique_id.split(".")[-1]
+    # unique_id format: "model.<project>.<name>" or "test.<project>.<name>.<hash>"
+    # Tests have a trailing hash segment; use the second-to-last part for those.
+    parts = unique_id.split(".")
+    resource_type = parts[0] if parts else ""
+    model_name = parts[-2] if resource_type == "test" and len(parts) >= 4 else parts[-1]
     from app.dbt.venv import venv_dbt
     limit = max(1, min(dto.limit, 5000))
     from app.api.init import load_project_env
     env = await load_project_env(project_id)
+    append_project_log(project.path, f">>> dbt show --select {model_name} --limit {limit}", project_id)
     try:
         proc = await asyncio.create_subprocess_exec(
             str(venv_dbt()), "show", "--select", model_name,
@@ -286,6 +300,7 @@ async def show_model(
         )
         stdout_bytes, stderr_bytes = await proc.communicate()
     except Exception as exc:
+        append_project_log(project.path, f"ERROR: dbt show failed: {exc}", project_id)
         raise HTTPException(status_code=500, detail=f"dbt show failed: {exc}")
 
     stdout = stdout_bytes.decode(errors="replace")
@@ -293,6 +308,10 @@ async def show_model(
 
     if proc.returncode != 0:
         detail = stderr[-1000:] or stdout[-1000:]
+        append_project_log(project.path, f"<<< dbt show --select {model_name} FAILED", project_id)
+        for line in detail.splitlines():
+            if line.strip():
+                append_project_log(project.path, line, project_id)
         raise HTTPException(status_code=422, detail=f"dbt show failed:\n{detail}")
 
     # Strip ANSI escape codes — dbt colorizes output even with --output json
@@ -329,6 +348,7 @@ async def show_model(
             table = result.get("table") or result.get("agate_table") or {}
             columns: list[str] = table.get("column_names") or []
             rows: list[list] = table.get("rows") or []
+            append_project_log(project.path, f"<<< dbt show --select {model_name} OK ({len(rows)} rows)", project_id)
             return ShowResponseDto(columns=columns, rows=rows)
 
         # Format 2: dbt 1.11+ compact output — {"node": "...", "show": [{col: val}, ...]}
@@ -336,10 +356,12 @@ async def show_model(
         if isinstance(show_rows, list) and show_rows:
             columns = list(show_rows[0].keys())
             rows = [[row.get(c) for c in columns] for row in show_rows]
+            append_project_log(project.path, f"<<< dbt show --select {model_name} OK ({len(rows)} rows)", project_id)
             return ShowResponseDto(columns=columns, rows=rows)
 
     # Nothing parseable found — surface raw output for diagnosis
     detail_lines = (stdout + "\n" + stderr).strip()[-1000:]
+    append_project_log(project.path, f"<<< dbt show --select {model_name} FAILED (could not parse output)", project_id)
     raise HTTPException(status_code=422, detail=f"Could not parse dbt show output:\n{detail_lines}")
 
 
@@ -347,7 +369,6 @@ async def _compile_project(project_id: int, project_path: str) -> None:
     from app.events.bus import Event, bus
     from app.api.init import load_project_env
     from app.dbt.venv import venv_dbt
-    from app.logs.project_logger import append_project_log
 
     topic = f"project:{project_id}"
     env = await load_project_env(project_id)
@@ -356,7 +377,7 @@ async def _compile_project(project_id: int, project_path: str) -> None:
     profiles_args = ["--profiles-dir", project_path] if (project / "profiles.yml").exists() else []
 
     await bus.publish(Event(topic=topic, type="compile_started", data={}))
-    append_project_log(project_path, ">>> dbt compile")
+    append_project_log(project_path, ">>> dbt compile", project_id)
     ok = False
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -368,12 +389,12 @@ async def _compile_project(project_id: int, project_path: str) -> None:
         )
         assert proc.stdout is not None
         async for raw in proc.stdout:
-            append_project_log(project_path, raw.decode(errors="replace").rstrip("\n"))
+            append_project_log(project_path, raw.decode(errors="replace").rstrip("\n"), project_id)
         rc = await proc.wait()
         ok = rc == 0
     except Exception:
         pass
-    append_project_log(project_path, f"<<< dbt compile {'OK' if ok else 'FAILED'}")
+    append_project_log(project_path, f"<<< dbt compile {'OK' if ok else 'FAILED'}", project_id)
     await bus.publish(Event(topic=topic, type="compile_finished", data={"ok": ok}))
     if ok:
         await bus.publish(Event(topic=topic, type="graph_changed", data={}))

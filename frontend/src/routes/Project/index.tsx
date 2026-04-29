@@ -335,7 +335,27 @@ function YamlViewer({ content }: { content: string }) {
   const monacoTheme = useTheme() === 'light' ? 'vs-light' : 'vs-dark';
 
   return (
-    <div ref={containerRef} style={{ minHeight: 100 }}>
+    <div
+      ref={containerRef}
+      style={{ minHeight: 100 }}
+      onWheelCapture={(e) => {
+        // Monaco captures wheel events even when the editor can't scroll (vertical hidden).
+        // Re-dispatch on the nearest scrollable ancestor so the page scrolls normally.
+        const target = e.currentTarget;
+        let ancestor = target.parentElement;
+        while (ancestor) {
+          const { overflowY } = getComputedStyle(ancestor);
+          const canScroll = overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay';
+          if (canScroll && ancestor.scrollHeight > ancestor.clientHeight) {
+            ancestor.scrollTop += e.deltaY;
+            e.stopPropagation();
+            return;
+          }
+          ancestor = ancestor.parentElement;
+        }
+        // No scrollable ancestor found — let the event propagate naturally.
+      }}
+    >
       <Editor
         language="yaml"
         value={content}

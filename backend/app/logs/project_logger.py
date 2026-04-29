@@ -1,7 +1,6 @@
 """
-Append log lines to {project_path}/logs/dbt-ui/project_logs.log.
-
-The logs/ directory is gitignored automatically when first created.
+Append log lines to {project_path}/logs/dbt-ui/project_logs.log and publish
+them as `project_log` SSE events on the project bus topic.
 """
 
 import asyncio
@@ -19,7 +18,6 @@ def _ensure_log_dir(project_path: str) -> Path:
     log_dir = Path(project_path) / "logs" / "dbt-ui"
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write a .gitignore inside logs/ so the whole directory is ignored
     gitignore = Path(project_path) / "logs" / ".gitignore"
     if not gitignore.exists():
         gitignore.write_text(_GITIGNORE_CONTENT, encoding="utf-8")
@@ -27,22 +25,44 @@ def _ensure_log_dir(project_path: str) -> Path:
     return log_dir
 
 
-def append_project_log(project_path: str, line: str) -> None:
-    """Synchronously append a timestamped line to the project log file."""
+def append_project_log(project_path: str, line: str, project_id: int | None = None) -> None:
+    """Append a timestamped line to the project log file.
+
+    Pass project_id to also publish a `project_log` SSE event so the frontend
+    updates in real time without polling.
+    """
     try:
         log_dir = _ensure_log_dir(project_path)
         log_file = log_dir / "project_logs.log"
         ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+        formatted = f"{ts}  {line}"
         with log_file.open("a", encoding="utf-8") as f:
-            f.write(f"{ts}  {line}\n")
+            f.write(formatted + "\n")
+
+        if project_id is not None:
+            # Fire-and-forget: publish to the bus without blocking the caller.
+            # Import here to avoid a circular import at module load time.
+            from app.events.bus import Event, bus
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(
+                    bus.publish(Event(
+                        topic=f"project:{project_id}",
+                        type="project_log",
+                        data={"line": formatted},
+                    ))
+                )
+            except RuntimeError:
+                pass  # No running loop (e.g. during tests) — skip publish
+
     except OSError as exc:
         log.warning("project_log_write_failed", error=str(exc))
 
 
-async def append_project_log_async(project_path: str, line: str) -> None:
-    """Async wrapper — runs the blocking write in a thread so it doesn't block the event loop."""
+async def append_project_log_async(project_path: str, line: str, project_id: int | None = None) -> None:
+    """Async wrapper — runs the blocking file write in a thread."""
     loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, append_project_log, project_path, line)
+    await loop.run_in_executor(None, append_project_log, project_path, line, project_id)
 
 
 def read_project_log_tail(project_path: str, lines: int = 500) -> list[str]:

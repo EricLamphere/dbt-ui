@@ -88,31 +88,13 @@ function applyStatuses(graph: GraphDto, statuses: Record<string, NodeStatus>): G
   };
 }
 
-// Build a subgraph containing the executed nodes plus their graph ancestors,
-// so edges between parent→child are visible even if the parent didn't re-run.
+// Build a subgraph containing only the nodes that actually executed.
 function buildDisplayGraph(graph: GraphDto, runNodeIds: Set<string>): GraphDto {
   if (runNodeIds.size === 0) return { nodes: [], edges: [] };
 
-  // Collect all ancestor IDs for nodes that ran
-  const displayIds = new Set<string>(runNodeIds);
-  const edgesByTarget = new Map<string, string[]>();
-  for (const e of graph.edges) {
-    const list = edgesByTarget.get(e.target) ?? [];
-    list.push(e.source);
-    edgesByTarget.set(e.target, list);
-  }
-
-  // Walk up the graph from each run node to include direct parents
-  for (const uid of runNodeIds) {
-    const parents = edgesByTarget.get(uid) ?? [];
-    for (const p of parents) {
-      displayIds.add(p);
-    }
-  }
-
   return {
-    nodes: graph.nodes.filter((n) => displayIds.has(n.unique_id)),
-    edges: graph.edges.filter((e) => displayIds.has(e.source) && displayIds.has(e.target)),
+    nodes: graph.nodes.filter((n) => runNodeIds.has(n.unique_id)),
+    edges: graph.edges.filter((e) => runNodeIds.has(e.source) && runNodeIds.has(e.target)),
   };
 }
 

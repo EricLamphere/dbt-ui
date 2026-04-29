@@ -258,7 +258,7 @@ async def generate_docs(
 async def _generate_docs(project_id: int, project_path: str) -> None:
     from app.api.init import load_project_env
     from app.dbt.venv import venv_dbt
-    from app.logs.project_logger import append_project_log
+    from app.logs.project_logger import append_project_log  # noqa: PLC0415
 
     topic = f"project:{project_id}"
     env = await load_project_env(project_id)
@@ -270,7 +270,7 @@ async def _generate_docs(project_id: int, project_path: str) -> None:
     profiles_args = ["--profiles-dir", project_path] if (project / "profiles.yml").exists() else []
 
     async def _run_and_log(args: list[str]) -> tuple[bool, list[str]]:
-        append_project_log(project_path, f">>> {' '.join(args[1:])}")
+        append_project_log(project_path, f">>> {' '.join(args[1:])}", project_id)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -280,17 +280,17 @@ async def _generate_docs(project_id: int, project_path: str) -> None:
                 env=env,
             )
         except Exception as exc:
-            append_project_log(project_path, f"error: {exc}")
+            append_project_log(project_path, f"error: {exc}", project_id)
             return False, []
         lines: list[str] = []
         assert proc.stdout is not None
         async for raw in proc.stdout:
             line = raw.decode(errors="replace").rstrip("\n")
-            append_project_log(project_path, line)
+            append_project_log(project_path, line, project_id)
             lines.append(line)
         rc = await proc.wait()
         status = "OK" if rc == 0 else f"FAILED (rc={rc})"
-        append_project_log(project_path, f"<<< {' '.join(args[1:])} {status}")
+        append_project_log(project_path, f"<<< {' '.join(args[1:])} {status}", project_id)
         combined = "\n".join(lines).lower()
         unrecognised = any(kw in combined for kw in ("unrecognized", "no such option", "invalid value"))
         return rc == 0 and not unrecognised, lines

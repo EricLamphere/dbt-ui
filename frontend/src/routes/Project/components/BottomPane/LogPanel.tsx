@@ -59,21 +59,23 @@ export function LogPanel({ projectId, logType }: LogPanelProps) {
   const refetchEvents = logType === 'project' ? PROJECT_REFETCH_EVENTS : API_REFETCH_EVENTS;
 
   useProjectEvents(projectId, useCallback((event) => {
-    // Real-time: append run_log lines immediately to project log view
-    if (logType === 'project' && event.type === 'run_log') {
+    // Real-time project log lines — emitted by append_project_log for every dbt/init call
+    if (logType === 'project' && event.type === 'project_log') {
       const line = (event.data as { line: string }).line;
       setLiveLines((prev) => [...prev, line]);
       return;
     }
 
-    // Also append init step output in real time
-    if (logType === 'project' && event.type === 'init_step') {
-      const d = event.data as { name: string; status: string; log?: string };
-      if (d.log) {
-        const newLines = d.log.split('\n').filter(Boolean);
-        setLiveLines((prev) => [...prev, ...newLines]);
-      }
+    // Real-time API log lines — emitted by append_api_log for every HTTP request
+    if (logType === 'api' && event.type === 'api_log') {
+      const line = (event.data as { line: string }).line;
+      setLiveLines((prev) => [...prev, line]);
       return;
+    }
+
+    // Legacy real-time: run_log lines (runner emits these individually; also covered by project_log now)
+    if (logType === 'project' && event.type === 'run_log') {
+      return; // project_log handles this — no double-append
     }
 
     // On completion events, do a full refetch to get the authoritative log

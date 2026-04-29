@@ -1,19 +1,8 @@
-import { useEffect, useState } from 'react';
-import { BookOpen, Play, Hammer, FlaskConical, Layers } from 'lucide-react';
-import { api, type ModelNode, type GraphDto } from '../../../../lib/api';
+import { useEffect, useReducer, useState } from 'react';
+import { BookOpen, Play, Hammer, FlaskConical, Layers, Plus, Trash2 } from 'lucide-react';
+import { api, type ModelNode, type GraphDto, type RunOpts } from '../../../../lib/api';
 
 type RunCommand = 'run' | 'build' | 'test';
-type RunMode = 'only' | 'upstream' | 'downstream' | 'full';
-
-const RUN_ACTIONS: { cmd: RunCommand; icon: React.ReactNode; label: string }[] = [
-  { cmd: 'run',   icon: <Play className="w-4 h-4" />,         label: 'Run' },
-  { cmd: 'build', icon: <Hammer className="w-4 h-4" />,       label: 'Build' },
-  { cmd: 'test',  icon: <FlaskConical className="w-4 h-4" />, label: 'Test' },
-];
-
-const SCOPE_LABELS: Record<RunMode, string> = {
-  only: 'Only', upstream: '+ Upstream', downstream: '+ Downstream', full: 'Full',
-};
 
 export type ShowRows = { columns: string[]; rows: unknown[][] };
 
@@ -62,15 +51,189 @@ function Chip({ label, dim = false }: { label: string; dim?: boolean }) {
   );
 }
 
+// Shared run options component — scope toggles, full refresh, threads
+interface VarEntry { key: string; value: string }
+
+interface RunOptionsState {
+  upstream: boolean;
+  downstream: boolean;
+  fullRefresh: boolean;
+  debug: boolean;
+  empty: boolean;
+  threads: string;
+  vars: VarEntry[];
+}
+
+type RunOptionsAction =
+  | { type: 'toggle'; field: 'upstream' | 'downstream' | 'fullRefresh' | 'debug' | 'empty' }
+  | { type: 'setUpstream'; value: boolean }
+  | { type: 'setDownstream'; value: boolean }
+  | { type: 'setThreads'; value: string }
+  | { type: 'addVar' }
+  | { type: 'setVarKey'; index: number; value: string }
+  | { type: 'setVarValue'; index: number; value: string }
+  | { type: 'removeVar'; index: number };
+
+export function runOptionsInitial(): RunOptionsState {
+  return { upstream: false, downstream: false, fullRefresh: false, debug: false, empty: false, threads: '', vars: [] };
+}
+
+export function runOptionsReducer(state: RunOptionsState, action: RunOptionsAction): RunOptionsState {
+  switch (action.type) {
+    case 'toggle': return { ...state, [action.field]: !state[action.field] };
+    case 'setUpstream': return { ...state, upstream: action.value };
+    case 'setDownstream': return { ...state, downstream: action.value };
+    case 'setThreads': return { ...state, threads: action.value };
+    case 'addVar': return { ...state, vars: [...state.vars, { key: '', value: '' }] };
+    case 'setVarKey': return { ...state, vars: state.vars.map((v, i) => i === action.index ? { ...v, key: action.value } : v) };
+    case 'setVarValue': return { ...state, vars: state.vars.map((v, i) => i === action.index ? { ...v, value: action.value } : v) };
+    case 'removeVar': return { ...state, vars: state.vars.filter((_, i) => i !== action.index) };
+    default: return state;
+  }
+}
+
+export function runOptsFromState(state: RunOptionsState): RunOpts {
+  const mode = state.upstream && state.downstream ? 'full' : state.upstream ? 'upstream' : state.downstream ? 'downstream' : 'only';
+  const validVars = state.vars.filter((v) => v.key.trim());
+  return {
+    full_refresh: state.fullRefresh || undefined,
+    threads: state.threads ? parseInt(state.threads, 10) : undefined,
+    debug: state.debug || undefined,
+    empty: state.empty || undefined,
+    vars: validVars.length ? Object.fromEntries(validVars.map((v) => [v.key.trim(), v.value])) : undefined,
+    _mode: mode,
+  } as RunOpts & { _mode: string };
+}
+
+function Pill({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`text-xs px-3 py-1.5 rounded border font-mono transition-colors select-none ${
+        active
+          ? 'bg-brand-900/70 border-brand-600 text-brand-200'
+          : 'bg-surface-elevated border-gray-700 text-gray-500 hover:border-gray-600 hover:text-gray-300'
+      }`}
+    >
+      {label}
+    </button>
+  );
+}
+
+function RunOptions({ state, dispatch }: { state: RunOptionsState; dispatch: (a: RunOptionsAction) => void }) {
+  return (
+    <div className="flex flex-col gap-2">
+      {/* Row 1: scope pills */}
+      <div className="flex gap-1.5 flex-wrap">
+        <Pill
+          active={state.upstream && !state.downstream}
+          label="+Upstream"
+          onClick={() => {
+            const wasOnly = state.upstream && !state.downstream;
+            dispatch({ type: 'setUpstream', value: !wasOnly });
+            if (!wasOnly) dispatch({ type: 'setDownstream', value: false });
+          }}
+        />
+        <Pill
+          active={!state.upstream && state.downstream}
+          label="Downstream+"
+          onClick={() => {
+            const wasOnly = !state.upstream && state.downstream;
+            dispatch({ type: 'setDownstream', value: !wasOnly });
+            if (!wasOnly) dispatch({ type: 'setUpstream', value: false });
+          }}
+        />
+        <Pill
+          active={state.upstream && state.downstream}
+          label="+Full Lineage+"
+          onClick={() => {
+            const both = state.upstream && state.downstream;
+            dispatch({ type: 'setUpstream', value: !both });
+            dispatch({ type: 'setDownstream', value: !both });
+          }}
+        />
+      </div>
+      {/* Row 2: flags */}
+      <div className="flex gap-1.5 flex-wrap">
+        <Pill active={state.fullRefresh} label="Full Refresh" onClick={() => dispatch({ type: 'toggle', field: 'fullRefresh' })} />
+        <Pill active={state.debug} label="Debug" onClick={() => dispatch({ type: 'toggle', field: 'debug' })} />
+        <Pill active={state.empty} label="Empty" onClick={() => dispatch({ type: 'toggle', field: 'empty' })} />
+      </div>
+      {/* Row 3: threads */}
+      <div className="flex items-center gap-2">
+        <label className="text-xs text-gray-500 whitespace-nowrap">Threads</label>
+        <input
+          type="number"
+          min={1}
+          max={64}
+          placeholder="default"
+          value={state.threads}
+          onChange={(e) => dispatch({ type: 'setThreads', value: e.target.value })}
+          className="w-20 px-2 py-1.5 text-xs bg-surface-elevated border border-gray-700 rounded text-gray-300 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+        />
+      </div>
+      {/* Vars section */}
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium">Vars</span>
+          <button
+            type="button"
+            onClick={() => dispatch({ type: 'addVar' })}
+            className="flex items-center justify-center w-4 h-4 rounded bg-surface-elevated border border-gray-700 text-gray-500 hover:border-gray-500 hover:text-gray-300 transition-colors"
+          >
+            <Plus className="w-2.5 h-2.5" />
+          </button>
+        </div>
+        {state.vars.map((v, i) => (
+          <div key={i} className="flex items-center gap-1.5">
+            <input
+              placeholder="key"
+              value={v.key}
+              onChange={(e) => dispatch({ type: 'setVarKey', index: i, value: e.target.value })}
+              className="w-24 px-2 py-1 text-xs bg-surface-elevated border border-gray-700 rounded text-gray-300 font-mono placeholder-gray-600 focus:outline-none focus:border-gray-600"
+            />
+            <span className="text-gray-600 text-xs shrink-0">=</span>
+            <input
+              placeholder="value"
+              value={v.value}
+              onChange={(e) => dispatch({ type: 'setVarValue', index: i, value: e.target.value })}
+              className="flex-1 min-w-0 px-2 py-1 text-xs bg-surface-elevated border border-gray-700 rounded text-gray-300 font-mono placeholder-gray-600 focus:outline-none focus:border-gray-600"
+            />
+            <button
+              type="button"
+              onClick={() => dispatch({ type: 'removeVar', index: i })}
+              className="text-gray-600 hover:text-red-400 transition-colors shrink-0"
+            >
+              <Trash2 className="w-3 h-3" />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Spinner SVG
+function Spinner() {
+  return (
+    <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"/>
+    </svg>
+  );
+}
+
 export function PropertiesTab({
   projectId, model, selectedModels = [], graph, page, failedTestUid, onFailedTestConsumed,
   showRows, onShowRows,
   onNavigateToFiles, onNavigateToDag, onViewDocs, onDelete,
 }: PropertiesTabProps) {
-  const [loading, setLoading] = useState<string | null>(null);
+  const [loading, setLoading] = useState<RunCommand | null>(null);
   const [loadingShow, setLoadingShow] = useState(false);
+  const [opts, dispatchOpts] = useReducer(runOptionsReducer, undefined, runOptionsInitial);
 
-  // Auto-fetch failing test rows when this test just failed (one-shot: clear after consuming)
+  // Auto-fetch failing test rows on one-shot signal
   useEffect(() => {
     if (!model || model.resource_type !== 'test') return;
     if (failedTestUid !== model.unique_id) return;
@@ -82,16 +245,14 @@ export function PropertiesTab({
       .finally(() => setLoadingShow(false));
   }, [failedTestUid, model?.unique_id, model?.resource_type, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleRun = async (cmd: RunCommand, mode: RunMode) => {
+  const handleRun = async (cmd: RunCommand) => {
     if (!model) return;
-    const key = `${cmd}:${mode}`;
-    setLoading(key);
+    setLoading(cmd);
     try {
-      await (cmd === 'run'
-        ? api.runs.run(projectId, model.name, mode)
-        : cmd === 'build'
-        ? api.runs.build(projectId, model.name, mode)
-        : api.runs.test(projectId, model.name, mode));
+      const { _mode, ...runOpts } = runOptsFromState(opts) as RunOpts & { _mode: string };
+      if (cmd === 'run') await api.runs.run(projectId, model.name, _mode, runOpts);
+      else if (cmd === 'build') await api.runs.build(projectId, model.name, _mode, runOpts);
+      else await api.runs.test(projectId, model.name, _mode, runOpts);
     } finally {
       setLoading(null);
     }
@@ -132,7 +293,7 @@ export function PropertiesTab({
         </div>
       </div>
 
-      {/* Error/warn message only */}
+      {/* Error/warn message */}
       {model.message && ERROR_STATUSES.has(model.status) && (
         <p className="text-xs text-red-400 bg-red-950/30 border border-red-900/40 rounded px-3 py-2">
           {model.message}
@@ -152,25 +313,21 @@ export function PropertiesTab({
             <span className="font-mono text-gray-400">{model.original_file_path}</span>
           </Row>
         )}
-
         {model.schema_ && (
           <Row label="Schema">
             <span className="font-mono">{model.schema_}</span>
           </Row>
         )}
-
         {model.database && (
           <Row label="Database">
             <span className="font-mono">{model.database}</span>
           </Row>
         )}
-
         {model.materialized && (
           <Row label="Materialization">
             <span className="font-mono">{model.materialized}</span>
           </Row>
         )}
-
         {(upstreamCount !== null || downstreamCount !== null) && (
           <Row label="Dependencies">
             <span className="font-mono">
@@ -189,45 +346,35 @@ export function PropertiesTab({
         </Row>
       )}
 
-      {/* Divider */}
       <div className="border-t border-gray-800" />
 
       {/* Run controls */}
       {!isTest && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-3">
           <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium">Run</span>
-          {RUN_ACTIONS.map(({ cmd, icon, label }) => (
-            <div key={cmd} className="grid grid-cols-4 gap-1">
-              {(['only', 'upstream', 'downstream', 'full'] as RunMode[]).map((mode) => {
-                const key = `${cmd}:${mode}`;
-                return (
-                  <button
-                    key={mode}
-                    title={`${label} ${SCOPE_LABELS[mode]}`}
-                    onClick={() => handleRun(cmd, mode)}
-                    disabled={loading !== null}
-                    className={`flex items-center justify-center gap-1.5 py-2 px-1 text-xs rounded border transition-colors disabled:opacity-50
-                      ${mode === 'only'
-                        ? 'bg-surface-elevated border-gray-700 text-gray-200 hover:border-brand-600 hover:text-brand-300'
-                        : 'bg-transparent border-gray-800 text-gray-500 hover:border-gray-600 hover:text-gray-300'
-                      }`}
-                  >
-                    {loading === key ? (
-                      <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"/>
-                      </svg>
-                    ) : (
-                      <>
-                        {mode === 'only' && icon}
-                        <span className="truncate">{mode === 'only' ? label : SCOPE_LABELS[mode]}</span>
-                      </>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          ))}
+
+          {/* Run | Build | Test buttons in a row */}
+          <div className="grid grid-cols-3 gap-1.5">
+            {([
+              { cmd: 'run' as RunCommand,   icon: <Play className="w-3.5 h-3.5" />,         label: 'Run' },
+              { cmd: 'build' as RunCommand, icon: <Hammer className="w-3.5 h-3.5" />,       label: 'Build' },
+              { cmd: 'test' as RunCommand,  icon: <FlaskConical className="w-3.5 h-3.5" />, label: 'Test' },
+            ] as const).map(({ cmd, icon, label }) => (
+              <button
+                key={cmd}
+                onClick={() => handleRun(cmd)}
+                disabled={loading !== null}
+                className="flex items-center justify-center gap-1.5 py-2 text-xs rounded border bg-surface-elevated border-gray-700 text-gray-200 hover:border-brand-600 hover:text-brand-300 transition-colors disabled:opacity-50"
+              >
+                {loading === cmd ? <Spinner /> : icon}
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium">Options</span>
+
+          <RunOptions state={opts} dispatch={dispatchOpts} />
         </div>
       )}
 
@@ -236,7 +383,7 @@ export function PropertiesTab({
         <div className="flex flex-col gap-2">
           <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium">Run</span>
           <button
-            onClick={() => handleRun('test', 'only')}
+            onClick={() => handleRun('test')}
             disabled={loading !== null}
             className="flex items-center justify-center gap-2 w-full py-2.5 text-sm rounded bg-surface-elevated border border-gray-700 hover:border-brand-600 hover:text-brand-300 text-gray-200 transition-colors disabled:opacity-50"
           >
@@ -318,7 +465,6 @@ export function PropertiesTab({
 
 // --- Multi-selection run controls ---
 
-// Execution order for sequential multi-run
 const MULTI_RUN_ORDER = ['seed', 'source', 'model', 'snapshot', 'test'] as const;
 
 const TYPE_LABELS: Partial<Record<string, string>> = {
@@ -329,33 +475,24 @@ const TYPE_LABELS: Partial<Record<string, string>> = {
   test: 'Tests',
 };
 
-function applyMode(name: string, mode: RunMode): string {
-  if (mode === 'upstream') return `+${name}`;
-  if (mode === 'downstream') return `${name}+`;
-  if (mode === 'full') return `+${name}+`;
-  return name;
+function applyScope(name: string, upstream: boolean, downstream: boolean): string {
+  const prefix = upstream ? '+' : '';
+  const suffix = downstream ? '+' : '';
+  return `${prefix}${name}${suffix}`;
 }
 
-// Map each resource type + user command → the actual dbt command to fire
-// build handles all types in one pass, so we'll fire it once for everything
-// run/test need to be split:
-//   seeds   → seed (dbt seed --select …)
-//   sources → test (dbt test --select source:…)
-//   models/snapshots → run
-//   tests   → test
 function effectiveCommand(cmd: RunCommand, type: string): 'run' | 'build' | 'test' | 'seed' {
   if (cmd === 'build') return 'build';
   if (type === 'seed') return 'seed';
   if (cmd === 'test') return 'test';
-  // cmd === 'run'
   if (type === 'test' || type === 'source') return 'test';
   return 'run';
 }
 
 function MultiSelectionTab({ projectId, selectedModels }: { projectId: number; selectedModels: ModelNode[] }) {
-  const [loading, setLoading] = useState<string | null>(null);
+  const [loading, setLoading] = useState<RunCommand | null>(null);
+  const [runOpts, dispatchOpts] = useReducer(runOptionsReducer, undefined, runOptionsInitial);
 
-  // Group nodes by resource type in display order
   const grouped = MULTI_RUN_ORDER.reduce<Record<string, ModelNode[]>>((acc, type) => {
     const nodes = selectedModels.filter((m) => m.resource_type === type);
     if (nodes.length) acc[type] = nodes;
@@ -364,29 +501,26 @@ function MultiSelectionTab({ projectId, selectedModels }: { projectId: number; s
   const extraTypes = [...new Set(selectedModels.map((m) => m.resource_type))]
     .filter((t) => !(MULTI_RUN_ORDER as readonly string[]).includes(t));
   for (const t of extraTypes) grouped[t] = selectedModels.filter((m) => m.resource_type === t);
-
   const orderedTypes = [...MULTI_RUN_ORDER, ...extraTypes].filter((t) => grouped[t]);
 
-  const handleMultiRun = async (cmd: RunCommand, mode: RunMode) => {
-    const key = `${cmd}:${mode}`;
-    setLoading(key);
+  const handleMultiRun = async (cmd: RunCommand) => {
+    setLoading(cmd);
+    const { _mode, ...opts } = runOptsFromState(runOpts) as RunOpts & { _mode: string };
     try {
       if (cmd === 'build') {
-        // build handles all resource types in one command
-        const select = selectedModels.map((n) => applyMode(n.name, mode)).join(' ');
-        await api.runs.build(projectId, '', mode, select);
+        const select = selectedModels.map((n) => applyScope(n.name, runOpts.upstream, runOpts.downstream)).join(' ');
+        await api.runs.build(projectId, '', _mode, opts, select);
       } else {
-        // run and test: sequential per type group
         for (const type of orderedTypes) {
           const nodes = grouped[type];
-          const select = nodes.map((n) => applyMode(n.name, mode)).join(' ');
+          const select = nodes.map((n) => applyScope(n.name, runOpts.upstream, runOpts.downstream)).join(' ');
           const dbtCmd = effectiveCommand(cmd, type);
           if (dbtCmd === 'seed') {
-            await api.runs.seed(projectId, '', mode, select);
+            await api.runs.seed(projectId, '', _mode, opts, select);
           } else if (dbtCmd === 'run') {
-            await api.runs.run(projectId, '', mode, select);
+            await api.runs.run(projectId, '', _mode, opts, select);
           } else {
-            await api.runs.test(projectId, '', mode, select);
+            await api.runs.test(projectId, '', _mode, opts, select);
           }
         }
       }
@@ -397,13 +531,11 @@ function MultiSelectionTab({ projectId, selectedModels }: { projectId: number; s
 
   return (
     <div className="overflow-auto flex-1 p-4 flex flex-col gap-4">
-      {/* Header */}
       <div className="flex items-center gap-2">
         <Layers className="w-4 h-4 text-brand-400 shrink-0" />
         <span className="font-semibold text-gray-100 text-sm">{selectedModels.length} nodes selected</span>
       </div>
 
-      {/* Grouped node list */}
       <div className="flex flex-col gap-3">
         {orderedTypes.map((type) => (
           <div key={type}>
@@ -432,44 +564,38 @@ function MultiSelectionTab({ projectId, selectedModels }: { projectId: number; s
 
       <div className="border-t border-gray-800" />
 
-      {/* Run controls */}
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-3">
         <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium">Run selection</span>
         <p className="text-[10px] text-gray-600 leading-relaxed">
           Seeds → sources → models → tests, sequentially. Build runs all at once.
         </p>
-        {RUN_ACTIONS.map(({ cmd, icon, label }) => (
-          <div key={cmd} className="grid grid-cols-4 gap-1">
-            {(['only', 'upstream', 'downstream', 'full'] as RunMode[]).map((mode) => {
-              const key = `${cmd}:${mode}`;
-              return (
-                <button
-                  key={mode}
-                  title={`${label} ${SCOPE_LABELS[mode]}`}
-                  onClick={() => handleMultiRun(cmd, mode)}
-                  disabled={loading !== null}
-                  className={`flex items-center justify-center gap-1.5 py-2 px-1 text-xs rounded border transition-colors disabled:opacity-50
-                    ${mode === 'only'
-                      ? 'bg-surface-elevated border-gray-700 text-gray-200 hover:border-brand-600 hover:text-brand-300'
-                      : 'bg-transparent border-gray-800 text-gray-500 hover:border-gray-600 hover:text-gray-300'
-                    }`}
-                >
-                  {loading === key ? (
-                    <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"/>
-                    </svg>
-                  ) : (
-                    <>
-                      {mode === 'only' && icon}
-                      <span className="truncate">{mode === 'only' ? label : SCOPE_LABELS[mode]}</span>
-                    </>
-                  )}
-                </button>
-              );
-            })}
-          </div>
-        ))}
+
+        <div className="grid grid-cols-3 gap-1.5">
+          {([
+            { cmd: 'run' as RunCommand,   icon: <Play className="w-3.5 h-3.5" />,         label: 'Run' },
+            { cmd: 'build' as RunCommand, icon: <Hammer className="w-3.5 h-3.5" />,       label: 'Build' },
+            { cmd: 'test' as RunCommand,  icon: <FlaskConical className="w-3.5 h-3.5" />, label: 'Test' },
+          ] as const).map(({ cmd, icon, label }) => (
+            <button
+              key={cmd}
+              onClick={() => handleMultiRun(cmd)}
+              disabled={loading !== null}
+              className="flex items-center justify-center gap-1.5 py-2 text-xs rounded border bg-surface-elevated border-gray-700 text-gray-200 hover:border-brand-600 hover:text-brand-300 transition-colors disabled:opacity-50"
+            >
+              {loading === cmd ? (
+                <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 00-8 8h4z"/>
+                </svg>
+              ) : icon}
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <span className="text-[10px] uppercase tracking-wider text-gray-600 font-medium">Options</span>
+
+        <RunOptions state={runOpts} dispatch={dispatchOpts} />
       </div>
     </div>
   );

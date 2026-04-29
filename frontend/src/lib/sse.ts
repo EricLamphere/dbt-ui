@@ -28,6 +28,7 @@ export function useProjectEvents(projectId: number | null, onEvent: SseHandler) 
         'docs_generating', 'docs_generated',
         'test_failed',
         'git_status_changed', 'git_started', 'git_log', 'git_finished', 'git_error',
+        'project_log', 'api_log',
       ];
       types.forEach((type) => {
         es.addEventListener(type, (e: MessageEvent) => {

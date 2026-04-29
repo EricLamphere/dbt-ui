@@ -172,6 +172,21 @@ html[data-theme="light"] {
   stroke: rgb(var(--brand-400) / 1) !important;
 }
 
+/* DAG node selection highlight */
+.node-selected {
+  background-color: rgb(8 47 73);       /* sky-950 */
+  --tw-ring-color: rgb(56 189 248);     /* sky-400 */
+  --tw-shadow-color: rgb(14 165 233 / 0.4); /* sky-500/40 */
+}
+html[data-theme="light"] .node-selected {
+  background-color: rgb(224 242 254);   /* sky-100 — light tint */
+  --tw-ring-color: rgb(2 132 199);      /* sky-600 — darker for contrast */
+  --tw-shadow-color: rgb(14 165 233 / 0.25);
+}
+html[data-theme="light"] .node-selected .node-name {
+  color: inherit;
+}
+
 /* Monaco dbt ref/source cmd-hover underline */
 .dbt-ref-link {
   text-decoration: underline;
