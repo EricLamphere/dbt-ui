@@ -458,6 +458,8 @@ export const api = {
       post<GitAcceptedDto>(`/projects/${projectId}/git/unstage`, { paths }),
     discard: (projectId: number, paths: string[]) =>
       post<GitAcceptedDto>(`/projects/${projectId}/git/discard`, { paths }),
+    deleteNew: (projectId: number, paths: string[]) =>
+      post<GitAcceptedDto>(`/projects/${projectId}/git/delete-new`, { paths }),
     commit: (projectId: number, message: string, amend = false) =>
       post<GitAcceptedDto>(`/projects/${projectId}/git/commit`, { message, amend }),
     branches: (projectId: number) =>

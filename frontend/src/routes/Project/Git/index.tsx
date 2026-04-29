@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api, type GitFileChange } from '../../../lib/api';
 import { useProjectEvents } from '../../../lib/sse';
@@ -14,6 +14,9 @@ export default function GitPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
   const qc = useQueryClient();
+  const navigate = useNavigate();
+
+  const SESSION_KEY = `git-selected-path-${id}`;
 
   // Panel sizing
   const [navWidth, setNavWidth] = useState(192);
@@ -22,12 +25,26 @@ export default function GitPage() {
   const navResizing = useRef(false);
   const changesResizing = useRef(false);
 
-  // UI state
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // UI state — restore selected path from sessionStorage
+  const [selectedPath, setSelectedPath] = useState<string | null>(
+    () => sessionStorage.getItem(SESSION_KEY)
+  );
   const [branchPickerOpen, setBranchPickerOpen] = useState(false);
   const [discardConfirm, setDiscardConfirm] = useState<string[] | null>(null);
+  const [deleteNewConfirm, setDeleteNewConfirm] = useState<string[] | null>(null);
   const [syncOutput, setSyncOutput] = useState<string[]>([]);
   const [syncing, setSyncing] = useState(false);
+
+  // Persist selected path across navigations
+  useEffect(() => {
+    if (selectedPath) sessionStorage.setItem(SESSION_KEY, selectedPath);
+    else sessionStorage.removeItem(SESSION_KEY);
+  }, [selectedPath, SESSION_KEY]);
+
+  const handleOpenInFiles = useCallback((filePath: string) => {
+    sessionStorage.setItem(`file-explorer-open-${id}`, filePath);
+    navigate(`/projects/${id}/files`);
+  }, [id, navigate]);
 
   // ---- queries ----
   const { data: status, isLoading } = useQuery({
@@ -48,7 +65,7 @@ export default function GitPage() {
   const { data: workingData, isLoading: workingLoading } = useQuery({
     queryKey: ['files', 'content', id, selectedPath],
     queryFn: () => api.files.getContent(id, selectedPath!),
-    enabled: selectedPath !== null && selectedChange !== null && !selectedChange.is_untracked,
+    enabled: selectedPath !== null && selectedChange !== null,
   });
 
   // ---- SSE ----
@@ -88,6 +105,15 @@ export default function GitPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['git', 'status', id] });
       setDiscardConfirm(null);
+    },
+  });
+
+  const deleteNewMutation = useMutation({
+    mutationFn: (paths: string[]) => api.git.deleteNew(id, paths),
+    onSuccess: (_, paths) => {
+      qc.invalidateQueries({ queryKey: ['git', 'status', id] });
+      setDeleteNewConfirm(null);
+      if (paths.includes(selectedPath ?? '')) setSelectedPath(null);
     },
   });
 
@@ -172,6 +198,7 @@ export default function GitPage() {
                 onStage={(paths) => stageMutation.mutate(paths)}
                 onUnstage={(paths) => unstageMutation.mutate(paths)}
                 onDiscard={(paths) => setDiscardConfirm(paths)}
+                onDeleteNew={(paths) => setDeleteNewConfirm(paths)}
               />
             </div>
 
@@ -221,6 +248,7 @@ export default function GitPage() {
             path={selectedPath}
             change={selectedChange}
             loading={diffLoading}
+            onOpenInFiles={handleOpenInFiles}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-sm text-zinc-500">
@@ -274,6 +302,35 @@ export default function GitPage() {
                 className="px-3 py-1.5 text-sm bg-red-700 hover:bg-red-600 text-white rounded disabled:opacity-50"
               >
                 Discard
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Delete new file confirmation dialog */}
+      {deleteNewConfirm && (
+        <>
+          <div className="fixed inset-0 z-50 bg-black/50" />
+          <div className="fixed z-50 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-80 bg-surface-panel border border-zinc-700 rounded-lg shadow-xl p-4">
+            <h3 className="text-sm font-medium text-gray-200 mb-2">Delete new file?</h3>
+            <p className="text-xs text-zinc-400 mb-4">
+              <span className="text-gray-300">{deleteNewConfirm.join(', ')}</span> is a new untracked file.
+              Deleting it will permanently remove it from disk. This cannot be undone.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setDeleteNewConfirm(null)}
+                className="px-3 py-1.5 text-sm text-zinc-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteNewMutation.mutate(deleteNewConfirm)}
+                disabled={deleteNewMutation.isPending}
+                className="px-3 py-1.5 text-sm bg-red-700 hover:bg-red-600 text-white rounded disabled:opacity-50"
+              >
+                Delete file
               </button>
             </div>
           </div>

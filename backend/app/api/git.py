@@ -275,6 +275,25 @@ async def post_discard(
     return AcceptedDto(accepted=True)
 
 
+@router.post("/{project_id}/git/delete-new", response_model=AcceptedDto)
+async def post_delete_new(
+    project_id: int,
+    dto: PathsDto,
+    session: AsyncSession = Depends(get_session),
+) -> AcceptedDto:
+    """Delete untracked (new) files from the working tree via git clean."""
+    project = await _get_project(project_id, session)
+    repo = _require_repo(project_id, Path(project.path))
+
+    if not dto.paths:
+        return AcceptedDto(accepted=True)
+    rc, out = await _git(project_id, repo, "clean", "-f", "--", *dto.paths)
+    if rc != 0:
+        raise HTTPException(status_code=500, detail=f"git clean failed: {out.strip()}")
+    await _publish_status_changed(project_id)
+    return AcceptedDto(accepted=True)
+
+
 @router.post("/{project_id}/git/commit", response_model=AcceptedDto)
 async def post_commit(
     project_id: int,

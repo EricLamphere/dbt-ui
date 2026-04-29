@@ -50,7 +50,6 @@ export function BottomPane({ projectId, graph, projectPath }: BottomPaneProps) {
 
   const handleRunStart = useCallback(() => {
     setOpen(true);
-    setActiveTab('run');
   }, []);
 
   // When switching to terminal tab, create first instance if none exist

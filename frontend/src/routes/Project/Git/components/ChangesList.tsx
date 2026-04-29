@@ -7,6 +7,7 @@ interface Props {
   onStage: (paths: string[]) => void;
   onUnstage: (paths: string[]) => void;
   onDiscard: (paths: string[]) => void;
+  onDeleteNew: (paths: string[]) => void;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -29,6 +30,7 @@ function FileRow({
   onStage,
   onUnstage,
   onDiscard,
+  onDeleteNew,
 }: {
   change: GitFileChange;
   selected: boolean;
@@ -36,6 +38,7 @@ function FileRow({
   onStage: () => void;
   onUnstage: () => void;
   onDiscard: () => void;
+  onDeleteNew: () => void;
 }) {
   const displayStatus = change.staged
     ? STATUS_LABEL[change.index_status] ?? change.index_status
@@ -93,6 +96,15 @@ function FileRow({
             ↶
           </button>
         )}
+        {change.is_untracked && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onDeleteNew(); }}
+            title="Delete file"
+            className="w-5 h-5 flex items-center justify-center rounded hover:bg-zinc-600 text-zinc-300 hover:text-white text-xs"
+          >
+            ↶
+          </button>
+        )}
       </div>
     </div>
   );
@@ -135,7 +147,7 @@ function SectionHeader({
   );
 }
 
-export function ChangesList({ changes, selectedPath, onSelect, onStage, onUnstage, onDiscard }: Props) {
+export function ChangesList({ changes, selectedPath, onSelect, onStage, onUnstage, onDiscard, onDeleteNew }: Props) {
   const staged = changes.filter((c) => c.staged);
   const unstaged = changes.filter((c) => !c.staged && !c.is_conflict);
   const conflicts = changes.filter((c) => c.is_conflict && !c.staged);
@@ -166,6 +178,7 @@ export function ChangesList({ changes, selectedPath, onSelect, onStage, onUnstag
               onStage={() => onStage([c.path])}
               onUnstage={() => onUnstage([c.path])}
               onDiscard={() => onDiscard([c.path])}
+              onDeleteNew={() => onDeleteNew([c.path])}
             />
           ))}
         </>
@@ -182,6 +195,7 @@ export function ChangesList({ changes, selectedPath, onSelect, onStage, onUnstag
               onStage={() => onStage([c.path])}
               onUnstage={() => onUnstage([c.path])}
               onDiscard={() => onDiscard([c.path])}
+              onDeleteNew={() => onDeleteNew([c.path])}
             />
           ))}
         </>
@@ -202,6 +216,7 @@ export function ChangesList({ changes, selectedPath, onSelect, onStage, onUnstag
               onStage={() => onStage([c.path])}
               onUnstage={() => onUnstage([c.path])}
               onDiscard={() => onDiscard([c.path])}
+              onDeleteNew={() => onDeleteNew([c.path])}
             />
           ))}
         </>
