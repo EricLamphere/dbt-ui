@@ -6,6 +6,7 @@ import {
   Background,
   Controls,
   MiniMap,
+  Panel,
   useNodesState,
   useEdgesState,
   useReactFlow,
@@ -148,7 +149,7 @@ export default function ModelsPage() {
     refetchInterval: false,
   });
 
-  const { data: columnLineage } = useQuery({
+  const { data: columnLineage, isLoading: columnLineageLoading } = useQuery({
     queryKey: ['column-lineage', id],
     queryFn: () => api.models.columnLineage(id),
     refetchInterval: false,
@@ -490,6 +491,14 @@ export default function ModelsPage() {
             minZoom={0.1}
           >
             <FitViewOnFirstLoad trigger={layoutNodes} />
+            {columnLineageLoading && (
+              <Panel position="top-center">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/90 border border-zinc-700 text-xs text-zinc-400 shadow-lg">
+                  <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
+                  Column lineage loading…
+                </div>
+              </Panel>
+            )}
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1f2937" />
             <Controls showInteractive={false} className="!bg-surface-panel !border-gray-800" />
             <MiniMap
