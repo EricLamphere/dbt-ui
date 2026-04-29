@@ -117,12 +117,21 @@ def build_column_lineage(
             raw_sql = raw.get("raw_code") or raw.get("raw_sql") or ""
             if raw_sql:
                 sql = _strip_jinja(raw_sql)
-        if sql:
-            node_sql[uid] = sql
 
         cols = list((raw.get("columns") or {}).keys())
         if cols:
             node_columns[uid] = cols
+
+        # Seeds and sources have no SQL — synthesize a stub so sqlglot can
+        # resolve columns through them when they appear as upstream sources.
+        # No FROM clause: avoids circular expansion when the stub is itself
+        # referenced by a CTE that selects from the same name.
+        if not sql and cols:
+            col_list = ", ".join(cols)
+            sql = f"SELECT {col_list}"
+
+        if sql:
+            node_sql[uid] = sql
 
     name_to_uid: dict[str, str] = {v: k for k, v in short_names.items()}
 
