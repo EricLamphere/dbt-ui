@@ -72,9 +72,12 @@ function applyLiveStatuses(graph: GraphDto, liveStatuses: Record<string, LiveSta
   };
 }
 
-function FitViewOnChange({ trigger }: { trigger: unknown }) {
+function FitViewOnFirstLoad({ trigger }: { trigger: unknown }) {
   const { fitView } = useReactFlow();
+  const hasFit = useRef(false);
   useEffect(() => {
+    if (hasFit.current || !trigger) return;
+    hasFit.current = true;
     fitView({ padding: 0.2, duration: 200 });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger]);
@@ -486,7 +489,7 @@ export default function ModelsPage() {
             fitViewOptions={{ padding: 0.2 }}
             minZoom={0.1}
           >
-            <FitViewOnChange trigger={layoutNodes} />
+            <FitViewOnFirstLoad trigger={layoutNodes} />
             <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1f2937" />
             <Controls showInteractive={false} className="!bg-surface-panel !border-gray-800" />
             <MiniMap
