@@ -227,6 +227,7 @@ GET    /api/projects/{id}/models/{unique_id}/compiled    on-demand compile + ret
 POST   /api/projects/{id}/models/{unique_id}/show        run dbt show, return rows
 GET    /api/projects/{id}/models/{unique_id}/sql
 PUT    /api/projects/{id}/models/{unique_id}/sql
+GET    /api/projects/{id}/column-lineage                 column-level lineage graph parsed from manifest.json
 
 POST   /api/projects/{id}/run
 POST   /api/projects/{id}/build
@@ -464,7 +465,22 @@ DAG filtering (`dagFilter.ts`) is purely client-side — no backend involvement:
 5. Publishes `docs_generated {ok, generated_at}`
 6. Frontend invalidates `['docs-status', projectId]`; the native docs browser (`Docs.tsx`) re-fetches `GET /api/projects/{id}/docs/data`
 
-### 10. File Watching
+### 10. Column-Level Lineage
+
+`GET /api/projects/{id}/column-lineage`:
+1. Reads `target/manifest.json` in a thread pool executor (non-blocking)
+2. `dbt/column_lineage.py` → `build_column_lineage()` parses each node's `columns` and `depends_on.nodes` to build a `{downstream_node: {column: [ColumnRef(node, column)]}}` map
+3. Returns `ColumnLineageDto { lineage }` — a nested dict from downstream node → column → list of upstream `{node, column}` refs
+
+In the frontend (`Models.tsx`):
+- `useQuery(['column-lineage', id])` fetches the lineage map on load; the query runs as a background task on the backend so the DAG is usable before it completes
+- A loading banner ("Column lineage loading…") is shown while the query is in flight
+- Expanding a model node in the DAG reveals its columns; clicking a column toggles it in `activeColumnSels`
+- `traceColumn()` walks the lineage map bidirectionally (upstream via `reverseLineageIndex`, downstream via forward traversal) to collect all `{node, column}` pairs in the trace
+- Highlighted `{node, column}` pairs are passed as props into each `ModelNode`; nodes and edges outside the trace are dimmed
+- `graph_changed` SSE event invalidates `['column-lineage', id]` so the trace updates after recompilation
+
+### 11. File Watching
 
 `WatcherManager` runs one `watchfiles.awatch` task per project. Watched paths: `models/`, `tests/`, `seeds/`, `snapshots/`, `macros/`, `analyses/`, `target/`.
 

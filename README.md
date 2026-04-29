@@ -17,6 +17,7 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 - **Init pipeline** — configurable initialization steps (`pip install`, `dbt deps`, custom shell scripts) that run automatically when a project is opened; env vars exported from scripts are captured and injected into all dbt invocations
 - **Environment profiles** — define named env var sets globally and apply them per-project; switch profiles and dbt targets from the header
 - **Interactive project creation** — `dbt init` runs in a full in-browser terminal; adapter install, profiles.yml setup, and project discovery all handled automatically
+- **Column-level lineage** — click any column in the DAG to trace its data flow upstream and downstream across models; edges highlight the exact columns that feed into each transformation
 - **Source control (Git)** — VSCode-style source control panel: view changed files, stage/unstage, Monaco diff viewer, commit, push/pull with live streaming output, branch switch/create, and commit history
 
 ## Stack highlights
