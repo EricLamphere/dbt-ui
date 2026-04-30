@@ -610,6 +610,10 @@ export default function ModelsPage() {
         graph={graph ?? null}
         page="dag"
         onNavigateToFiles={() => selectedModel && navigate(`/projects/${id}/files?model=${encodeURIComponent(selectedModel.unique_id)}`)}
+        onNavigateToFile={(path) => {
+          const node = graph?.nodes.find((n) => n.original_file_path === path);
+          if (node) navigate(`/projects/${id}/files?model=${encodeURIComponent(node.unique_id)}`);
+        }}
         onViewDocs={() => selectedModel && navigate(`/projects/${id}/docs?node=${encodeURIComponent(selectedModel.unique_id)}`)}
         onDelete={() => selectedModel && handleDeleteModel(selectedModel)}
         failedTestUid={failedTestUid}
