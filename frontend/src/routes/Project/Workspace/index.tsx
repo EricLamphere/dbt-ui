@@ -6,6 +6,7 @@ import type * as MonacoEditor from 'monaco-editor';
 import { format as sqlFormat } from 'sql-formatter';
 import { Play, Save, Trash2, WrapText, Plus, FolderPlus, ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
 import { api, type FileNode, type GraphDto } from '../../../lib/api';
+import { useProjectEvents } from '../../../lib/sse';
 import { useTheme } from '../../../lib/useTheme';
 import NavRail from '../components/NavRail';
 import { TreeItem } from './TreeItem';
@@ -140,6 +141,12 @@ export default function WorkspacePage() {
   });
   const graphDataRef = useRef<GraphDto | undefined>(undefined);
   useEffect(() => { graphDataRef.current = graphData; }, [graphData]);
+
+  useProjectEvents(id, useCallback((event) => {
+    if (event.type === 'graph_changed' || event.type === 'compile_finished') {
+      qc.invalidateQueries({ queryKey: ['graph', id] });
+    }
+  }, [id, qc]));
   const completionDisposableRef = useRef<MonacoEditor.IDisposable | null>(null);
 
   // Restore session state

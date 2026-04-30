@@ -587,6 +587,20 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                     [str(venv_dbt()), "deps"], project_path, env
                 )
                 ok = return_code == 0
+            elif step.name == "base: dbt compile":
+                project_dir = Path(project_path)
+                profiles_args = ["--profiles-dir", project_path] if (project_dir / "profiles.yml").exists() else []
+                return_code, log_lines = await _exec_and_capture(
+                    [str(venv_dbt()), "compile"] + profiles_args, project_path, env
+                )
+                ok = return_code == 0
+                if ok:
+                    await bus.publish(Event(topic=f"project:{project_id}", type="graph_changed", data={}))
+            elif step.name == "base: dbt docs generate":
+                from app.api.docs import _generate_docs  # noqa: PLC0415
+                ok = await _generate_docs(project_id, project_path, env=env)
+                return_code = 0 if ok else 1
+                log_lines = []
             elif step.script_path:
                 script_dir = str(Path(step.script_path).parent)
                 return_code, log_lines = await _exec_and_capture(

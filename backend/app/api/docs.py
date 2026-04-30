@@ -255,13 +255,14 @@ async def generate_docs(
     return {"status": "started"}
 
 
-async def _generate_docs(project_id: int, project_path: str) -> None:
+async def _generate_docs(project_id: int, project_path: str, env: dict | None = None) -> bool:
     from app.api.init import load_project_env
     from app.dbt.venv import venv_dbt
     from app.logs.project_logger import append_project_log  # noqa: PLC0415
 
     topic = f"project:{project_id}"
-    env = await load_project_env(project_id)
+    if env is None:
+        env = await load_project_env(project_id)
     await bus.publish(Event(topic=topic, type="docs_generating", data={}))
 
     dbt = str(venv_dbt())
@@ -305,7 +306,7 @@ async def _generate_docs(project_id: int, project_path: str) -> None:
 
     if not ok:
         await bus.publish(Event(topic=topic, type="docs_generated", data={"ok": False}))
-        return
+        return False
 
     # Copy target artifacts to data_dir/docs/{project_id}/
     target_dir = Path(project_path) / "target"
@@ -329,3 +330,4 @@ async def _generate_docs(project_id: int, project_path: str) -> None:
     await bus.publish(
         Event(topic=topic, type="docs_generated", data={"ok": True, "generated_at": generated_at})
     )
+    return True

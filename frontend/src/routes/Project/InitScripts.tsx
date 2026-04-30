@@ -333,8 +333,10 @@ function PageShell({ id, children }: { id: number; children: React.ReactNode }) 
 // ---- step tile ----
 
 const BASE_STEP_PREVIEWS: Record<string, string> = {
-  'pip install': '# Install Python requirements\n# Reads global + project requirements.txt',
-  'dbt deps':    '# Install dbt package dependencies\n# Runs: dbt deps',
+  'pip install':       '# Install Python requirements\n# Reads global + project requirements.txt',
+  'dbt deps':          '# Install dbt package dependencies\n# Runs: dbt deps',
+  'dbt compile':       '# Compile all dbt models\n# Runs: dbt compile',
+  'dbt docs generate': '# Generate dbt docs and catalog\n# Runs: dbt compile --write-catalog (or dbt docs generate)',
 };
 
 interface StepTileProps {
