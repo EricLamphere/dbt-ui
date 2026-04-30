@@ -1,5 +1,7 @@
+import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelNode } from '../../../lib/api';
+import { useColumnLineage } from '../lib/columnLineageContext';
 
 const STATUS_RING: Record<string, string> = {
   idle: 'ring-gray-700',
@@ -34,26 +36,20 @@ interface Props extends NodeProps {
     model: ModelNode;
     dimmed?: boolean;
     expanded?: boolean;
-    // Set of column names on this node that are actively selected
-    activeColumns?: Set<string>;
-    // Set of column names on this node that are lineage-connected but not selected
-    relatedColumns?: Set<string>;
-    onColumnClick?: (nodeId: string, column: string, multi: boolean) => void;
-    onToggleExpand?: (nodeId: string) => void;
   };
 }
 
-export default function ModelNodeComponent({ data, selected }: Props) {
-  const {
-    model, dimmed, expanded,
-    activeColumns = new Set<string>(),
-    relatedColumns = new Set<string>(),
-    onColumnClick, onToggleExpand,
-  } = data;
+function ModelNodeComponent({ data, selected }: Props) {
+  const { model, dimmed, expanded } = data;
+  const { activeColumnSels, relatedColumnsMap, onColumnClick, onToggleExpand } = useColumnLineage();
+
   const ring = STATUS_RING[model.status] ?? STATUS_RING.idle;
   const dot = STATUS_DOT[model.status] ?? STATUS_DOT.idle;
   const icon = TYPE_ICON[model.resource_type] ?? '▣';
   const hasColumns = model.columns.length > 0;
+
+  const uid = model.unique_id;
+  const relatedColumns = relatedColumnsMap.get(uid);
 
   return (
     <>
@@ -93,7 +89,7 @@ export default function ModelNodeComponent({ data, selected }: Props) {
           <button
             onClick={(e) => {
               e.stopPropagation();
-              onToggleExpand?.(model.unique_id);
+              onToggleExpand(uid);
             }}
             className="w-full text-center text-[9px] text-gray-600 hover:text-gray-400 py-0.5 border-t border-zinc-700 mt-1.5 leading-none"
           >
@@ -108,14 +104,14 @@ export default function ModelNodeComponent({ data, selected }: Props) {
             onWheelCapture={(e) => e.stopPropagation()}
           >
             {model.columns.map((col) => {
-              const isActive = activeColumns.has(col.name);
-              const isRelated = !isActive && relatedColumns.has(col.name);
+              const isActive = activeColumnSels.has(`${uid}::${col.name}`);
+              const isRelated = !isActive && (relatedColumns?.has(col.name) ?? false);
               return (
                 <div
                   key={col.name}
                   onClick={(e) => {
                     e.stopPropagation();
-                    onColumnClick?.(model.unique_id, col.name, e.metaKey || e.ctrlKey);
+                    onColumnClick(uid, col.name, e.metaKey || e.ctrlKey);
                   }}
                   className={`
                     px-1 py-0.5 cursor-pointer rounded text-[10px] font-mono
@@ -146,3 +142,12 @@ export default function ModelNodeComponent({ data, selected }: Props) {
     </>
   );
 }
+
+export default memo(ModelNodeComponent, (prev, next) => {
+  return (
+    prev.selected === next.selected &&
+    prev.data.dimmed === next.data.dimmed &&
+    prev.data.expanded === next.data.expanded &&
+    prev.data.model === next.data.model
+  );
+});

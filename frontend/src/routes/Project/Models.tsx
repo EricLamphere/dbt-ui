@@ -26,6 +26,7 @@ import { type ShowRows } from './components/SidePane/PropertiesTab';
 import DagFilterBar from './components/DagFilterBar';
 import { computeLayout, NODE_HEIGHT } from './lib/layout';
 import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserializeFilter } from './lib/dagFilter';
+import { ColumnLineageContext, type ColumnLineageContextValue } from './lib/columnLineageContext';
 
 type LiveStatus = 'running' | 'success' | 'error' | 'warn';
 
@@ -137,7 +138,7 @@ export default function ModelsPage() {
     } catch { return new Set(); }
   });
   // Lineage trace mode: 'direct' shows only immediate upstream/downstream of the clicked column;
-  // 'full' follows the complete transitive closure (can pull in sibling columns via shared nodes).
+  // 'full' follows the complete transitive closure.
   const [lineageMode, setLineageMode] = useState<'direct' | 'full'>('direct');
 
   const { data: graph } = useQuery({
@@ -156,7 +157,7 @@ export default function ModelsPage() {
   // Pre-select model from ?model=<unique_id> query param (takes priority),
   // or from sessionStorage. Initialise directly from cache so the selection is
   // available on the first render even when the cached graph object reference
-  // hasn't changed (which would prevent a useEffect from firing).
+  // hasn't changed.
   const modelParam = searchParams.get('model');
   const [selectedModel, setSelectedModel] = useState<ModelNode | null>(() => {
     const cachedGraph = qc.getQueryData<GraphDto>(['models', id]);
@@ -169,8 +170,6 @@ export default function ModelsPage() {
     return null;
   });
 
-  // When graph loads for the first time (cache miss on mount), or when modelParam
-  // changes, resolve the selection against the fresh node list.
   useEffect(() => {
     if (!graph) return;
     if (modelParam) {
@@ -188,8 +187,6 @@ export default function ModelsPage() {
     });
   }, [graph, modelParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When graph refreshes (e.g. after dbt show writes manifest.json), keep selectedModel
-  // data current without clearing the selection.
   useEffect(() => {
     if (!graph || !selectedModel) return;
     const refreshed = graph.nodes.find((n) => n.unique_id === selectedModel.unique_id);
@@ -203,7 +200,6 @@ export default function ModelsPage() {
       setTestShowRows({});
       try { sessionStorage.removeItem(`dag-show-rows-${id}`); } catch {}
       if (event.type === 'graph_changed') {
-        // Node UIDs may change after a graph refresh — clear stale selections
         setSelectedModel(null);
         setActiveColumnSels(new Set());
         setExpandedNodes(new Set());
@@ -249,7 +245,6 @@ export default function ModelsPage() {
     for (const node of graph.nodes) {
       if (expandedNodes.has(node.unique_id) && node.columns.length > 0) {
         const colHeight = Math.min(node.columns.length * 22, 150);
-        // base height + toggle button (~20px) + column list
         heights.set(node.unique_id, NODE_HEIGHT + 20 + colHeight);
       }
     }
@@ -267,15 +262,15 @@ export default function ModelsPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState(layoutNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layoutEdges);
 
-  // Compute the set of uids connected to the selected model via standard graph edges
+  // Model-level connection set for dimming (based on selected model, ignoring column state)
   const connectedUids = useMemo(() => {
     const seeds = selectedModels.length > 0
       ? selectedModels.map((m) => m.unique_id)
       : selectedModel ? [selectedModel.unique_id] : [];
     if (seeds.length === 0) return null;
 
-    const fwd = new Map<string, string[]>(); // source → targets (downstream)
-    const bwd = new Map<string, string[]>(); // target → sources (upstream)
+    const fwd = new Map<string, string[]>();
+    const bwd = new Map<string, string[]>();
     for (const e of layoutEdges) {
       if (!fwd.has(e.source)) fwd.set(e.source, []);
       fwd.get(e.source)!.push(e.target);
@@ -284,8 +279,6 @@ export default function ModelsPage() {
     }
 
     const connected = new Set<string>(seeds);
-
-    // Walk DOWNSTREAM only from each seed
     const downQueue = [...seeds];
     while (downQueue.length > 0) {
       const uid = downQueue.shift()!;
@@ -293,8 +286,6 @@ export default function ModelsPage() {
         if (!connected.has(next)) { connected.add(next); downQueue.push(next); }
       }
     }
-
-    // Walk UPSTREAM only from each seed
     const upQueue = [...seeds];
     while (upQueue.length > 0) {
       const uid = upQueue.shift()!;
@@ -302,11 +293,10 @@ export default function ModelsPage() {
         if (!connected.has(next)) { connected.add(next); upQueue.push(next); }
       }
     }
-
     return connected;
   }, [selectedModel, selectedModels, layoutEdges]);
 
-  // Precompute a reverse lineage index once per lineage fetch:
+  // Precompute reverse lineage index once per lineage fetch:
   // upstream_uid::col → [{downNode, downCol}]
   const reverseLineageIndex = useMemo(() => {
     const idx = new Map<string, Array<{ n: string; c: string }>>();
@@ -323,12 +313,6 @@ export default function ModelsPage() {
     return idx;
   }, [columnLineage]);
 
-  // For a given (nodeId, column) seed, return all connected {uid, col} pairs
-  // including the seed itself.
-  //
-  // 'direct': one hop upstream + one hop downstream only — never recurses into discovered nodes.
-  //   Prevents sibling columns from being highlighted when they share a downstream dependency.
-  // 'full': full transitive closure in both directions.
   const traceColumn = useCallback((nodeId: string, column: string): Array<{ n: string; c: string }> => {
     if (!columnLineage) return [{ n: nodeId, c: column }];
     const lineage = columnLineage.lineage;
@@ -338,15 +322,12 @@ export default function ModelsPage() {
       const seen = new Set<string>([seedKey]);
       const result: Array<{ n: string; c: string }> = [{ n: nodeId, c: column }];
 
-      // Walk upstream only (follow lineage refs recursively, never reverse direction)
       const walkUp = (n: string, c: string) => {
         for (const ref of lineage[n]?.[c] ?? []) {
           const k = `${ref.node}::${ref.column}`;
           if (!seen.has(k)) { seen.add(k); result.push({ n: ref.node, c: ref.column }); walkUp(ref.node, ref.column); }
         }
       };
-
-      // Walk downstream only (follow reverse index recursively, never reverse direction)
       const walkDown = (n: string, c: string) => {
         const k = `${n}::${c}`;
         for (const entry of reverseLineageIndex.get(k) ?? []) {
@@ -362,7 +343,6 @@ export default function ModelsPage() {
 
     const all: Array<{ n: string; c: string }> = [];
     const visited = new Set<string>();
-
     const enqueue = (n: string, c: string) => {
       const key = `${n}::${c}`;
       if (visited.has(key)) return;
@@ -371,39 +351,33 @@ export default function ModelsPage() {
       for (const ref of lineage[n]?.[c] ?? []) enqueue(ref.node, ref.column);
       for (const entry of reverseLineageIndex.get(key) ?? []) enqueue(entry.n, entry.c);
     };
-
     enqueue(nodeId, column);
     return all;
   }, [columnLineage, reverseLineageIndex, lineageMode]);
 
-  // Compute connected node UIDs and related columns for all active selections combined.
+  // Compute column-level connected UIDs and related columns for the context value.
+  // This does NOT touch React Flow node state — it feeds context only.
   const { columnConnectedUids, relatedColumnsMap } = useMemo(() => {
     if (activeColumnSels.size === 0 || !columnLineage) {
       return { columnConnectedUids: null, relatedColumnsMap: new Map<string, Set<string>>() };
     }
-
     const connectedUidSet = new Set<string>();
-    // related: uid → set of column names that are lineage-connected (but not selected)
     const related = new Map<string, Set<string>>();
-
     for (const key of activeColumnSels) {
       const sep = key.indexOf('::');
       const nodeId = key.slice(0, sep);
       const col = key.slice(sep + 2);
       for (const { n, c } of traceColumn(nodeId, col)) {
         connectedUidSet.add(n);
-        // Mark as related unless it is one of the selected columns itself
         if (!activeColumnSels.has(`${n}::${c}`)) {
           if (!related.has(n)) related.set(n, new Set());
           related.get(n)!.add(c);
         }
       }
     }
-
     return { columnConnectedUids: connectedUidSet, relatedColumnsMap: related };
   }, [activeColumnSels, columnLineage, traceColumn]);
 
-  // Handlers for column expand/collapse and selection — stable references
   const handleColumnClick = useCallback((nodeId: string, column: string, multi: boolean) => {
     const key = `${nodeId}::${column}`;
     setActiveColumnSels((prev) => {
@@ -412,7 +386,6 @@ export default function ModelsPage() {
         next = new Set(prev);
         if (next.has(key)) next.delete(key); else next.add(key);
       } else {
-        // Single click: toggle off if already the only selection, else replace
         next = prev.size === 1 && prev.has(key) ? new Set() : new Set([key]);
       }
       try { sessionStorage.setItem(columnSelsKey, JSON.stringify([...next])); } catch {}
@@ -427,7 +400,6 @@ export default function ModelsPage() {
       try { sessionStorage.setItem(expandedNodesKey, JSON.stringify([...next])); } catch {}
       return next;
     });
-    // Clear any column selections owned by this node when collapsing
     setActiveColumnSels((prev) => {
       const next = new Set(prev);
       for (const key of prev) {
@@ -441,19 +413,15 @@ export default function ModelsPage() {
     });
   }, [expandedNodesKey, columnSelsKey]);
 
-  // Sync layout + dimming into React Flow's node state.
-  // Column lineage dimming takes precedence over model-level dimming when columns are selected.
+  // Sync layout + node-level dimming/expand into React Flow state.
+  // Column highlight state is NOT stored in nodes — it lives in context so only
+  // nodes that actually need it re-render when selections change.
   useEffect(() => {
     const effectiveConnected = columnConnectedUids ?? connectedUids;
     setNodes((prev) => {
       const prevSelected = new Map(prev.map((n) => [n.id, n.selected ?? false]));
       return layoutNodes.map((n) => {
         const uid = (n.data?.model as ModelNode | undefined)?.unique_id ?? '';
-        // Collect selected column names for this node
-        const activeColumns = new Set<string>();
-        for (const key of activeColumnSels) {
-          if (key.startsWith(`${uid}::`)) activeColumns.add(key.slice(uid.length + 2));
-        }
         return {
           ...n,
           selected: prevSelected.get(n.id) ?? false,
@@ -461,18 +429,13 @@ export default function ModelsPage() {
             ...n.data,
             dimmed: effectiveConnected !== null && !effectiveConnected.has(uid),
             expanded: expandedNodes.has(uid),
-            activeColumns,
-            relatedColumns: relatedColumnsMap.get(uid) ?? new Set<string>(),
-            onColumnClick: handleColumnClick,
-            onToggleExpand: handleToggleExpand,
           },
         };
       });
     });
     setEdges(layoutEdges);
-  }, [layoutNodes, layoutEdges, connectedUids, columnConnectedUids, relatedColumnsMap, expandedNodes, activeColumnSels, handleColumnClick, handleToggleExpand, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layoutNodes, layoutEdges, connectedUids, columnConnectedUids, expandedNodes, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // When deep-link param changes, push selection through React Flow's state.
   useEffect(() => {
     if (!selectedModel) return;
     setNodes((prev) => prev.map((n) => ({
@@ -495,7 +458,6 @@ export default function ModelsPage() {
       if (model) {
         setSelectedModel(model);
         try { sessionStorage.setItem(selectedModelKey, model.unique_id); } catch {}
-        // Clicking the node canvas (not a column) clears column selections
         setActiveColumnSels(new Set());
         try { sessionStorage.setItem(columnSelsKey, '[]'); } catch {}
       }
@@ -530,110 +492,119 @@ export default function ModelsPage() {
     setSelectedModel(null);
   };
 
+  const columnLineageCtx = useMemo<ColumnLineageContextValue>(() => ({
+    activeColumnSels,
+    relatedColumnsMap,
+    onColumnClick: handleColumnClick,
+    onToggleExpand: handleToggleExpand,
+  }), [activeColumnSels, relatedColumnsMap, handleColumnClick, handleToggleExpand]);
+
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Side rail */}
-      <NavRail projectId={id} current="dag" />
+    <ColumnLineageContext.Provider value={columnLineageCtx}>
+      <div className="flex h-full overflow-hidden">
+        {/* Side rail */}
+        <NavRail projectId={id} current="dag" />
 
-      {/* Main DAG area */}
-      <div className="flex-1 flex flex-col overflow-hidden relative">
-        {/* Filter bar */}
-        <DagFilterBar
-          graph={graph ?? null}
-          filter={filter}
-          onChange={handleFilterChange}
-          nodeCount={filteredGraph?.nodes.length ?? 0}
-          compiling={compiling}
-          onRefresh={handleRefreshDag}
-          onNewModel={() => setNewModelOpen(true)}
-        />
+        {/* Main DAG area */}
+        <div className="flex-1 flex flex-col overflow-hidden relative">
+          {/* Filter bar */}
+          <DagFilterBar
+            graph={graph ?? null}
+            filter={filter}
+            onChange={handleFilterChange}
+            nodeCount={filteredGraph?.nodes.length ?? 0}
+            compiling={compiling}
+            onRefresh={handleRefreshDag}
+            onNewModel={() => setNewModelOpen(true)}
+          />
 
-        {/* React Flow */}
-        <div className="flex-1 overflow-hidden">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onNodeClick={onNodeClick}
-            onSelectionChange={onSelectionChange}
-            nodeTypes={nodeTypes}
-            fitView
-            fitViewOptions={{ padding: 0.2 }}
-            minZoom={0.1}
-          >
-            <FitViewOnFirstLoad trigger={layoutNodes} />
-            <Panel position="top-center">
-              <div className="flex items-center gap-2">
-                {columnLineageLoading && (
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/90 border border-zinc-700 text-xs text-zinc-400 shadow-lg">
-                    <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
-                    Column lineage loading…
-                  </div>
-                )}
-                {activeColumnSels.size > 0 && (
-                  <button
-                    onClick={() => setLineageMode((m) => m === 'direct' ? 'full' : 'direct')}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/90 border border-zinc-700 text-xs shadow-lg transition-colors hover:bg-zinc-700/90"
-                    title={lineageMode === 'direct' ? 'Switch to full transitive closure' : 'Switch to direct lineage only'}
-                  >
-                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${lineageMode === 'direct' ? 'bg-brand-400' : 'bg-amber-400'}`} />
-                    <span className={lineageMode === 'direct' ? 'text-zinc-300' : 'text-amber-300'}>
-                      {lineageMode === 'direct' ? 'Direct lineage' : 'Full lineage'}
-                    </span>
-                  </button>
-                )}
-              </div>
-            </Panel>
-            <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1f2937" />
-            <Controls showInteractive={false} className="!bg-surface-panel !border-gray-800" />
-            <MiniMap
-              nodeColor={(n) => {
-                const status = (n.data?.model as ModelNode)?.status ?? 'idle';
-                if (status === 'success') return '#059669';
-                if (status === 'error') return '#dc2626';
-                if (status === 'running') return '#14b8a6';
-                if (status === 'stale') return '#d97706';
-                return '#374151';
-              }}
-              className="!bg-surface-panel !border-gray-800"
-            />
-          </ReactFlow>
+          {/* React Flow */}
+          <div className="flex-1 overflow-hidden">
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onNodeClick={onNodeClick}
+              onSelectionChange={onSelectionChange}
+              nodeTypes={nodeTypes}
+              fitView
+              fitViewOptions={{ padding: 0.2 }}
+              minZoom={0.1}
+            >
+              <FitViewOnFirstLoad trigger={layoutNodes} />
+              <Panel position="top-center">
+                <div className="flex items-center gap-2">
+                  {columnLineageLoading && (
+                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/90 border border-zinc-700 text-xs text-zinc-400 shadow-lg">
+                      <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
+                      Column lineage loading…
+                    </div>
+                  )}
+                  {activeColumnSels.size > 0 && (
+                    <button
+                      onClick={() => setLineageMode((m) => m === 'direct' ? 'full' : 'direct')}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/90 border border-zinc-700 text-xs shadow-lg transition-colors hover:bg-zinc-700/90"
+                      title={lineageMode === 'direct' ? 'Switch to full transitive closure' : 'Switch to direct lineage only'}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${lineageMode === 'direct' ? 'bg-brand-400' : 'bg-amber-400'}`} />
+                      <span className={lineageMode === 'direct' ? 'text-zinc-300' : 'text-amber-300'}>
+                        {lineageMode === 'direct' ? 'Direct lineage' : 'Full lineage'}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              </Panel>
+              <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1f2937" />
+              <Controls showInteractive={false} className="!bg-surface-panel !border-gray-800" />
+              <MiniMap
+                nodeColor={(n) => {
+                  const status = (n.data?.model as ModelNode)?.status ?? 'idle';
+                  if (status === 'success') return '#059669';
+                  if (status === 'error') return '#dc2626';
+                  if (status === 'running') return '#14b8a6';
+                  if (status === 'stale') return '#d97706';
+                  return '#374151';
+                }}
+                className="!bg-surface-panel !border-gray-800"
+              />
+            </ReactFlow>
+          </div>
+
         </div>
 
-      </div>
-
-      {/* Side panel */}
-      <SidePane
-        projectId={id}
-        model={selectedModel}
-        selectedModels={selectedModels}
-        graph={graph ?? null}
-        page="dag"
-        onNavigateToFiles={() => selectedModel && navigate(`/projects/${id}/files?model=${encodeURIComponent(selectedModel.unique_id)}`)}
-        onNavigateToFile={(path) => {
-          const node = graph?.nodes.find((n) => n.original_file_path === path);
-          if (node) navigate(`/projects/${id}/files?model=${encodeURIComponent(node.unique_id)}`);
-        }}
-        onViewDocs={() => selectedModel && navigate(`/projects/${id}/docs?node=${encodeURIComponent(selectedModel.unique_id)}`)}
-        onDelete={() => selectedModel && handleDeleteModel(selectedModel)}
-        failedTestUid={failedTestUid}
-        onFailedTestConsumed={() => setFailedTestUid(null)}
-        showRows={selectedModel ? (testShowRows[selectedModel.unique_id] ?? null) : null}
-        onShowRows={handleShowRows}
-      />
-
-      {/* New model modal */}
-      {newModelOpen && (
-        <NewModelModal
+        {/* Side panel */}
+        <SidePane
           projectId={id}
-          onClose={() => setNewModelOpen(false)}
-          onCreated={() => {
-            setNewModelOpen(false);
-            qc.invalidateQueries({ queryKey: ['models', id] });
+          model={selectedModel}
+          selectedModels={selectedModels}
+          graph={graph ?? null}
+          page="dag"
+          onNavigateToFiles={() => selectedModel && navigate(`/projects/${id}/files?model=${encodeURIComponent(selectedModel.unique_id)}`)}
+          onNavigateToFile={(path) => {
+            const node = graph?.nodes.find((n) => n.original_file_path === path);
+            if (node) navigate(`/projects/${id}/files?model=${encodeURIComponent(node.unique_id)}`);
           }}
+          onViewDocs={() => selectedModel && navigate(`/projects/${id}/docs?node=${encodeURIComponent(selectedModel.unique_id)}`)}
+          onDelete={() => selectedModel && handleDeleteModel(selectedModel)}
+          failedTestUid={failedTestUid}
+          onFailedTestConsumed={() => setFailedTestUid(null)}
+          showRows={selectedModel ? (testShowRows[selectedModel.unique_id] ?? null) : null}
+          onShowRows={handleShowRows}
         />
-      )}
-    </div>
+
+        {/* New model modal */}
+        {newModelOpen && (
+          <NewModelModal
+            projectId={id}
+            onClose={() => setNewModelOpen(false)}
+            onCreated={() => {
+              setNewModelOpen(false);
+              qc.invalidateQueries({ queryKey: ['models', id] });
+            }}
+          />
+        )}
+      </div>
+    </ColumnLineageContext.Provider>
   );
 }
