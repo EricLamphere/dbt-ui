@@ -96,8 +96,8 @@ export function DatabaseExplorer({ nodes, onRefresh }: DatabaseExplorerProps) {
           label="Sources"
           icon={<Database className="w-3 h-3 shrink-0" />}
           items={sources}
-          getLabel={(n) => n.source_name ? `${n.source_name}.${n.name}` : n.name}
-          getDragText={(n) => n.source_name ? `{{ source('${n.source_name}', '${n.name}') }}` : n.name}
+          getLabel={(n) => `${n.source_name ?? 'unknown'}.${n.name}`}
+          getDragText={(n) => `{{ source('${n.source_name ?? 'unknown'}', '${n.name}') }}`}
         />
 
         {models.length === 0 && seeds.length === 0 && sources.length === 0 && (
