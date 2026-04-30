@@ -95,6 +95,10 @@ export default function ModelsPage() {
   const qc = useQueryClient();
 
   const filterKey = `dag-filter-${id}`;
+  const selectedModelKey = `dag-selected-model-${id}`;
+  const expandedNodesKey = `dag-expanded-nodes-${id}`;
+  const columnSelsKey = `dag-column-sels-${id}`;
+
   const [filter, setFilter] = useState<FilterState>(() => {
     const saved = sessionStorage.getItem(filterKey);
     return saved ? deserializeFilter(saved) : defaultFilter();
@@ -104,7 +108,6 @@ export default function ModelsPage() {
     setFilter(f);
     sessionStorage.setItem(filterKey, serializeFilter(f));
   }, [filterKey]);
-  const [selectedModel, setSelectedModel] = useState<ModelNode | null>(null);
   const [selectedModels, setSelectedModels] = useState<ModelNode[]>([]);
   const [newModelOpen, setNewModelOpen] = useState(false);
   const [compiling, setCompiling] = useState(false);
@@ -120,9 +123,19 @@ export default function ModelsPage() {
   const [liveStatuses, setLiveStatuses] = useState<Record<string, LiveStatus>>({});
 
   // Column lineage state
-  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(() => {
+    try {
+      const saved = sessionStorage.getItem(expandedNodesKey);
+      return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
+    } catch { return new Set(); }
+  });
   // Active column selections: Set of "uid::colname" keys. Supports multi-select via cmd/ctrl+click.
-  const [activeColumnSels, setActiveColumnSels] = useState<Set<string>>(new Set());
+  const [activeColumnSels, setActiveColumnSels] = useState<Set<string>>(() => {
+    try {
+      const saved = sessionStorage.getItem(columnSelsKey);
+      return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
+    } catch { return new Set(); }
+  });
   // Lineage trace mode: 'direct' shows only immediate upstream/downstream of the clicked column;
   // 'full' follows the complete transitive closure (can pull in sibling columns via shared nodes).
   const [lineageMode, setLineageMode] = useState<'direct' | 'full'>('direct');
@@ -139,15 +152,40 @@ export default function ModelsPage() {
     refetchInterval: false,
   });
 
-  // Pre-select model from ?model=<unique_id> query param.
-  // Runs whenever searchParams or graph changes so navigating here from another
-  // page (without unmounting) still selects the correct node.
+  // Pre-select model from ?model=<unique_id> query param (takes priority),
+  // or from sessionStorage. Initialise directly from cache so the selection is
+  // available on the first render even when the cached graph object reference
+  // hasn't changed (which would prevent a useEffect from firing).
   const modelParam = searchParams.get('model');
+  const [selectedModel, setSelectedModel] = useState<ModelNode | null>(() => {
+    const cachedGraph = qc.getQueryData<GraphDto>(['models', id]);
+    if (!cachedGraph) return null;
+    if (modelParam) return cachedGraph.nodes.find((n) => n.unique_id === modelParam) ?? null;
+    try {
+      const uid = sessionStorage.getItem(selectedModelKey);
+      if (uid) return cachedGraph.nodes.find((n) => n.unique_id === uid) ?? null;
+    } catch {}
+    return null;
+  });
+
+  // When graph loads for the first time (cache miss on mount), or when modelParam
+  // changes, resolve the selection against the fresh node list.
   useEffect(() => {
-    if (!graph || !modelParam) return;
-    const node = graph.nodes.find((n) => n.unique_id === modelParam);
-    if (node) setSelectedModel(node);
-  }, [graph, modelParam]);
+    if (!graph) return;
+    if (modelParam) {
+      const node = graph.nodes.find((n) => n.unique_id === modelParam);
+      if (node) setSelectedModel(node);
+      return;
+    }
+    setSelectedModel((current) => {
+      if (current) return current;
+      try {
+        const uid = sessionStorage.getItem(selectedModelKey);
+        if (uid) return graph.nodes.find((n) => n.unique_id === uid) ?? null;
+      } catch {}
+      return null;
+    });
+  }, [graph, modelParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // When graph refreshes (e.g. after dbt show writes manifest.json), keep selectedModel
   // data current without clearing the selection.
@@ -163,6 +201,17 @@ export default function ModelsPage() {
       setLiveStatuses({});
       setTestShowRows({});
       try { sessionStorage.removeItem(`dag-show-rows-${id}`); } catch {}
+      if (event.type === 'graph_changed') {
+        // Node UIDs may change after a graph refresh — clear stale selections
+        setSelectedModel(null);
+        setActiveColumnSels(new Set());
+        setExpandedNodes(new Set());
+        try {
+          sessionStorage.removeItem(selectedModelKey);
+          sessionStorage.setItem(columnSelsKey, '[]');
+          sessionStorage.setItem(expandedNodesKey, '[]');
+        } catch {}
+      }
       qc.invalidateQueries({ queryKey: ['models', id] });
       qc.invalidateQueries({ queryKey: ['column-lineage', id] });
     }
@@ -184,7 +233,7 @@ export default function ModelsPage() {
         setLiveStatuses((prev) => ({ ...prev, [result.name]: result.status }));
       }
     }
-  }, [id, qc]));
+  }, [id, qc, selectedModelKey, columnSelsKey, expandedNodesKey]));
 
   const filteredGraph = useMemo(() => {
     if (!graph) return null;
@@ -357,21 +406,24 @@ export default function ModelsPage() {
   const handleColumnClick = useCallback((nodeId: string, column: string, multi: boolean) => {
     const key = `${nodeId}::${column}`;
     setActiveColumnSels((prev) => {
+      let next: Set<string>;
       if (multi) {
-        const next = new Set(prev);
+        next = new Set(prev);
         if (next.has(key)) next.delete(key); else next.add(key);
-        return next;
+      } else {
+        // Single click: toggle off if already the only selection, else replace
+        next = prev.size === 1 && prev.has(key) ? new Set() : new Set([key]);
       }
-      // Single click: toggle off if already the only selection, else replace
-      if (prev.size === 1 && prev.has(key)) return new Set();
-      return new Set([key]);
+      try { sessionStorage.setItem(columnSelsKey, JSON.stringify([...next])); } catch {}
+      return next;
     });
-  }, []);
+  }, [columnSelsKey]);
 
   const handleToggleExpand = useCallback((nodeId: string) => {
     setExpandedNodes((prev) => {
       const next = new Set(prev);
       if (next.has(nodeId)) next.delete(nodeId); else next.add(nodeId);
+      try { sessionStorage.setItem(expandedNodesKey, JSON.stringify([...next])); } catch {}
       return next;
     });
     // Clear any column selections owned by this node when collapsing
@@ -380,9 +432,13 @@ export default function ModelsPage() {
       for (const key of prev) {
         if (key.startsWith(`${nodeId}::`)) next.delete(key);
       }
-      return next.size === prev.size ? prev : next;
+      if (next.size !== prev.size) {
+        try { sessionStorage.setItem(columnSelsKey, JSON.stringify([...next])); } catch {}
+        return next;
+      }
+      return prev;
     });
-  }, []);
+  }, [expandedNodesKey, columnSelsKey]);
 
   // Sync layout + dimming into React Flow's node state.
   // Column lineage dimming takes precedence over model-level dimming when columns are selected.
@@ -437,11 +493,13 @@ export default function ModelsPage() {
       const model = node.data?.model as ModelNode | undefined;
       if (model) {
         setSelectedModel(model);
+        try { sessionStorage.setItem(selectedModelKey, model.unique_id); } catch {}
         // Clicking the node canvas (not a column) clears column selections
         setActiveColumnSels(new Set());
+        try { sessionStorage.setItem(columnSelsKey, '[]'); } catch {}
       }
     },
-    [],
+    [selectedModelKey, columnSelsKey],
   );
 
   const onSelectionChange = useCallback(({ nodes }: OnSelectionChangeParams) => {
@@ -449,12 +507,17 @@ export default function ModelsPage() {
       .map((n) => n.data?.model as ModelNode | undefined)
       .filter((m): m is ModelNode => m !== undefined);
     setSelectedModels(models);
-    if (models.length === 1) setSelectedModel(models[0]);
+    if (models.length === 1) {
+      setSelectedModel(models[0]);
+      try { sessionStorage.setItem(selectedModelKey, models[0].unique_id); } catch {}
+    }
     if (models.length === 0) {
       setSelectedModel(null);
+      try { sessionStorage.removeItem(selectedModelKey); } catch {}
       setActiveColumnSels(new Set());
+      try { sessionStorage.setItem(columnSelsKey, '[]'); } catch {}
     }
-  }, []);
+  }, [selectedModelKey, columnSelsKey]);
 
   const handleRefreshDag = async () => {
     await api.models.compile(id);

@@ -31,6 +31,30 @@ Jinja expressions (`{{ ref('my_model') }}`, `{{ var('x') }}`, `{% if ... %}`) ar
 
 ---
 
+## Autocomplete
+
+The editor provides context-aware completions sourced from the project's `manifest.json`:
+
+| Trigger | Completions |
+|---|---|
+| `{{ ref('` | All models, seeds, and snapshots — with materialization and schema as detail |
+| `{{ source('schema',` | Source table names for the typed schema |
+| `{{ source('` | All source schema names |
+| `FROM ` / `JOIN ` | Models as `{{ ref('...') }}` and sources as `{{ source('...', '...') }}` |
+| After `SELECT`, `WHERE`, `ON`, column position | Column names, scoped to models referenced in the current SQL statement |
+
+Suggestions are prefix-filtered and ranked (exact match first, then alphabetical). Trigger autocomplete manually with `Ctrl+Space`.
+
+---
+
+## Navigating to a Ref or Source
+
+Hold **Cmd** (Mac) or **Ctrl** (Windows/Linux) over any `ref(...)` or `source(...)` expression — it becomes underlined as a clickable link. **Cmd+click** opens the referenced model's source file in the File Explorer.
+
+This works the same way as the cmd+click navigation in the File Explorer editor.
+
+---
+
 ## Running a Query
 
 Click **Run** or press `Cmd+Enter`. The backend calls `dbt show --inline "<sql>" --limit <n>`. Results appear in the right pane with a row count and timestamp.

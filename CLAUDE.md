@@ -56,13 +56,15 @@ frontend/src/
       Docs.tsx           — Native docs browser (folder tree)
       FileExplorer/      — File browser + editor; uses SidePane(page="files") with navigation to DAG
       Git/               — Source Control page (VSCode-style SCM): ChangesList, DiffView (Monaco DiffEditor), CommitBox, BranchPicker, HistoryPanel
-      Workspace/         — SQL Workspace page: file tree + Monaco editor + Compiled SQL tab + resizable results pane
+      Workspace/         — SQL Workspace page: file tree + Monaco editor + Compiled SQL tab + resizable results pane; SQL/dbt autocomplete; cmd+click refs navigate to File Explorer
       Environment.tsx    — Env vars + profiles
       InitScripts.tsx    — Init pipeline management
       components/
+        NavRail.tsx      — Collapsible left nav sidebar; persists collapsed state in localStorage; resizable when expanded; never re-opens on navigation
+        ProjectNav.tsx   — Nav items (DAG/Files/Docs/Workspace/Git/Environment/Init); icon-only when NavRail collapsed
         SidePane/
-          index.tsx      — Right collapsible/draggable panel (horizontal drag); renders PropertiesTab; props: projectId, model, graph, page, navigation callbacks
-          PropertiesTab.tsx — Model metadata (name, type, materialization, schema, path, deps, tags, description, status), run controls (run/build/test grid), test failures, action buttons
+          index.tsx      — Right collapsible/draggable panel (horizontal drag); renders PropertiesTab; props: projectId, model, graph, page, navigation callbacks, onNavigateToFile
+          PropertiesTab.tsx — Model metadata; Refs/Sources + Referenced By chips (cmd+clickable → onNavigateToFile); run controls (run/build/test grid); test failures; action buttons
         BottomPane/
           RunPanel.tsx     — Execution DAG (parses run_log to show real-time status)
           TerminalPanel.tsx — xterm.js terminals (multi-instance tabs); optimized resize with lastSizeRef to prevent spurious SIGWINCH

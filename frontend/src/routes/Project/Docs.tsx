@@ -304,7 +304,9 @@ export default function DocsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
 
-  const [listWidth, setListWidth] = useState(300);
+  const [listWidth, setListWidth] = useState(() => {
+    try { const v = parseInt(localStorage.getItem('dbt-ui:docs-list-width') ?? '', 10); return !isNaN(v) && v >= 160 && v <= 520 ? v : 300; } catch { return 300; }
+  });
   const listResizing = useRef(false);
   const [generating, setGenerating] = useState(false);
   const [filter, setFilter] = useState('');
@@ -358,7 +360,10 @@ export default function DocsPage() {
     const onMove = (e: MouseEvent) => {
       if (listResizing.current) setListWidth((w) => Math.max(160, Math.min(520, w + e.movementX)));
     };
-    const onUp = () => { listResizing.current = false; };
+    const onUp = () => {
+      listResizing.current = false;
+      setListWidth((w) => { try { localStorage.setItem('dbt-ui:docs-list-width', String(w)); } catch {} return w; });
+    };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };

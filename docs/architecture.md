@@ -94,16 +94,18 @@ dbt-ui/
 │   │           ├── InitScripts.tsx      # Init pipeline management
 │   │           ├── FileExplorer/        # File browser + Monaco editor; SidePane replaces old tab bar
 │   │           ├── Git/                 # Source Control page (VSCode-style SCM)
-│   │           ├── Workspace/           # SQL Workspace page — file tree + Monaco editor + results pane
+│   │           ├── Workspace/           # SQL Workspace — file tree + Monaco editor + results pane + autocomplete
 │   │           └── components/
 │   │               ├── BottomPane/
 │   │               │   ├── index.tsx        # Drag-to-resize pane; tab management; terminal instances
 │   │               │   ├── RunPanel.tsx     # Execution DAG (real-time run_log parsing)
 │   │               │   ├── TerminalPanel.tsx # xterm.js multi-instance terminal; only resizes PTY when dims change
 │   │               │   └── LogPanel.tsx     # Project and API logs
+│   │               ├── NavRail.tsx          # Collapsible left nav sidebar (persists collapsed state in localStorage; resizable when expanded)
+│   │               ├── ProjectNav.tsx       # Nav items (DAG/Files/Docs/Workspace/Git/Environment/Init); icon-only mode when collapsed
 │   │               ├── SidePane/
 │   │               │   ├── index.tsx        # Right-side collapsible panel (drag/collapse); renders PropertiesTab
-│   │               │   └── PropertiesTab.tsx # Model metadata + run controls + action buttons (unified, no tabs)
+│   │               │   └── PropertiesTab.tsx # Model metadata; Refs/Sources + Referenced By as cmd+clickable chips; run controls; action buttons
 │   │               ├── ModelNode.tsx
 │   │               ├── NewProjectModal.tsx  # dbt init PTY terminal; writes profiles.yml after rescan
 │   │               └── DagFilterBar.tsx     # filter bar: text selector + dropdown pills + Clear + node count
@@ -508,9 +510,19 @@ In the frontend (`Models.tsx`):
 - All SQL files are enforced to have a `.sql` extension on creation
 
 **Frontend layout** (three resizable panels):
-- Left: file tree (add/delete/rename files and folders; filter bar)
+- Left: file tree (add/delete/rename files and folders; filter bar) + Database Explorer (resizable vertical split)
 - Center: Monaco editor with Code / Compiled SQL tabs; Cmd+S saves, Cmd+Enter runs; SQL formatter (Jinja-aware)
 - Right: query results pane (drag to open/resize/close); shows row count and query timestamp
+
+**Autocomplete** (`Monaco registerCompletionItemProvider` on `'sql'`):
+- `ref('` → lists all models/seeds/snapshots with materialization + schema detail
+- `source('schema',` → lists source table names for the given schema
+- `source('` → lists all source schema names
+- `FROM`/`JOIN <word>` → lists models as `{{ ref('...') }}` and sources as `{{ source('...', '...') }}`
+- Column names after `SELECT`, `WHERE`, `ON`, etc. — scoped to models referenced in the current SQL statement
+- Completions are prefix-filtered and ranked (exact match first, then alphabetical)
+
+**Cmd+click navigation** — `ref('model')` and `source('schema', 'table')` spans are underlined when Cmd/Ctrl is held. Clicking navigates to `/projects/:id/files?model=<unique_id>`, which the File Explorer deep-link handler resolves to the model's source file.
 
 Session state (`sessionStorage`) persists open file path, expanded tree nodes, active tab, and last query results across navigation within a browser session.
 
@@ -592,6 +604,10 @@ task install PYTHON=python3.12
 **`_effective_workspace()` as single source of truth** — The projects path can come from the `app_settings` DB table (set via UI) or `settings.dbt_projects_path` (the `DBT_UI_PROJECTS_PATH` env var). All backend code that needs the workspace path calls this one function.
 
 **SidePane as a unified panel** — The right-side panel (DAG and File Explorer) intentionally has no tab bar. Model metadata and run controls live in one scrollable view. Separating them into tabs added navigation friction with no benefit since both are used together during a typical run-and-inspect workflow.
+
+**SidePane upstream/downstream chips** — "Refs / Sources" (upstream nodes) and "Referenced By" (downstream nodes) are shown as chips derived from graph edges at render time. Cmd+clicking a chip calls `onNavigateToFile(path)`, which in FileExplorer expands the tree and opens the file. Chips without a navigable `original_file_path` render in muted style with no hover effect.
+
+**NavRail collapse state in localStorage** — The left sidebar collapse state persists in `localStorage` under `nav-rail-collapsed`. Navigating between pages or clicking a nav icon while collapsed never re-opens the rail; the collapsed state is only changed by clicking the toggle chevron at the bottom of the rail.
 
 **Project-local `profiles.yml`** — Each project carries its own `profiles.yml` rather than relying on `~/.dbt/profiles.yml`. This makes projects self-contained and portable. `DbtRunner.build_args()` adds `--profiles-dir` automatically when the file is present, so existing projects without one continue to use the global fallback. `ensure-profiles-yml` writes a minimal stub after `dbt init` so new projects are immediately usable.
 

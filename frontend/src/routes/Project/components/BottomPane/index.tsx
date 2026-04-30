@@ -22,6 +22,18 @@ const MIN_HEIGHT = 180;
 const DEFAULT_HEIGHT = 280;
 const MAX_HEIGHT = 800;
 const COLLAPSE_THRESHOLD = 80;
+const BOTTOM_PANE_HEIGHT_KEY = 'dbt-ui:bottom-pane-height';
+
+function readStoredHeight(): number {
+  try {
+    const v = localStorage.getItem(BOTTOM_PANE_HEIGHT_KEY);
+    if (v) {
+      const n = parseInt(v, 10);
+      if (!isNaN(n) && n >= MIN_HEIGHT && n <= MAX_HEIGHT) return n;
+    }
+  } catch {}
+  return DEFAULT_HEIGHT;
+}
 
 let termIdCounter = 0;
 function newTermTab(): TermTab {
@@ -32,11 +44,11 @@ function newTermTab(): TermTab {
 export function BottomPane({ projectId, graph, projectPath }: BottomPaneProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<PaneTabId>('run');
-  const [height, setHeight] = useState(DEFAULT_HEIGHT);
+  const [height, setHeight] = useState(readStoredHeight);
   const resizing = useRef(false);
   const startY = useRef(0);
   const startH = useRef(0);
-  const lastHeightRef = useRef(DEFAULT_HEIGHT);
+  const lastHeightRef = useRef(readStoredHeight());
 
   // Terminal instance management
   const [termTabs, setTermTabs] = useState<TermTab[]>([]);
@@ -128,6 +140,7 @@ export function BottomPane({ projectId, graph, projectPath }: BottomPaneProps) {
         }
         const clamped = Math.max(MIN_HEIGHT, h);
         lastHeightRef.current = clamped;
+        try { localStorage.setItem(BOTTOM_PANE_HEIGHT_KEY, String(clamped)); } catch {}
         return clamped;
       });
     };

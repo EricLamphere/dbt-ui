@@ -26,6 +26,21 @@ const DEFAULT_WIDTH = 320;
 const MAX_WIDTH = 600;
 const COLLAPSE_THRESHOLD = 80;
 
+function storageKey(page: string) {
+  return `dbt-ui:side-pane-width:${page}`;
+}
+
+function readStoredWidth(page: string): number {
+  try {
+    const v = localStorage.getItem(storageKey(page));
+    if (v) {
+      const n = parseInt(v, 10);
+      if (!isNaN(n) && n >= MIN_WIDTH && n <= MAX_WIDTH) return n;
+    }
+  } catch {}
+  return DEFAULT_WIDTH;
+}
+
 export function SidePane({
   projectId,
   model,
@@ -43,11 +58,11 @@ export function SidePane({
   onShowRows,
 }: SidePaneProps) {
   const [open, setOpen] = useState(false);
-  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [width, setWidth] = useState(() => readStoredWidth(page));
   const resizing = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
-  const lastWidthRef = useRef(DEFAULT_WIDTH);
+  const lastWidthRef = useRef(readStoredWidth(page));
 
   // Auto-open when a model is selected (single or multi)
   useEffect(() => {
@@ -70,6 +85,7 @@ export function SidePane({
         }
         const clamped = Math.max(MIN_WIDTH, w);
         lastWidthRef.current = clamped;
+        try { localStorage.setItem(storageKey(page), String(clamped)); } catch {}
         return clamped;
       });
     };

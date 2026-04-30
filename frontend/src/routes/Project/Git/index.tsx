@@ -19,9 +19,12 @@ export default function GitPage() {
   const SESSION_KEY = `git-selected-path-${id}`;
 
   // Panel sizing
-  const [changesWidth, setChangesWidth] = useState(280);
+  const [changesWidth, setChangesWidth] = useState(() => {
+    try { const v = parseInt(localStorage.getItem('dbt-ui:git-changes-width') ?? '', 10); return !isNaN(v) && v >= 180 && v <= 600 ? v : 280; } catch { return 280; }
+  });
   const [historyOpen, setHistoryOpen] = useState(false);
   const changesResizing = useRef(false);
+  const changesWidthRef = useRef(changesWidth);
 
   // UI state — restore selected path from sessionStorage
   const [selectedPath, setSelectedPath] = useState<string | null>(
@@ -117,10 +120,16 @@ export default function GitPage() {
 
   // ---- resize handlers ----
   const onMouseMove = useCallback((e: MouseEvent) => {
-    if (changesResizing.current) setChangesWidth((w) => Math.max(180, Math.min(600, w + e.movementX)));
+    if (changesResizing.current) setChangesWidth((w) => {
+      const next = Math.max(180, Math.min(600, w + e.movementX));
+      changesWidthRef.current = next;
+      return next;
+    });
   }, []);
   const onMouseUp = useCallback(() => {
+    if (!changesResizing.current) return;
     changesResizing.current = false;
+    try { localStorage.setItem('dbt-ui:git-changes-width', String(changesWidthRef.current)); } catch {}
   }, []);
 
   const registerListeners = useCallback(() => {
