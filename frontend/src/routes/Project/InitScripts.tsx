@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api, type InitStepDto } from '../../lib/api';
-import ProjectNav from './components/ProjectNav';
+import NavRail from './components/NavRail';
 import { useProjectEvents } from '../../lib/sse';
 import { FilePickerModal } from './components/FilePickerModal';
 
@@ -322,33 +322,9 @@ export default function InitScriptsPage() {
 // ---- layout wrapper ----
 
 function PageShell({ id, children }: { id: number; children: React.ReactNode }) {
-  const [navWidth, setNavWidth] = useState(192);
-  const navResizing = useRef(false);
-
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (navResizing.current) {
-        setNavWidth((w) => Math.max(120, Math.min(320, w + e.movementX)));
-      }
-    };
-    const onMouseUp = () => { navResizing.current = false; };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, []);
-
   return (
     <div className="flex h-full overflow-hidden">
-      <div style={{ width: navWidth }} className="shrink-0 bg-surface-panel border-r border-gray-800 flex flex-col overflow-hidden relative">
-        <ProjectNav projectId={id} current="init" />
-        <div
-          onMouseDown={() => { navResizing.current = true; }}
-          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-brand-500/40 transition-colors"
-        />
-      </div>
+      <NavRail projectId={id} current="init" />
       <div className="flex-1 overflow-auto">{children}</div>
     </div>
   );

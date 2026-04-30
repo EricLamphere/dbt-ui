@@ -14,6 +14,7 @@ interface SidePaneProps {
   onNavigateToDag?: () => void;
   onViewDocs?: () => void;
   onDelete?: () => void;
+  onNavigateToFile?: (path: string) => void;
   failedTestUid?: string | null;
   onFailedTestConsumed?: () => void;
   showRows?: ShowRows | null;
@@ -35,6 +36,7 @@ export function SidePane({
   onNavigateToDag,
   onViewDocs,
   onDelete,
+  onNavigateToFile,
   failedTestUid,
   onFailedTestConsumed,
   showRows,
@@ -144,6 +146,7 @@ export function SidePane({
             onNavigateToDag={onNavigateToDag}
             onViewDocs={onViewDocs}
             onDelete={onDelete}
+            onNavigateToFile={onNavigateToFile}
           />
         </div>
       </div>

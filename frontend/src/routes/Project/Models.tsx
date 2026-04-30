@@ -20,7 +20,7 @@ import { api, type ModelNode, type GraphDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 import ModelNodeComponent from './components/ModelNode';
 import NewModelModal from './components/NewModelModal';
-import ProjectNav from './components/ProjectNav';
+import NavRail from './components/NavRail';
 import { SidePane } from './components/SidePane';
 import { type ShowRows } from './components/SidePane/PropertiesTab';
 import DagFilterBar from './components/DagFilterBar';
@@ -126,25 +126,6 @@ export default function ModelsPage() {
   // Lineage trace mode: 'direct' shows only immediate upstream/downstream of the clicked column;
   // 'full' follows the complete transitive closure (can pull in sibling columns via shared nodes).
   const [lineageMode, setLineageMode] = useState<'direct' | 'full'>('direct');
-
-  // Resizable nav rail
-  const [navWidth, setNavWidth] = useState(192);
-  const navResizing = useRef(false);
-
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (navResizing.current) {
-        setNavWidth((w) => Math.max(120, Math.min(320, w + e.movementX)));
-      }
-    };
-    const onMouseUp = () => { navResizing.current = false; };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, []);
 
   const { data: graph } = useQuery({
     queryKey: ['models', id],
@@ -488,13 +469,7 @@ export default function ModelsPage() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Side rail */}
-      <div style={{ width: navWidth }} className="shrink-0 bg-surface-panel border-r border-gray-800 flex flex-col overflow-hidden relative">
-        <ProjectNav projectId={id} current="dag" />
-        <div
-          onMouseDown={() => { navResizing.current = true; }}
-          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-brand-500/40 transition-colors"
-        />
-      </div>
+      <NavRail projectId={id} current="dag" />
 
       {/* Main DAG area */}
       <div className="flex-1 flex flex-col overflow-hidden relative">

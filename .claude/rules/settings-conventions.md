@@ -41,6 +41,7 @@ All settings must appear in one of two places in the Environment page (`frontend
 |---|---|---|---|
 | `INIT_SCRIPT_PATH` | `projects.init_script_path` | `init` | `init` |
 | `REQUIREMENTS_PATH` | `ProjectEnvVar` | (empty) | `/path/to/requirements.txt` |
+| `WORKSPACE_PATH` | `ProjectEnvVar` | `workspace` | `analysis/scratch` |
 
 ## Current Global Settings
 

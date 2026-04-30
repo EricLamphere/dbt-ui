@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Editor, { type Monaco } from '@monaco-editor/react';
+import type * as MonacoEditor from 'monaco-editor';
 import { ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
 import { format as sqlFormat } from 'sql-formatter';
 import { api, type FileContentDto, type GraphDto } from '../../../../lib/api';
@@ -76,6 +77,9 @@ export function ViewPane({
 
   const onNavigateToFileRef = useRef(onNavigateToFile);
   useEffect(() => { onNavigateToFileRef.current = onNavigateToFile; }, [onNavigateToFile]);
+
+  const completionDisposableRef = useRef<MonacoEditor.IDisposable | null>(null);
+  useEffect(() => () => { completionDisposableRef.current?.dispose(); }, []);
 
   const [activeTab, setActiveTab] = useState<ViewTab>('code');
   const [compiledSql, setCompiledSql] = useState<string | null>(null);
@@ -285,6 +289,221 @@ export function ViewPane({
             theme={monacoTheme}
             onMount={(editor, monacoInstance: Monaco) => {
               type IRange = Monaco['Range'] extends new (...a: infer _) => infer R ? R : never;
+
+              // SQL autocomplete for ref/source/column names
+              completionDisposableRef.current?.dispose();
+              completionDisposableRef.current = monacoInstance.languages.registerCompletionItemProvider('sql', {
+                triggerCharacters: ["'", '"', '.', ' ', ','],
+                provideCompletionItems(model: MonacoEditor.editor.ITextModel, position: MonacoEditor.Position) {
+                  const graph = graphRef.current;
+                  if (!graph) return { suggestions: [] };
+
+                  const word = model.getWordUntilPosition(position);
+                  const tokenRange: MonacoEditor.IRange = {
+                    startLineNumber: position.lineNumber,
+                    endLineNumber: position.lineNumber,
+                    startColumn: word.startColumn,
+                    endColumn: position.column,
+                  };
+
+                  const linePrefix = model.getValueInRange({
+                    startLineNumber: position.lineNumber,
+                    endLineNumber: position.lineNumber,
+                    startColumn: 1,
+                    endColumn: position.column,
+                  });
+
+                  function rank<T extends { label: string }>(items: T[], typed: string): T[] {
+                    const t = typed.toLowerCase();
+                    return items
+                      .filter((s) => s.label.toLowerCase().startsWith(t))
+                      .sort((a, b) => {
+                        const al = a.label.toLowerCase();
+                        const bl = b.label.toLowerCase();
+                        if (al === t) return -1;
+                        if (bl === t) return 1;
+                        return al.localeCompare(bl);
+                      });
+                  }
+
+                  function currentStatement(): string {
+                    const fullSql = model.getValue();
+                    const offset = model.getOffsetAt(position);
+                    const before = fullSql.lastIndexOf(';', offset - 1);
+                    const after = fullSql.indexOf(';', offset);
+                    const start = before === -1 ? 0 : before + 1;
+                    const end = after === -1 ? fullSql.length : after;
+                    return fullSql.slice(start, end);
+                  }
+
+                  function referencedNames(): Set<string> {
+                    const stmt = currentStatement();
+                    const names = new Set<string>();
+                    for (const m of stmt.matchAll(/\{\{\s*ref\s*\(\s*['"]([^'"]+)['"]\s*\)\s*\}\}/g))
+                      names.add(m[1]);
+                    for (const m of stmt.matchAll(/\{\{\s*source\s*\(\s*['"][^'"]+['"]\s*,\s*['"]([^'"]+)['"]\s*\)\s*\}\}/g))
+                      names.add(m[1]);
+                    return names;
+                  }
+
+                  const suggestions: MonacoEditor.languages.CompletionItem[] = [];
+                  const g = graph;
+
+                  function nodeDetail(node: (typeof g.nodes)[number]): { detail: string; documentation?: { value: string } } {
+                    const parts: string[] = [];
+                    if (node.materialized) parts.push(node.materialized);
+                    if (node.schema_) parts.push(node.schema_);
+                    return {
+                      detail: parts.length ? `${parts.join(' · ')} (${node.resource_type})` : node.resource_type,
+                      documentation: node.description ? { value: node.description } : undefined,
+                    };
+                  }
+
+                  const refInnerMatch = linePrefix.match(/\{\{\s*ref\s*\(\s*['"]([^'"]*)?$/);
+                  if (refInnerMatch) {
+                    const typed = refInnerMatch[1] ?? '';
+                    const refable = graph.nodes.filter((n) => ['model', 'seed', 'snapshot'].includes(n.resource_type));
+                    for (const { label, node } of rank(refable.map((n) => ({ label: n.name, node: n })), typed)) {
+                      const hasError = node.status === 'error' || node.status === 'stale';
+                      const { detail, documentation } = nodeDetail(node);
+                      suggestions.push({
+                        label: hasError ? `${label} ⚠` : label,
+                        kind: monacoInstance.languages.CompletionItemKind.Reference,
+                        insertText: label,
+                        detail,
+                        documentation,
+                        range: tokenRange,
+                        sortText: label,
+                      });
+                    }
+                    return { suggestions };
+                  }
+
+                  const sourceInnerMatch = linePrefix.match(/\{\{\s*source\s*\(\s*['"][^'"]*['"]\s*,\s*['"]([^'"]*)?$/);
+                  if (sourceInnerMatch) {
+                    const typed = sourceInnerMatch[1] ?? '';
+                    const sources = graph.nodes.filter((n) => n.resource_type === 'source');
+                    for (const { label, node } of rank(sources.map((n) => ({ label: n.name, node: n })), typed)) {
+                      const { documentation } = nodeDetail(node);
+                      suggestions.push({
+                        label,
+                        kind: monacoInstance.languages.CompletionItemKind.Reference,
+                        insertText: label,
+                        detail: node.source_name ? `source: ${node.source_name}` : 'source',
+                        documentation,
+                        range: tokenRange,
+                        sortText: label,
+                      });
+                    }
+                    return { suggestions };
+                  }
+
+                  const sourceSchemaInnerMatch = linePrefix.match(/\{\{\s*source\s*\(\s*['"]([^'"]*)?$/);
+                  if (sourceSchemaInnerMatch) {
+                    const typed = sourceSchemaInnerMatch[1] ?? '';
+                    const schemaNames = [
+                      ...new Set(
+                        graph.nodes
+                          .filter((n) => n.resource_type === 'source' && n.source_name)
+                          .map((n) => n.source_name as string)
+                      ),
+                    ];
+                    for (const { label } of rank(schemaNames.map((s) => ({ label: s })), typed)) {
+                      suggestions.push({
+                        label,
+                        kind: monacoInstance.languages.CompletionItemKind.Module,
+                        insertText: label,
+                        detail: 'source schema',
+                        range: tokenRange,
+                        sortText: label,
+                      });
+                    }
+                    return { suggestions };
+                  }
+
+                  const tableTrigger = /(?:from|join)\s+\w*$/i.test(linePrefix);
+                  if (tableTrigger) {
+                    const typed = word.word;
+                    const refable = graph.nodes.filter((n) => ['model', 'seed', 'snapshot'].includes(n.resource_type));
+                    const sources = graph.nodes.filter((n) => n.resource_type === 'source');
+
+                    for (const { label, node } of rank(refable.map((n) => ({ label: n.name, node: n })), typed)) {
+                      const hasError = node.status === 'error' || node.status === 'stale';
+                      const { detail, documentation } = nodeDetail(node);
+                      suggestions.push({
+                        label: hasError ? `${label} ⚠` : label,
+                        kind: monacoInstance.languages.CompletionItemKind.Reference,
+                        insertText: `{{ ref('${label}') }}`,
+                        detail,
+                        documentation,
+                        range: tokenRange,
+                        sortText: `0_${label}`,
+                      });
+                    }
+
+                    for (const { label, node } of rank(sources.map((n) => ({ label: n.name, node: n })), typed)) {
+                      const { documentation } = nodeDetail(node);
+                      const schema = node.source_name ?? '';
+                      suggestions.push({
+                        label,
+                        kind: monacoInstance.languages.CompletionItemKind.Reference,
+                        insertText: `{{ source('${schema}', '${label}') }}`,
+                        detail: schema ? `source: ${schema}` : 'source',
+                        documentation,
+                        range: tokenRange,
+                        sortText: `1_${label}`,
+                      });
+                    }
+
+                    return { suggestions };
+                  }
+
+                  const colTrigger =
+                    /(?:select|where|on|and|or|by)\s+\w*$/i.test(linePrefix) ||
+                    /,\s*\w*$/.test(linePrefix) ||
+                    /\.\w*$/.test(linePrefix);
+                  if (colTrigger) {
+                    const typed = word.word;
+                    const refNames = referencedNames();
+                    const scopedNodes = refNames.size > 0
+                      ? graph.nodes.filter((n) => refNames.has(n.name))
+                      : graph.nodes;
+
+                    const colMap = new Map<string, { dataType: string; description: string; nodeNames: string[] }>();
+                    for (const node of scopedNodes) {
+                      for (const col of node.columns) {
+                        const existing = colMap.get(col.name);
+                        if (existing) {
+                          existing.nodeNames.push(node.name);
+                        } else {
+                          colMap.set(col.name, {
+                            dataType: col.data_type || '',
+                            description: col.description || '',
+                            nodeNames: [node.name],
+                          });
+                        }
+                      }
+                    }
+
+                    const colItems = [...colMap.entries()].map(([name, meta]) => ({ label: name, meta }));
+                    for (const { label, meta } of rank(colItems, typed)) {
+                      const detail = [meta.dataType, meta.nodeNames.length > 1 ? `${meta.nodeNames.length} models` : meta.nodeNames[0]]
+                        .filter(Boolean).join(' · ');
+                      suggestions.push({
+                        label,
+                        kind: monacoInstance.languages.CompletionItemKind.Field,
+                        insertText: label,
+                        detail: detail || undefined,
+                        documentation: meta.description ? { value: meta.description } : undefined,
+                        range: tokenRange,
+                        sortText: label,
+                      });
+                    }
+                  }
+
+                  return { suggestions };
+                },
+              });
 
               // Compute spans for all ref/source calls in the current model text
               function computeRefSpans(text: string): Array<{ filePath: string; startOffset: number; endOffset: number }> {

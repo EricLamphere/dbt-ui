@@ -9,7 +9,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { api, type DocsNodeDto, type DocsMacroDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
-import ProjectNav from './components/ProjectNav';
+import NavRail from './components/NavRail';
 
 // ---- tree types ----
 
@@ -304,9 +304,7 @@ export default function DocsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
 
-  const [navWidth, setNavWidth] = useState(192);
   const [listWidth, setListWidth] = useState(300);
-  const navResizing = useRef(false);
   const listResizing = useRef(false);
   const [generating, setGenerating] = useState(false);
   const [filter, setFilter] = useState('');
@@ -358,10 +356,9 @@ export default function DocsPage() {
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
-      if (navResizing.current)  setNavWidth((w)  => Math.max(120, Math.min(320, w + e.movementX)));
       if (listResizing.current) setListWidth((w) => Math.max(160, Math.min(520, w + e.movementX)));
     };
-    const onUp = () => { navResizing.current = false; listResizing.current = false; };
+    const onUp = () => { listResizing.current = false; };
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
     return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
@@ -452,10 +449,7 @@ export default function DocsPage() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Nav rail */}
-      <div style={{ width: navWidth }} className="shrink-0 bg-surface-panel border-r border-gray-800 flex flex-col overflow-hidden relative">
-        <ProjectNav projectId={id} current="docs" />
-        <div onMouseDown={() => { navResizing.current = true; }} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-brand-500/40 transition-colors" />
-      </div>
+      <NavRail projectId={id} current="docs" />
 
       {/* Folder tree panel */}
       <div style={{ width: listWidth }} className="shrink-0 bg-surface-app border-r border-gray-800 flex flex-col overflow-hidden relative">

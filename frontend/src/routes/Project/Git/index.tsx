@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api, type GitFileChange } from '../../../lib/api';
 import { useProjectEvents } from '../../../lib/sse';
-import ProjectNav from '../components/ProjectNav';
+import NavRail from '../components/NavRail';
 import { ChangesList } from './components/ChangesList';
 import { CommitBox } from './components/CommitBox';
 import { DiffView } from './components/DiffView';
@@ -19,10 +19,8 @@ export default function GitPage() {
   const SESSION_KEY = `git-selected-path-${id}`;
 
   // Panel sizing
-  const [navWidth, setNavWidth] = useState(192);
   const [changesWidth, setChangesWidth] = useState(280);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const navResizing = useRef(false);
   const changesResizing = useRef(false);
 
   // UI state — restore selected path from sessionStorage
@@ -119,11 +117,9 @@ export default function GitPage() {
 
   // ---- resize handlers ----
   const onMouseMove = useCallback((e: MouseEvent) => {
-    if (navResizing.current) setNavWidth((w) => Math.max(120, Math.min(320, w + e.movementX)));
     if (changesResizing.current) setChangesWidth((w) => Math.max(180, Math.min(600, w + e.movementX)));
   }, []);
   const onMouseUp = useCallback(() => {
-    navResizing.current = false;
     changesResizing.current = false;
   }, []);
 
@@ -154,13 +150,7 @@ export default function GitPage() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Nav */}
-      <div style={{ width: navWidth }} className="shrink-0 bg-surface-panel border-r border-zinc-800 overflow-hidden">
-        <ProjectNav projectId={id} current="git" />
-      </div>
-      <div
-        className="w-1 shrink-0 cursor-col-resize bg-zinc-800 hover:bg-brand-500 transition-colors"
-        onMouseDown={() => { navResizing.current = true; }}
-      />
+      <NavRail projectId={id} current="git" />
 
       {/* Changes panel */}
       <div
@@ -266,7 +256,7 @@ export default function GitPage() {
           />
           <div
             className="fixed z-50 bottom-32 left-64 w-72 bg-surface-panel border border-zinc-700 rounded-lg shadow-xl overflow-hidden"
-            style={{ left: navWidth + changesWidth - 20 }}
+            style={{ left: changesWidth + 192 - 20 }}
           >
             <BranchPicker
               projectId={id}

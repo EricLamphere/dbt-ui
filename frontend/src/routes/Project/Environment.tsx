@@ -1,9 +1,9 @@
-import { useRef, useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Plus, Trash2, Check } from 'lucide-react';
 import { api, type EnvVarDto, type Project } from '../../lib/api';
-import ProjectNav from './components/ProjectNav';
+import NavRail from './components/NavRail';
 
 // ---- Collapsible tile wrapper ----
 
@@ -35,36 +35,14 @@ export default function EnvironmentPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
 
-  const [navWidth, setNavWidth] = useState(192);
-  const navResizing = useRef(false);
-
   const { data: project } = useQuery({
     queryKey: ['project', id],
     queryFn: () => api.projects.get(id),
   });
 
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (navResizing.current) setNavWidth((w) => Math.max(120, Math.min(320, w + e.movementX)));
-    };
-    const onMouseUp = () => { navResizing.current = false; };
-    window.addEventListener('mousemove', onMouseMove);
-    window.addEventListener('mouseup', onMouseUp);
-    return () => {
-      window.removeEventListener('mousemove', onMouseMove);
-      window.removeEventListener('mouseup', onMouseUp);
-    };
-  }, []);
-
   return (
     <div className="flex h-full overflow-hidden">
-      <div style={{ width: navWidth }} className="shrink-0 bg-surface-panel border-r border-gray-800 flex flex-col overflow-hidden relative">
-        <ProjectNav projectId={id} current="environment" />
-        <div
-          onMouseDown={() => { navResizing.current = true; }}
-          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-brand-500/40 transition-colors"
-        />
-      </div>
+      <NavRail projectId={id} current="environment" />
 
       <div className="flex-1 overflow-auto p-6 flex flex-col gap-4">
         <Tile title="Settings">
@@ -204,6 +182,7 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
   });
 
   const requirementsPath = envVars.find((v) => v.key === 'REQUIREMENTS_PATH')?.value ?? '';
+  const workspacePath = envVars.find((v) => v.key === 'WORKSPACE_PATH')?.value ?? '';
 
   const handleSaveInitScriptPath = async (val: string) => {
     await api.projects.updateSettings(projectId, { init_script_path: val || 'init' });
@@ -218,6 +197,15 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
     }
     qc.invalidateQueries({ queryKey: ['env-vars', projectId] });
     qc.invalidateQueries({ queryKey: ['init-steps', projectId] });
+  };
+
+  const handleSaveWorkspacePath = async (val: string) => {
+    if (val) {
+      await api.init.setEnvVar(projectId, 'WORKSPACE_PATH', val);
+    } else {
+      await api.init.deleteEnvVar(projectId, 'WORKSPACE_PATH');
+    }
+    qc.invalidateQueries({ queryKey: ['env-vars', projectId] });
   };
 
   return (
@@ -241,6 +229,12 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
               placeholder="/path/to/requirements.txt"
               onSave={handleSaveRequirementsPath}
             />
+            <ProjectSettingRow
+              label="WORKSPACE_PATH"
+              value={workspacePath}
+              placeholder="workspace"
+              onSave={handleSaveWorkspacePath}
+            />
           </>
         )}
       </div>
@@ -249,7 +243,7 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
 }
 
 // Keys managed by other UI sections — excluded from the user-facing env vars list
-const RESERVED_ENV_KEYS = new Set(['REQUIREMENTS_PATH', 'active_global_profile_id', 'dbt_target']);
+const RESERVED_ENV_KEYS = new Set(['REQUIREMENTS_PATH', 'WORKSPACE_PATH', 'active_global_profile_id', 'dbt_target']);
 
 // ---- Environment Variables ----
 

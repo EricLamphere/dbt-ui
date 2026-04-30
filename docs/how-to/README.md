@@ -12,3 +12,4 @@ Step-by-step guides for using dbt-ui.
 | [Use the file explorer and editor](use-file-explorer.md) | Browse files, edit SQL/YAML with Monaco, and navigate between files and the DAG |
 | [Use the integrated terminal](use-terminal.md) | Open terminal sessions, manage multiple tabs, and use the terminal during development |
 | [Use source control (Git)](use-git.md) | Stage, commit, push/pull, switch branches, and view diffs in the built-in SCM panel |
+| [Use the SQL workspace](use-sql-workspace.md) | Write and run ad-hoc SQL queries, inspect compiled SQL, and manage workspace files |

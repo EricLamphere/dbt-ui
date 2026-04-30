@@ -3,7 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronsDownUp } from 'lucide-react';
 import { api, type FileContentDto, type ModelNode } from '../../../lib/api';
-import ProjectNav from '../components/ProjectNav';
+import NavRail from '../components/NavRail';
 import { SidePane } from '../components/SidePane';
 import { ContextMenu } from './ContextMenu';
 import { TreeItem } from './TreeItem';
@@ -50,9 +50,7 @@ export default function FileExplorerPage() {
 
   // Resizable panels
   const [treeWidth, setTreeWidth] = useState(256);
-  const [navWidth, setNavWidth] = useState(192);
   const treeResizing = useRef(false);
-  const navResizing = useRef(false);
 
   // Fetch graph so we can resolve model uid from file path
   const { data: graph } = useQuery({
@@ -66,13 +64,9 @@ export default function FileExplorerPage() {
       if (treeResizing.current) {
         setTreeWidth((w) => Math.max(150, Math.min(500, w + e.movementX)));
       }
-      if (navResizing.current) {
-        setNavWidth((w) => Math.max(120, Math.min(320, w + e.movementX)));
-      }
     };
     const onMouseUp = () => {
       treeResizing.current = false;
-      navResizing.current = false;
     };
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('mouseup', onMouseUp);
@@ -473,13 +467,7 @@ export default function FileExplorerPage() {
   return (
     <div className="flex h-full overflow-hidden">
       {/* Side rail */}
-      <div style={{ width: navWidth }} className="shrink-0 bg-surface-panel border-r border-gray-800 flex flex-col overflow-hidden relative">
-        <ProjectNav projectId={id} current="files" />
-        <div
-          onMouseDown={() => { navResizing.current = true; }}
-          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-brand-500/40 transition-colors"
-        />
-      </div>
+      <NavRail projectId={id} current="files" />
 
       {/* File tree */}
       <div style={{ width: treeWidth }} className="shrink-0 bg-surface-app border-r border-gray-800 flex flex-col overflow-hidden relative">
@@ -569,6 +557,7 @@ export default function FileExplorerPage() {
         onNavigateToDag={() => selectedModel && navigate(`/projects/${id}/models?model=${encodeURIComponent(selectedModel.unique_id)}`)}
         onViewDocs={() => selectedModel && navigate(`/projects/${id}/docs?node=${encodeURIComponent(selectedModel.unique_id)}`)}
         onDelete={handleDeleteModel}
+        onNavigateToFile={navigateToFile}
       />
 
       {/* Context menu */}

@@ -373,6 +373,14 @@ export const api = {
         body: JSON.stringify({ name, dir_path: dirPath, is_dir: isDir }),
       }),
   },
+  workspace: {
+    run: (projectId: number, body: { sql: string; limit?: number }) =>
+      post<{ columns: string[]; rows: unknown[][] }>(`/projects/${projectId}/workspace/run`, body),
+    compile: (projectId: number, body: { sql: string }) =>
+      post<{ compiled_sql: string }>(`/projects/${projectId}/workspace/compile`, body),
+    getPath: (projectId: number) =>
+      get<{ path: string; relative_path: string }>(`/projects/${projectId}/workspace/path`),
+  },
   init: {
     steps: (projectId: number) => get<InitStepDto[]>(`/projects/${projectId}/init/steps`),
     open: (projectId: number) => post(`/projects/${projectId}/open`),

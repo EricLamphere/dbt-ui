@@ -20,6 +20,7 @@ interface PropertiesTabProps {
   onNavigateToDag?: () => void;
   onViewDocs?: () => void;
   onDelete?: () => void;
+  onNavigateToFile?: (path: string) => void;
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -227,7 +228,7 @@ function Spinner() {
 export function PropertiesTab({
   projectId, model, selectedModels = [], graph, page, failedTestUid, onFailedTestConsumed,
   showRows, onShowRows,
-  onNavigateToFiles, onNavigateToDag, onViewDocs, onDelete,
+  onNavigateToFiles, onNavigateToDag, onViewDocs, onDelete, onNavigateToFile,
 }: PropertiesTabProps) {
   const [loading, setLoading] = useState<RunCommand | null>(null);
   const [loadingShow, setLoadingShow] = useState(false);
@@ -271,13 +272,6 @@ export function PropertiesTab({
   }
 
   const isTest = model.resource_type === 'test';
-
-  const upstreamCount = graph
-    ? graph.edges.filter((e) => e.target === model.unique_id).length
-    : null;
-  const downstreamCount = graph
-    ? graph.edges.filter((e) => e.source === model.unique_id).length
-    : null;
 
   return (
     <div className="overflow-auto flex-1 p-4 flex flex-col gap-4">
@@ -328,13 +322,70 @@ export function PropertiesTab({
             <span className="font-mono">{model.materialized}</span>
           </Row>
         )}
-        {(upstreamCount !== null || downstreamCount !== null) && (
-          <Row label="Dependencies">
-            <span className="font-mono">
-              {upstreamCount ?? '—'} upstream · {downstreamCount ?? '—'} downstream
-            </span>
-          </Row>
-        )}
+        {(() => {
+          if (!graph) return null;
+          const upstreamNodes = graph.edges
+            .filter((e) => e.target === model.unique_id)
+            .map((e) => graph.nodes.find((n) => n.unique_id === e.source))
+            .filter((n): n is ModelNode => n != null);
+          const downstreamNodes = graph.edges
+            .filter((e) => e.source === model.unique_id)
+            .map((e) => graph.nodes.find((n) => n.unique_id === e.target))
+            .filter((n): n is ModelNode => n != null);
+          if (upstreamNodes.length === 0 && downstreamNodes.length === 0) return null;
+          return (
+            <>
+              {upstreamNodes.length > 0 && (
+                <Row label="Refs / Sources">
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    {upstreamNodes.map((n) => (
+                      <button
+                        key={n.unique_id}
+                        title={n.original_file_path ? 'Cmd+click to open in Files' : n.name}
+                        onClick={(e) => {
+                          if ((e.metaKey || e.ctrlKey) && n.original_file_path && onNavigateToFile) {
+                            onNavigateToFile(n.original_file_path);
+                          }
+                        }}
+                        className={`inline-block text-[10px] px-1.5 py-0.5 rounded font-mono border transition-colors ${
+                          n.original_file_path && onNavigateToFile
+                            ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-brand-500 hover:text-brand-300 cursor-default'
+                            : 'bg-surface-elevated text-gray-500 border-transparent cursor-default'
+                        }`}
+                      >
+                        {n.source_name ? `${n.source_name}.${n.name}` : n.name}
+                      </button>
+                    ))}
+                  </div>
+                </Row>
+              )}
+              {downstreamNodes.length > 0 && (
+                <Row label="Referenced By">
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    {downstreamNodes.map((n) => (
+                      <button
+                        key={n.unique_id}
+                        title={n.original_file_path ? 'Cmd+click to open in Files' : n.name}
+                        onClick={(e) => {
+                          if ((e.metaKey || e.ctrlKey) && n.original_file_path && onNavigateToFile) {
+                            onNavigateToFile(n.original_file_path);
+                          }
+                        }}
+                        className={`inline-block text-[10px] px-1.5 py-0.5 rounded font-mono border transition-colors ${
+                          n.original_file_path && onNavigateToFile
+                            ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-brand-500 hover:text-brand-300 cursor-default'
+                            : 'bg-surface-elevated text-gray-500 border-transparent cursor-default'
+                        }`}
+                      >
+                        {n.name}
+                      </button>
+                    ))}
+                  </div>
+                </Row>
+              )}
+            </>
+          );
+        })()}
       </div>
 
       {/* Tags */}

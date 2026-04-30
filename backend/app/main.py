@@ -22,6 +22,7 @@ from app.api import settings as settings_api
 from app.api import sql as sql_api
 from app.api import git as git_api
 from app.api import terminal as terminal_api
+from app.api import workspace as workspace_api
 from app.config import settings
 from app.db.engine import SessionLocal
 from app.db.migrations import init_db
@@ -76,6 +77,7 @@ app.include_router(global_profiles_api.router)
 app.include_router(logs_api.router)
 app.include_router(terminal_api.router)
 app.include_router(git_api.router)
+app.include_router(workspace_api.router)
 
 
 _PROJECT_ID_RE = re.compile(r"/api/projects/(\d+)/")

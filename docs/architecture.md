@@ -42,6 +42,7 @@ dbt-ui/
 │   │   │   ├── docs.py              # /api/projects/{id}/docs — native docs browser
 │   │   │   ├── env.py               # /api/projects/{id}/profiles + dbt-targets + dbt-target (R/W)
 │   │   │   ├── init.py              # /api/projects/{id}/init — steps, pipeline, PTY session
+│   │   │   ├── workspace.py         # /api/projects/{id}/workspace — SQL scratchpad compile/run/path
 │   │   │   ├── terminal.py          # /api/terminal — integrated bash PTY sessions
 │   │   │   ├── settings.py          # /api/settings — global app config (dbt_projects_path)
 │   │   │   ├── events.py            # /api/projects/{id}/events — SSE endpoint
@@ -93,6 +94,7 @@ dbt-ui/
 │   │           ├── InitScripts.tsx      # Init pipeline management
 │   │           ├── FileExplorer/        # File browser + Monaco editor; SidePane replaces old tab bar
 │   │           ├── Git/                 # Source Control page (VSCode-style SCM)
+│   │           ├── Workspace/           # SQL Workspace page — file tree + Monaco editor + results pane
 │   │           └── components/
 │   │               ├── BottomPane/
 │   │               │   ├── index.tsx        # Drag-to-resize pane; tab management; terminal instances
@@ -181,6 +183,7 @@ project_env_vars
   -- Well-known keys:
   --   dbt_target        active dbt target; passed as --target on every invocation
   --   REQUIREMENTS_PATH path to project-specific requirements.txt
+  --   WORKSPACE_PATH    relative path to SQL workspace dir (default "workspace")
   --   Any KEY=value exported by an init script is upserted here automatically
 
 app_settings
@@ -280,6 +283,10 @@ POST   /api/global-profiles
 DELETE /api/global-profiles/{profile_id}
 PUT    /api/global-profiles/{profile_id}/vars/{key}
 DELETE /api/global-profiles/{profile_id}/vars/{key}
+
+GET    /api/projects/{id}/workspace/path              workspace dir path + relative path (creates dir if missing)
+POST   /api/projects/{id}/workspace/compile          compile SQL with dbt compile --inline; returns compiled SQL
+POST   /api/projects/{id}/workspace/run              run SQL with dbt show --inline; returns columns + rows (max 5000)
 
 GET    /api/projects/{id}/git/status                 repo root, current branch, ahead/behind, changes list
 GET    /api/projects/{id}/git/diff                   unified diff for one file (?path=&staged=)
@@ -480,7 +487,34 @@ In the frontend (`Models.tsx`):
 - Highlighted `{node, column}` pairs are passed as props into each `ModelNode`; nodes and edges outside the trace are dimmed
 - `graph_changed` SSE event invalidates `['column-lineage', id]` so the trace updates after recompilation
 
-### 11. File Watching
+### 11. SQL Workspace
+
+`WorkspacePage` (`routes/Project/Workspace/`) is a standalone SQL scratchpad with its own file tree, editor, and results pane. It does **not** use `DbtRunner` — it calls `asyncio.create_subprocess_exec` directly to avoid publishing `run_started`/`run_finished` events and keep the Run panel quiet.
+
+**Compile** (`POST /api/projects/{id}/workspace/compile`):
+1. Calls `dbt compile --inline "<sql>" --output json`
+2. Parses the JSON response — handles dbt 1.10+ `{"compiled": "..."}` and older `{"results":[{"node":{"compiled_code":"..."}}]}` formats
+3. Returns `{ compiled_sql }` to the frontend
+
+**Run** (`POST /api/projects/{id}/workspace/run`):
+1. Calls `dbt show --inline "<sql>" --limit <n> --output json`
+2. `_parse_show_output()` tries multiple JSON shapes (`results[0].table`, `show[*]`) for cross-version compatibility
+3. Returns `{ columns, rows }` (limit clamped 1–5000; existing `LIMIT` clause in SQL is respected and takes precedence)
+4. Results persist in `sessionStorage` so they survive navigation within the session
+
+**Workspace path** (`GET /api/projects/{id}/workspace/path`):
+- Reads `WORKSPACE_PATH` from `project_env_vars`; defaults to `"workspace"`
+- Creates the directory if it does not exist; returns both absolute and relative paths
+- All SQL files are enforced to have a `.sql` extension on creation
+
+**Frontend layout** (three resizable panels):
+- Left: file tree (add/delete/rename files and folders; filter bar)
+- Center: Monaco editor with Code / Compiled SQL tabs; Cmd+S saves, Cmd+Enter runs; SQL formatter (Jinja-aware)
+- Right: query results pane (drag to open/resize/close); shows row count and query timestamp
+
+Session state (`sessionStorage`) persists open file path, expanded tree nodes, active tab, and last query results across navigation within a browser session.
+
+### 12. File Watching
 
 `WatcherManager` runs one `watchfiles.awatch` task per project. Watched paths: `models/`, `tests/`, `seeds/`, `snapshots/`, `macros/`, `analyses/`, `target/`.
 
@@ -513,6 +547,7 @@ Per-project env vars (stored in `project_env_vars`, injected into every dbt subp
 |---|---|---|
 | `REQUIREMENTS_PATH` | Environment tab (UI) | Path to a project-specific `requirements.txt`; installed during `base: pip install` |
 | `dbt_target` | Target dropdown (UI) | Active dbt target; passed as `--target` on every dbt invocation |
+| `WORKSPACE_PATH` | Environment tab (UI) | Relative path to the SQL workspace directory inside the project (default `workspace`) |
 | _(any exported var)_ | Init scripts automatically | Any `export KEY=value` in a custom init script is captured and upserted here after the step succeeds; persists across restarts |
 
 `load_project_env()` builds the subprocess env as: `os.environ` + `project_env_vars` rows + active profile vars (from `env_profiles` / `profile_env_vars`).

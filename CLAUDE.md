@@ -56,6 +56,7 @@ frontend/src/
       Docs.tsx           — Native docs browser (folder tree)
       FileExplorer/      — File browser + editor; uses SidePane(page="files") with navigation to DAG
       Git/               — Source Control page (VSCode-style SCM): ChangesList, DiffView (Monaco DiffEditor), CommitBox, BranchPicker, HistoryPanel
+      Workspace/         — SQL Workspace page: file tree + Monaco editor + Compiled SQL tab + resizable results pane
       Environment.tsx    — Env vars + profiles
       InitScripts.tsx    — Init pipeline management
       components/
@@ -80,7 +81,7 @@ All 10 in `backend/app/db/models.py`:
 - `run_invocations` — historical run records
 - `env_profiles` — named environment profiles per project
 - `profile_env_vars` — key/value vars belonging to a profile
-- `project_env_vars` — project-level env vars (not profile-scoped); includes `dbt_target` for active target; `REQUIREMENTS_PATH` for per-project requirements
+- `project_env_vars` — project-level env vars (not profile-scoped); includes `dbt_target` for active target; `REQUIREMENTS_PATH` for per-project requirements; `WORKSPACE_PATH` for SQL workspace dir (default `workspace`)
 - `app_settings` — global app config (key/value); keys: `dbt_projects_path`, `global_requirements_path`, `data_dir`, `log_level`
 - `global_profiles` — named env var sets shared across all projects
 - `global_profile_vars` — key/value vars belonging to a global profile
