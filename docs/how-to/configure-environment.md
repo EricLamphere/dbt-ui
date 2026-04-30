@@ -83,6 +83,10 @@ Use global profiles for credentials or env vars that apply to multiple projects 
 
 **REQUIREMENTS_PATH** — an absolute path to a `requirements.txt` file. When set, this file is pip-installed into the dbt venv during every project open (the `base: pip install` init step). Click the value to edit; clear it to remove.
 
+**WORKSPACE_PATH** — the subdirectory within the project where SQL Workspace files are stored. Defaults to `workspace/`. The directory is created automatically if it does not exist. Click the value to edit; clear it to reset to the default.
+
+Use this to point the SQL Workspace at a different folder — for example `analysis/scratch` if you want workspace files committed alongside your models, or a path outside the project root for throwaway queries.
+
 ### Global settings (read-only here)
 
 Global settings are shown for reference but can only be edited in the Global Settings modal:

@@ -85,6 +85,7 @@ Per-project settings (stored in `project_env_vars`, injected into every dbt subp
 |---|---|---|---|
 | `INIT_SCRIPT_PATH` | Environment tab | Directory (relative to project root) scanned for `.sh` init scripts | `init` |
 | `REQUIREMENTS_PATH` | Environment tab | Path to a project-specific `requirements.txt`; installed in addition to the global one | _(none)_ |
+| `WORKSPACE_PATH` | Environment tab | Directory (relative to project root) where SQL Workspace files are stored | `workspace` |
 | `dbt_target` | Target dropdown | Active dbt target; passed as `--target` on every invocation | _(profiles.yml default)_ |
 | _(any key)_ | Init scripts (automatic) | Any `export KEY=value` in a custom init script is captured and stored here automatically | — |
 
