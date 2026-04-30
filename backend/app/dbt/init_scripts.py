@@ -8,6 +8,7 @@ BASE_STEPS: tuple[tuple[str, str], ...] = (
     ("base: pip install", "pip install -r requirements.txt"),
     ("base: dbt deps", "dbt deps"),
     ("base: dbt docs generate", "dbt docs generate"),
+    ("base: dbt compile", "dbt compile"),
 )
 
 

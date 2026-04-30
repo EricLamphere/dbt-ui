@@ -598,6 +598,11 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                 ok = await _generate_docs(project_id, project_path, env=env)
                 return_code = 0 if ok else 1
                 log_lines = []
+            elif step.name == "base: dbt compile":
+                return_code, log_lines = await _exec_and_capture(
+                    [str(venv_dbt()), "compile"], project_path, env
+                )
+                ok = return_code == 0
             elif step.script_path:
                 script_dir = str(Path(step.script_path).parent)
                 return_code, log_lines = await _exec_and_capture(

@@ -61,7 +61,7 @@ def _make_project_with_manifest(root: Path, name: str = "test_project") -> tuple
 async def test_models_no_manifest(
     client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings, "workspace", tmp_path)
+    monkeypatch.setattr(settings, "dbt_projects_path", tmp_path)
     (tmp_path / "proj").mkdir()
     (tmp_path / "proj" / "dbt_project.yml").write_text("name: empty\nprofile: p\n")
     list_resp = await client.post("/api/projects/rescan")
@@ -74,7 +74,7 @@ async def test_models_no_manifest(
 async def test_models_endpoint_returns_graph(
     client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings, "workspace", tmp_path)
+    monkeypatch.setattr(settings, "dbt_projects_path", tmp_path)
     _make_project_with_manifest(tmp_path)
     list_resp = await client.post("/api/projects/rescan")
     pid = list_resp.json()[0]["id"]

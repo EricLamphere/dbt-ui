@@ -26,7 +26,7 @@ def _make_project(root: Path, subdir: str, name: str) -> Path:
 async def test_projects_empty_workspace(
     client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings, "workspace", tmp_path)
+    monkeypatch.setattr(settings, "dbt_projects_path", tmp_path)
     resp = await client.get("/api/projects")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -35,7 +35,7 @@ async def test_projects_empty_workspace(
 async def test_projects_discovers_on_first_call(
     client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings, "workspace", tmp_path)
+    monkeypatch.setattr(settings, "dbt_projects_path", tmp_path)
     _make_project(tmp_path, "proj_a", "my_project")
     resp = await client.get("/api/projects")
     assert resp.status_code == 200
@@ -47,7 +47,7 @@ async def test_projects_discovers_on_first_call(
 async def test_rescan_endpoint(
     client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings, "workspace", tmp_path)
+    monkeypatch.setattr(settings, "dbt_projects_path", tmp_path)
     _make_project(tmp_path, "p1", "first_project")
     resp = await client.post("/api/projects/rescan")
     assert resp.status_code == 200
@@ -63,7 +63,7 @@ async def test_get_project_by_id_not_found(client: AsyncClient) -> None:
 async def test_get_project_by_id(
     client: AsyncClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(settings, "workspace", tmp_path)
+    monkeypatch.setattr(settings, "dbt_projects_path", tmp_path)
     _make_project(tmp_path, "proj", "fetched_project")
     list_resp = await client.post("/api/projects/rescan")
     project_id = list_resp.json()[0]["id"]

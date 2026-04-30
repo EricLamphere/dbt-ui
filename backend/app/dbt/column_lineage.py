@@ -45,7 +45,7 @@ def _strip_jinja(sql: str) -> str:
     sql = _RE_JINJA_TAG.sub("", sql)
     sql = _RE_REF.sub(r"\1", sql)
     sql = _RE_SOURCE.sub(r"\1", sql)
-    sql = _RE_JINJA_EXPR.sub("NULL", sql)
+    sql = _RE_JINJA_EXPR.sub("'__jinja__'", sql)
     return sql.strip()
 
 
