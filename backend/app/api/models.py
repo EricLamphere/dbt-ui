@@ -43,6 +43,7 @@ class ModelDto(BaseModel):
     tags: list[str] = []
     description: str = ""
     original_file_path: str | None = None
+    source_name: str | None = None
     status: str = "idle"
     message: str | None = None
     columns: list[ColumnDto] = []
@@ -80,6 +81,7 @@ def _node_to_dto(node: ModelNode, status: ModelStatus | None) -> ModelDto:
         tags=list(node.tags),
         description=node.description,
         original_file_path=node.original_file_path,
+        source_name=node.source_name,
         status=status.status if status else "idle",
         message=status.message if status else None,
         columns=[
