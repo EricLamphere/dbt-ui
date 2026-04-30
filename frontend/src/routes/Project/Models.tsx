@@ -144,6 +144,7 @@ export default function ModelsPage() {
     queryKey: ['models', id],
     queryFn: () => api.models.graph(id),
     refetchInterval: false,
+    staleTime: 0,
   });
 
   const { data: columnLineage, isLoading: columnLineageLoading } = useQuery({
