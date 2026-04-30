@@ -13,7 +13,6 @@ from app.logging_setup import get_logger
 log = get_logger(__name__)
 
 WATCHED_SUBDIRS = ("models", "tests", "seeds", "snapshots", "macros", "analyses")
-TARGET_FILES = ("target/manifest.json", "target/run_results.json")
 
 # .git paths whose changes indicate branch/index state flipped
 _GIT_STATUS_FILES = {"HEAD", "index", "ORIG_HEAD", "FETCH_HEAD", "MERGE_HEAD", "CHERRY_PICK_HEAD"}
@@ -103,10 +102,7 @@ class WatcherManager:
                     await bus.publish(Event(topic=topic, type="git_status_changed", data={}))
                     break
 
-        manifest_or_results = any(
-            str(p).endswith(("manifest.json", "run_results.json")) for p in changed_files
-        )
-        if manifest_or_results:
+        if any(str(p).endswith("manifest.json") for p in changed_files):
             await bus.publish(Event(topic=topic, type="graph_changed", data={}))
 
         stale_model_paths: list[str] = []

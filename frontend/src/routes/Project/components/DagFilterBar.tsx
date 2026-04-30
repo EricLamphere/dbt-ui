@@ -8,9 +8,10 @@ interface FilterDropdownProps {
   options: string[];
   selected: Set<string>;
   onChange: (next: Set<string>) => void;
+  closeSignal: number;
 }
 
-function FilterDropdown({ label, options, selected, onChange }: FilterDropdownProps) {
+function FilterDropdown({ label, options, selected, onChange, closeSignal }: FilterDropdownProps) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -22,6 +23,10 @@ function FilterDropdown({ label, options, selected, onChange }: FilterDropdownPr
     window.addEventListener('mousedown', handler);
     return () => window.removeEventListener('mousedown', handler);
   }, [open]);
+
+  useEffect(() => {
+    if (closeSignal > 0) setOpen(false);
+  }, [closeSignal]);
 
   if (options.length === 0) return null;
 
@@ -83,6 +88,7 @@ interface DagFilterBarProps {
   compiling: boolean;
   onRefresh: () => void;
   onNewModel: () => void;
+  closeDropdownsSignal?: number;
 }
 
 export default function DagFilterBar({
@@ -93,6 +99,7 @@ export default function DagFilterBar({
   compiling,
   onRefresh,
   onNewModel,
+  closeDropdownsSignal = 0,
 }: DagFilterBarProps) {
   const available = useMemo(
     () => (graph ? getAvailableFilters(graph) : { resourceTypes: [], materializations: [], tags: [], statuses: [] }),
@@ -121,24 +128,28 @@ export default function DagFilterBar({
         options={available.resourceTypes}
         selected={filter.resourceTypes}
         onChange={(v) => set('resourceTypes', v)}
+        closeSignal={closeDropdownsSignal}
       />
       <FilterDropdown
         label="Materialization"
         options={available.materializations}
         selected={filter.materializations}
         onChange={(v) => set('materializations', v)}
+        closeSignal={closeDropdownsSignal}
       />
       <FilterDropdown
         label="Tag"
         options={available.tags}
         selected={filter.tags}
         onChange={(v) => set('tags', v)}
+        closeSignal={closeDropdownsSignal}
       />
       <FilterDropdown
         label="Status"
         options={available.statuses}
         selected={filter.statuses}
         onChange={(v) => set('statuses', v)}
+        closeSignal={closeDropdownsSignal}
       />
 
       {/* Clear */}

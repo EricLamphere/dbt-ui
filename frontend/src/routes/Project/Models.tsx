@@ -112,6 +112,7 @@ export default function ModelsPage() {
   const [selectedModels, setSelectedModels] = useState<ModelNode[]>([]);
   const [newModelOpen, setNewModelOpen] = useState(false);
   const [compiling, setCompiling] = useState(false);
+  const [closeDropdownsSignal, setCloseDropdownsSignal] = useState(0);
   const [failedTestUid, setFailedTestUid] = useState<string | null>(null);
   const SHOW_ROWS_KEY = `dag-show-rows-${id}`;
   const [testShowRows, setTestShowRows] = useState<Record<string, ShowRows>>(() => {
@@ -191,6 +192,10 @@ export default function ModelsPage() {
     if (!graph || !selectedModel) return;
     const refreshed = graph.nodes.find((n) => n.unique_id === selectedModel.unique_id);
     if (refreshed) setSelectedModel(refreshed);
+    else {
+      setSelectedModel(null);
+      try { sessionStorage.removeItem(selectedModelKey); } catch {}
+    }
   }, [graph]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // SSE — react to server events
@@ -200,11 +205,9 @@ export default function ModelsPage() {
       setTestShowRows({});
       try { sessionStorage.removeItem(`dag-show-rows-${id}`); } catch {}
       if (event.type === 'graph_changed') {
-        setSelectedModel(null);
         setActiveColumnSels(new Set());
         setExpandedNodes(new Set());
         try {
-          sessionStorage.removeItem(selectedModelKey);
           sessionStorage.setItem(columnSelsKey, '[]');
           sessionStorage.setItem(expandedNodesKey, '[]');
         } catch {}
@@ -465,7 +468,11 @@ export default function ModelsPage() {
     [selectedModelKey, columnSelsKey],
   );
 
+  // onSelectionChange: only handles non-empty selections (multi-select, single-select).
+  // Deselection (0 nodes) is handled by onPaneClick to avoid spurious clears from
+  // programmatic setNodes calls that React Flow fires selection events for.
   const onSelectionChange = useCallback(({ nodes }: OnSelectionChangeParams) => {
+    if (nodes.length === 0) return;
     const models = nodes
       .map((n) => n.data?.model as ModelNode | undefined)
       .filter((m): m is ModelNode => m !== undefined);
@@ -474,12 +481,15 @@ export default function ModelsPage() {
       setSelectedModel(models[0]);
       try { sessionStorage.setItem(selectedModelKey, models[0].unique_id); } catch {}
     }
-    if (models.length === 0) {
-      setSelectedModel(null);
-      try { sessionStorage.removeItem(selectedModelKey); } catch {}
-      setActiveColumnSels(new Set());
-      try { sessionStorage.setItem(columnSelsKey, '[]'); } catch {}
-    }
+  }, [selectedModelKey]);
+
+  const onPaneClick = useCallback(() => {
+    setSelectedModel(null);
+    setSelectedModels([]);
+    try { sessionStorage.removeItem(selectedModelKey); } catch {}
+    setActiveColumnSels(new Set());
+    try { sessionStorage.setItem(columnSelsKey, '[]'); } catch {}
+    setCloseDropdownsSignal((n) => n + 1);
   }, [selectedModelKey, columnSelsKey]);
 
   const handleRefreshDag = async () => {
@@ -516,6 +526,7 @@ export default function ModelsPage() {
             compiling={compiling}
             onRefresh={handleRefreshDag}
             onNewModel={() => setNewModelOpen(true)}
+            closeDropdownsSignal={closeDropdownsSignal}
           />
 
           {/* React Flow */}
@@ -526,6 +537,7 @@ export default function ModelsPage() {
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
               onNodeClick={onNodeClick}
+              onPaneClick={onPaneClick}
               onSelectionChange={onSelectionChange}
               nodeTypes={nodeTypes}
               fitView
