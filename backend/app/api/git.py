@@ -158,6 +158,24 @@ async def get_git_status(
 
     branch, changes = parse_porcelain_v2(output)
 
+    # Git reports untracked directories with a trailing slash (e.g. "? models/staging/").
+    # Expand each such entry into its individual files so the frontend can load diffs.
+    expanded: list[FileChange] = []
+    for c in changes:
+        if c.is_untracked and c.path.endswith("/"):
+            rc2, ls_out = await _git(
+                project_id, repo,
+                "ls-files", "--others", "--exclude-standard", "-z", "--", c.path,
+            )
+            if rc2 == 0 and ls_out.strip("\0"):
+                for file_path in ls_out.split("\0"):
+                    if file_path:
+                        expanded.append(FileChange(path=file_path, index_status="?", worktree_status="?"))
+            # If ls-files fails or returns nothing, skip the directory entry entirely
+        else:
+            expanded.append(c)
+    changes = expanded
+
     def _fc(c: FileChange) -> FileChangeDto:
         return FileChangeDto(
             path=c.path,

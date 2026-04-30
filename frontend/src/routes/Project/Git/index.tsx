@@ -63,10 +63,13 @@ export default function GitPage() {
     enabled: selectedPath !== null,
   });
 
+  // Don't fetch working tree content when the file is deleted there (worktree_status 'D')
+  // or when the file is untracked-deleted — it won't exist on disk.
+  const workingTreeDeleted = selectedChange?.worktree_status === 'D';
   const { data: workingData, isLoading: workingLoading } = useQuery({
     queryKey: ['files', 'content', id, selectedPath],
     queryFn: () => api.files.getContent(id, selectedPath!),
-    enabled: selectedPath !== null && selectedChange !== null,
+    enabled: selectedPath !== null && selectedChange !== null && !workingTreeDeleted,
   });
 
   // ---- SSE ----
@@ -153,8 +156,8 @@ export default function GitPage() {
 
   // ---- diff content ----
   const originalContent = headData?.content ?? '';
-  const modifiedContent = workingData?.content ?? '';
-  const diffLoading = headLoading || workingLoading;
+  const modifiedContent = workingTreeDeleted ? '' : (workingData?.content ?? '');
+  const diffLoading = headLoading || (!workingTreeDeleted && workingLoading);
 
   return (
     <div className="flex h-full overflow-hidden">

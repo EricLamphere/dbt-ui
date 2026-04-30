@@ -194,116 +194,146 @@ export default function ProjectHome() {
         </div>
       </div>
 
-      {/* Action tiles — order: File Explorer, Open in editor, Docs, DAG, Environment, Initialization */}
-      <div className="grid grid-cols-2 gap-3">
-        <ActionTile
-          icon={
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
-            </svg>
-          }
-          title="File Explorer"
-          description="Browse, view, and edit files in your project directory"
-          onClick={() => navigate(`/projects/${id}/files`)}
-        />
-
-        {/* Editor tile — split button */}
-        <div className="relative" ref={pickerRef}>
-          <div className="group flex bg-surface-panel border border-gray-800 hover:border-brand-700 rounded-xl overflow-hidden transition-colors">
-            {/* Main open button */}
-            <button
-              onClick={handleOpenEditor}
-              className="flex-1 flex flex-col gap-3 px-5 py-4 text-left hover:bg-surface-elevated/60 transition-colors"
-            >
-              <div className="text-brand-400 group-hover:text-brand-300 transition-colors">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.25 9.75L16.5 12l-2.25 2.25m-4.5 0L7.5 12l2.25-2.25M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z" />
-                </svg>
-              </div>
-              <div>
-                <div className="text-sm font-semibold text-gray-100 mb-1">Open in {editorLabel}</div>
-                <div className="text-xs text-gray-500 leading-relaxed">Open this project in your preferred editor</div>
-              </div>
-            </button>
-
-            {/* Chevron — opens picker */}
-            <button
-              onClick={(e) => { e.stopPropagation(); setEditorPickerOpen((o) => !o); }}
-              className="px-3 border-l border-gray-800 text-gray-600 hover:text-gray-300 hover:bg-surface-elevated/60 transition-colors"
-              title="Choose editor"
-            >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+      {/* Setup section */}
+      <CollapsibleSection title="Setup" storageKey="home-section-setup">
+        <div className="grid grid-cols-2 gap-3">
+          <ActionTile
+            icon={
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
               </svg>
-            </button>
-          </div>
+            }
+            title="Environment"
+            description="Manage environment profiles and global variables for init scripts"
+            onClick={() => navigate(`/projects/${id}/environment`)}
+          />
 
-          {/* Editor picker dropdown */}
-          {editorPickerOpen && (
-            <div className="absolute bottom-full mb-1 right-0 min-w-[180px] bg-surface-panel border border-gray-700 rounded-lg shadow-xl py-1 z-50">
-              {ALL_EDITORS.map((editor) => {
-                const isActive = editor.id === preferredEditor.id;
-                const label = editor.kind === 'other' && otherAppName ? `Other (${otherAppName})` : editor.label;
-                return (
-                  <button
-                    key={editor.id}
-                    onClick={() => handleSelectEditor(editor)}
-                    className={`w-full text-left px-4 py-2 text-xs transition-colors
-                      ${isActive ? 'text-brand-300 bg-brand-900/30' : 'text-gray-300 hover:bg-gray-800'}`}
-                  >
-                    {label}
-                    {isActive && <span className="ml-2 text-brand-400">✓</span>}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+          <ActionTile
+            icon={
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
+              </svg>
+            }
+            title="Initialization"
+            description="Add or update initialization scripts that run during project setup"
+            onClick={() => navigate(`/projects/${id}/init`)}
+          />
         </div>
+      </CollapsibleSection>
 
-        <ActionTile
-          icon={
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-            </svg>
-          }
-          title="Docs"
-          description="Browse generated dbt documentation for models, sources, and tests"
-          onClick={() => navigate(`/projects/${id}/docs`)}
-        />
+      {/* Project section */}
+      <CollapsibleSection title="Project" storageKey="home-section-project">
+        <div className="grid grid-cols-2 gap-3">
+          <ActionTile
+            icon={
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
+              </svg>
+            }
+            title="File Explorer"
+            description="Browse, view, and edit files in your project directory"
+            onClick={() => navigate(`/projects/${id}/files`)}
+          />
 
-        <ActionTile
-          icon={
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zm0 9.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zm9.75-9.75A2.25 2.25 0 0115.75 3.75H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zm0 9.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-            </svg>
-          }
-          title="DAG"
-          description="Visualize your project's model graph, run builds and tests, and edit SQL"
-          onClick={() => navigate(`/projects/${id}/models`)}
-        />
+          <ActionTile
+            icon={
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <ellipse cx="12" cy="5" rx="9" ry="3" strokeLinecap="round" strokeLinejoin="round" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 5v4c0 1.657 4.03 3 9 3s9-1.343 9-3V5" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9v4c0 1.657 4.03 3 9 3s9-1.343 9-3V9" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 13v4c0 1.657 4.03 3 9 3s9-1.343 9-3v-4" />
+              </svg>
+            }
+            title="SQL Workspace"
+            description="Write and run SQL queries with dbt autocomplete and compiled SQL preview"
+            onClick={() => navigate(`/projects/${id}/workspace`)}
+          />
 
-        <ActionTile
-          icon={
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
-            </svg>
-          }
-          title="Environment"
-          description="Manage environment profiles and global variables for init scripts"
-          onClick={() => navigate(`/projects/${id}/environment`)}
-        />
+          <ActionTile
+            icon={
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zm0 9.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zm9.75-9.75A2.25 2.25 0 0115.75 3.75H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zm0 9.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
+              </svg>
+            }
+            title="DAG"
+            description="Visualize your project's model graph, run builds and tests, and edit SQL"
+            onClick={() => navigate(`/projects/${id}/models`)}
+          />
 
-        <ActionTile
-          icon={
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
-            </svg>
-          }
-          title="Initialization"
-          description="Add or update initialization scripts that run during project setup"
-          onClick={() => navigate(`/projects/${id}/init`)}
-        />
-      </div>
+          <ActionTile
+            icon={
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
+              </svg>
+            }
+            title="Docs"
+            description="Browse generated dbt documentation for models, sources, and tests"
+            onClick={() => navigate(`/projects/${id}/docs`)}
+          />
+
+          <ActionTile
+            icon={
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round"
+                  d="M12 5v7m0 0l-3-3m3 3l3-3M6 19a2 2 0 100-4 2 2 0 000 4zm12 0a2 2 0 100-4 2 2 0 000 4zM6 7a2 2 0 100-4 2 2 0 000 4z" />
+              </svg>
+            }
+            title="Source Control"
+            description="Stage, commit, push, and view your project's git history"
+            onClick={() => navigate(`/projects/${id}/git`)}
+          />
+
+          {/* Editor tile — split button */}
+          <div className="relative" ref={pickerRef}>
+            <div className="group flex bg-surface-panel border border-gray-800 hover:border-brand-700 rounded-xl overflow-hidden transition-colors">
+              <button
+                onClick={handleOpenEditor}
+                className="flex-1 flex flex-col gap-3 px-5 py-4 text-left hover:bg-surface-elevated/60 transition-colors"
+              >
+                <div className="text-brand-400 group-hover:text-brand-300 transition-colors">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.25 9.75L16.5 12l-2.25 2.25m-4.5 0L7.5 12l2.25-2.25M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z" />
+                  </svg>
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-gray-100 mb-1">Open in {editorLabel}</div>
+                  <div className="text-xs text-gray-500 leading-relaxed">Open this project in your preferred editor</div>
+                </div>
+              </button>
+
+              <button
+                onClick={(e) => { e.stopPropagation(); setEditorPickerOpen((o) => !o); }}
+                className="px-3 border-l border-gray-800 text-gray-600 hover:text-gray-300 hover:bg-surface-elevated/60 transition-colors"
+                title="Choose editor"
+              >
+                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            </div>
+
+            {editorPickerOpen && (
+              <div className="absolute bottom-full mb-1 right-0 min-w-[180px] bg-surface-panel border border-gray-700 rounded-lg shadow-xl py-1 z-50">
+                {ALL_EDITORS.map((editor) => {
+                  const isActive = editor.id === preferredEditor.id;
+                  const label = editor.kind === 'other' && otherAppName ? `Other (${otherAppName})` : editor.label;
+                  return (
+                    <button
+                      key={editor.id}
+                      onClick={() => handleSelectEditor(editor)}
+                      className={`w-full text-left px-4 py-2 text-xs transition-colors
+                        ${isActive ? 'text-brand-300 bg-brand-900/30' : 'text-gray-300 hover:bg-gray-800'}`}
+                    >
+                      {label}
+                      {isActive && <span className="ml-2 text-brand-400">✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </CollapsibleSection>
 
       {/* Project files panel */}
       <ProjectFilesPanel project={project} />
@@ -520,6 +550,51 @@ function AppPickerModal({
   );
 }
 
+
+// ---- Collapsible section ----
+
+function CollapsibleSection({
+  title,
+  storageKey,
+  children,
+}: {
+  title: string;
+  storageKey: string;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(() => {
+    const stored = localStorage.getItem(storageKey);
+    return stored === null ? true : stored === 'true';
+  });
+
+  const toggle = () => {
+    setOpen((prev) => {
+      localStorage.setItem(storageKey, String(!prev));
+      return !prev;
+    });
+  };
+
+  return (
+    <div className="mb-4">
+      <button
+        onClick={toggle}
+        className="flex items-center gap-1.5 mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500 hover:text-gray-300 transition-colors"
+      >
+        <svg
+          className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+        {title}
+      </button>
+      {open && children}
+    </div>
+  );
+}
 
 interface ActionTileProps {
   icon: React.ReactNode;
