@@ -40,5 +40,4 @@ Thumbs.db
 .env.*.local
 
 # dbt project workspaces (user data, not source)
-workspace/
 dbt_projects/
