@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import type * as MonacoEditor from 'monaco-editor';
 import { format as sqlFormat } from 'sql-formatter';
@@ -59,6 +59,7 @@ function ensureSqlExtension(name: string): string {
 export default function WorkspacePage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
+  const qc = useQueryClient();
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   useEffect(() => { navigateRef.current = navigate; }, [navigate]);
@@ -858,7 +859,10 @@ export default function WorkspacePage() {
 
         {/* Database explorer section */}
         <div style={{ flex: `0 0 ${explorerRatio * 100}%` }} className="min-h-0 overflow-hidden border-t border-gray-800">
-          <DatabaseExplorer nodes={graphData?.nodes ?? []} />
+          <DatabaseExplorer
+            nodes={graphData?.nodes ?? []}
+            onRefresh={() => qc.invalidateQueries({ queryKey: ['graph', id] })}
+          />
         </div>
 
         {/* Tree/panel right resize handle */}
