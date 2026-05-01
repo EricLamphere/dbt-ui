@@ -216,7 +216,10 @@ export default function ModelsPage() {
       qc.invalidateQueries({ queryKey: ['column-lineage', id] });
     }
     if (event.type === 'compile_started') setCompiling(true);
-    if (event.type === 'compile_finished') setCompiling(false);
+    if (event.type === 'compile_finished') {
+      setCompiling(false);
+      qc.invalidateQueries({ queryKey: ['column-lineage', id] });
+    }
     if (event.type === 'test_failed') {
       const d = event.data as { test_uid: string; model_uid: string | null };
       setFailedTestUid(d.test_uid);
