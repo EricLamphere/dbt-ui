@@ -5,7 +5,7 @@ import shutil
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from app.dbt.interactive import manager as init_manager
+from app.dbt.interactive import _pty_read_executor, manager as init_manager
 from app.events.sse import sse_response_with_replay
 from app.logging_setup import get_logger
 
@@ -98,7 +98,7 @@ async def terminal_resize(session_id: str, dto: TerminalResizeDto) -> dict[str, 
         try:
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(
-                None, session.process.setwinsize, dto.rows, dto.cols
+                _pty_read_executor, session.process.setwinsize, dto.rows, dto.cols
             )
         except Exception as exc:
             log.warning("terminal_resize_failed", error=str(exc))

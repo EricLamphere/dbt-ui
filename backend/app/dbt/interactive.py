@@ -1,12 +1,17 @@
 import asyncio
 import os
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from app.events.bus import Event, bus
 from app.logging_setup import get_logger
+
+# Dedicated pool for blocking PTY reads — keeps them off the default executor
+# so send_input, manifest loads, and log writes aren't starved.
+_pty_read_executor = ThreadPoolExecutor(max_workers=32, thread_name_prefix="pty-reader")
 
 log = get_logger(__name__)
 
@@ -75,7 +80,7 @@ class InteractiveInitManager:
         try:
             while True:
                 try:
-                    chunk = await loop.run_in_executor(None, self._read_chunk, session.process)
+                    chunk = await loop.run_in_executor(_pty_read_executor, self._read_chunk, session.process)
                 except EOFError:
                     break
                 if chunk is None:
@@ -118,7 +123,7 @@ class InteractiveInitManager:
             # PTY not yet started (pip install still running) — silently drop input
             return
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, session.process.write, data.encode())
+        await loop.run_in_executor(_pty_read_executor, session.process.write, data.encode())
 
     async def stop(self, session_id: str) -> None:
         session = self._sessions.get(session_id)
