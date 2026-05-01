@@ -575,7 +575,7 @@ export default function DocsPage() {
             description={docsData?.project_description ?? ''}
           />
         )}
-        {selectedNode && <NodeDetail node={selectedNode} allNodes={nodeMap} projectId={id} />}
+        {selectedNode && <NodeDetail node={selectedNode} allNodes={nodeMap} allMacros={macroMap} projectId={id} />}
         {selectedMacro && <MacroDetail macro={selectedMacro} />}
         {!isProjectOverview && !selectedNode && !selectedMacro && (
           <div className="flex items-center justify-center h-full text-gray-600 text-sm select-none">
@@ -686,9 +686,6 @@ function SectionTree({ sectionKey, label, resourceType, tree, selectedUid, onSel
     };
   }, [tree, filterQ]);
 
-  const visibleCount = matchingUids?.size ?? null;
-  if (matchingUids !== null && matchingUids.size === 0) return null;
-
   const totalCount = useMemo(() => {
     let n = 0;
     function walk(node: TreeNode) {
@@ -698,6 +695,9 @@ function SectionTree({ sectionKey, label, resourceType, tree, selectedUid, onSel
     tree.children.forEach(walk);
     return n;
   }, [tree]);
+
+  const visibleCount = matchingUids?.size ?? null;
+  if (matchingUids !== null && matchingUids.size === 0) return null;
 
   const isFilterActive = !!filterQ && matchingUids !== null && matchingUids.size > 0;
   const open = isFilterActive || expanded.has(sectionKey);
@@ -809,7 +809,9 @@ interface TreeNodeRowProps {
 
 function TreeNodeRow({ node, depth, resourceType, selectedUid, onSelect, matchingUids, expandedDirs, pathKey, expanded, onToggle }: TreeNodeRowProps) {
   const isFilterActive = matchingUids !== null;
-  const open = isFilterActive ? (expandedDirs?.has(pathKey) ?? false) : expanded.has(pathKey);
+  const open = isFilterActive
+    ? (expandedDirs?.has(pathKey) ?? false) || expanded.has(pathKey)
+    : expanded.has(pathKey);
 
   const indent = depth * 12;
 
@@ -851,7 +853,7 @@ function TreeNodeRow({ node, depth, resourceType, selectedUid, onSelect, matchin
   return (
     <div>
       <button
-        onClick={() => !isFilterActive && onToggle(pathKey, !open)}
+        onClick={() => onToggle(pathKey, !open)}
         style={{ paddingLeft: indent }}
         className="w-full text-left py-1 pr-3 text-xs flex items-center gap-1.5 text-gray-500 hover:text-gray-300 transition-colors"
       >
@@ -957,15 +959,16 @@ function ProjectOverview({ projectId, projectName, description }: {
 
 // ---- NodeDetail ----
 
-type NodeTab = 'details' | 'description' | 'columns' | 'referenced_by' | 'code';
+type NodeTab = 'details' | 'description' | 'columns' | 'depends_on' | 'referenced_by' | 'code';
 
-function NodeDetail({ node, allNodes, projectId }: { node: DocsNodeDto; allNodes: Map<string, DocsNodeDto>; projectId: number }) {
+function NodeDetail({ node, allNodes, allMacros, projectId }: { node: DocsNodeDto; allNodes: Map<string, DocsNodeDto>; allMacros: Map<string, DocsMacroDto>; projectId: number }) {
   const navigate = useNavigate();
   const [, setSearchParams] = useSearchParams();
   const [tab, setTab] = useState<NodeTab>('details');
   const [codeView, setCodeView] = useState<'source' | 'compiled'>('source');
   const [copied, setCopied] = useState(false);
   const isTest = node.resource_type === 'test';
+  const hasDependsOn = node.depends_on_nodes.length > 0 || node.depends_on_macros.length > 0;
 
   useEffect(() => { setTab('details'); }, [node.unique_id]);
 
@@ -973,6 +976,7 @@ function NodeDetail({ node, allNodes, projectId }: { node: DocsNodeDto; allNodes
     { id: 'details', label: 'Details' },
     { id: 'description', label: 'Description' },
     ...(node.columns.length > 0 ? [{ id: 'columns' as NodeTab, label: 'Columns' }] : []),
+    ...(hasDependsOn ? [{ id: 'depends_on' as NodeTab, label: 'Depends On' }] : []),
     ...(node.child_models.length > 0 || node.child_tests.length > 0 ? [{ id: 'referenced_by' as NodeTab, label: 'Referenced By' }] : []),
     ...(!isTest && (node.raw_code || node.compiled_code) ? [{ id: 'code' as NodeTab, label: 'Code' }] : []),
   ];
@@ -1054,6 +1058,12 @@ function NodeDetail({ node, allNodes, projectId }: { node: DocsNodeDto; allNodes
                 <ColumnsTable columns={node.columns} compact />
               </section>
             )}
+            {hasDependsOn && (
+              <section>
+                <h2 className="text-sm font-semibold text-gray-200 mb-3">Depends On</h2>
+                <DependsOn dependsOnNodes={node.depends_on_nodes} dependsOnMacros={node.depends_on_macros} allNodes={allNodes} allMacros={allMacros} onSelectNode={(uid) => setSearchParams({ node: uid }, { replace: true })} />
+              </section>
+            )}
             {(node.child_models.length > 0 || node.child_tests.length > 0) && (
               <section>
                 <h2 className="text-sm font-semibold text-gray-200 mb-3">Referenced By</h2>
@@ -1089,6 +1099,12 @@ function NodeDetail({ node, allNodes, projectId }: { node: DocsNodeDto; allNodes
           <div className="flex flex-col gap-3">
             <h2 className="text-sm font-semibold text-gray-200">Columns <span className="font-normal text-gray-600">({node.columns.length})</span></h2>
             <ColumnsTable columns={node.columns} />
+          </div>
+        )}
+        {tab === 'depends_on' && (
+          <div className="flex flex-col gap-3">
+            <h2 className="text-sm font-semibold text-gray-200">Depends On</h2>
+            <DependsOn dependsOnNodes={node.depends_on_nodes} dependsOnMacros={node.depends_on_macros} allNodes={allNodes} allMacros={allMacros} onSelectNode={(uid) => setSearchParams({ node: uid }, { replace: true })} />
           </div>
         )}
         {tab === 'referenced_by' && (
@@ -1273,6 +1289,69 @@ function TestBadge({ name }: { name: string }) {
     <span title={name} className={`text-[10px] font-mono px-1 py-0.5 rounded border ${colors[name] ?? 'bg-surface-elevated text-gray-400 border-gray-700'}`}>
       {abbrev}
     </span>
+  );
+}
+
+type DependsTab = 'models' | 'nodes' | 'macros';
+
+function DependsOn({ dependsOnNodes, dependsOnMacros, allNodes, allMacros, onSelectNode }: {
+  dependsOnNodes: string[];
+  dependsOnMacros: string[];
+  allNodes: Map<string, DocsNodeDto>;
+  allMacros: Map<string, DocsMacroDto>;
+  onSelectNode: (uid: string) => void;
+}) {
+  const models = dependsOnNodes.filter((uid) => uid.startsWith('model.') || uid.startsWith('seed.') || uid.startsWith('snapshot.'));
+  const sources = dependsOnNodes.filter((uid) => uid.startsWith('source.'));
+  const macros = dependsOnMacros;
+  const tabs: { id: DependsTab; label: string; count: number }[] = (
+    [
+      { id: 'models' as DependsTab, label: 'Models', count: models.length },
+      { id: 'nodes' as DependsTab, label: 'Sources', count: sources.length },
+      { id: 'macros' as DependsTab, label: 'Macros', count: macros.length },
+    ] as { id: DependsTab; label: string; count: number }[]
+  ).filter((t) => t.count > 0);
+  const [tab, setTab] = useState<DependsTab>(tabs[0]?.id ?? 'models');
+
+  if (tabs.length === 0) return <p className="text-xs text-gray-600 italic">No dependencies found.</p>;
+
+  const renderUids = tab === 'models' ? models : tab === 'nodes' ? sources : macros;
+
+  return (
+    <div>
+      {tabs.length > 1 && (
+        <div className="flex items-center gap-0 mb-3 border-b border-gray-800">
+          {tabs.map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`px-3 py-1.5 text-xs font-medium capitalize transition-colors relative ${tab === t.id ? 'text-brand-300' : 'text-gray-500 hover:text-gray-300'}`}>
+              {t.label}
+              <span className="ml-1 text-gray-600">({t.count})</span>
+              {tab === t.id && <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-brand-400 rounded-t" />}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-col gap-1">
+        {renderUids.map((uid) => {
+          const node = allNodes.get(uid);
+          const macro = allMacros.get(uid);
+          const displayName = node?.name ?? macro?.name ?? uid.split('.').pop() ?? uid;
+          const resourceType = node?.resource_type ?? macro?.resource_type ?? 'model';
+          const canNavigate = !!(node ?? macro);
+          return (
+            <button
+              key={uid}
+              onClick={() => canNavigate && onSelectNode(uid)}
+              disabled={!canNavigate}
+              className={`text-left flex items-center gap-1.5 text-xs font-mono ${canNavigate ? `${resourceColor(resourceType)} hover:underline hover:opacity-80 transition-opacity` : 'text-gray-500 cursor-default'}`}
+            >
+              <span className={`shrink-0 ${resourceColor(resourceType)}`}>{resourceIcon(resourceType)}</span>
+              {displayName}
+            </button>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
