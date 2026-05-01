@@ -1,7 +1,7 @@
 import asyncio
 import json
 import re
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,9 +15,10 @@ from app.dbt.manifest import Manifest, ModelNode, load_manifest
 from app.dbt.column_lineage import build_column_lineage, ColumnRef
 from app.logs.project_logger import append_project_log
 
-# Column lineage is CPU-bound (sqlglot parsing). A dedicated single-threaded
-# executor serializes concurrent requests and prevents starving the default pool.
-_lineage_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="col-lineage")
+# Column lineage is CPU-bound (sqlglot parsing). A ProcessPoolExecutor isolates
+# this work in a separate OS process, bypassing the GIL so the asyncio event loop
+# is never starved during lineage computation.
+_lineage_executor = ProcessPoolExecutor(max_workers=1)
 
 router = APIRouter(prefix="/api/projects", tags=["models"])
 

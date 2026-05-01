@@ -153,6 +153,7 @@ export default function ModelsPage() {
     queryKey: ['column-lineage', id],
     queryFn: () => api.models.columnLineage(id),
     refetchInterval: false,
+    staleTime: Infinity,
   });
 
   // Pre-select model from ?model=<unique_id> query param (takes priority),
