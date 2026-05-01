@@ -1,6 +1,7 @@
 import asyncio
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,10 @@ from app.db.models import ModelStatus, Project
 from app.dbt.manifest import Manifest, ModelNode, load_manifest
 from app.dbt.column_lineage import build_column_lineage, ColumnRef
 from app.logs.project_logger import append_project_log
+
+# Column lineage is CPU-bound (sqlglot parsing). A dedicated single-threaded
+# executor serializes concurrent requests and prevents starving the default pool.
+_lineage_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="col-lineage")
 
 router = APIRouter(prefix="/api/projects", tags=["models"])
 
@@ -128,7 +133,7 @@ async def get_column_lineage(
 
     manifest_path = Path(project.path) / "target" / "manifest.json"
     loop = asyncio.get_event_loop()
-    raw = await loop.run_in_executor(None, build_column_lineage, manifest_path)
+    raw = await loop.run_in_executor(_lineage_executor, build_column_lineage, manifest_path)
 
     lineage: dict[str, dict[str, list[ColumnLineageEntryDto]]] = {
         uid: {
