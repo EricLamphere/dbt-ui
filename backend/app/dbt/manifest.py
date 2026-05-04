@@ -30,6 +30,10 @@ class ModelNode:
     compiled_sql: str | None = None
     source_name: str | None = None  # set for resource_type == "source"
     columns: tuple[ColumnInfo, ...] = field(default_factory=tuple)
+    # test-only fields for locating a test in its YAML schema file
+    test_metadata_name: str | None = None  # e.g. "unique", "not_null", "relationships"
+    column_name: str | None = None  # column the test applies to, if any
+    attached_node: str | None = None  # unique_id of the model this test is attached to
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +51,9 @@ class ModelNode:
                 {"name": c.name, "description": c.description, "data_type": c.data_type}
                 for c in self.columns
             ],
+            "test_metadata_name": self.test_metadata_name,
+            "column_name": self.column_name,
+            "attached_node": self.attached_node,
         }
 
 
@@ -81,6 +88,7 @@ def _extract_node(unique_id: str, raw: dict[str, Any]) -> ModelNode | None:
         )
         for k, v in raw_columns.items()
     )
+    test_meta = raw.get("test_metadata") if isinstance(raw.get("test_metadata"), dict) else {}
     return ModelNode(
         unique_id=unique_id,
         name=raw.get("name") or unique_id.split(".")[-1],
@@ -95,6 +103,9 @@ def _extract_node(unique_id: str, raw: dict[str, Any]) -> ModelNode | None:
         compiled_sql=raw.get("compiled_code") or raw.get("compiled_sql"),
         source_name=raw.get("source_name") if resource_type == "source" else None,
         columns=columns,
+        test_metadata_name=test_meta.get("name") if resource_type == "test" else None,
+        column_name=raw.get("column_name") if resource_type == "test" else None,
+        attached_node=raw.get("attached_node") if resource_type == "test" else None,
     )
 
 

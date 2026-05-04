@@ -3,10 +3,10 @@ import Editor, { type Monaco } from '@monaco-editor/react';
 import type * as MonacoEditor from 'monaco-editor';
 import { ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
 import { format as sqlFormat } from 'sql-formatter';
-import { api, type FileContentDto, type GraphDto } from '../../../../lib/api';
+import { api, type FileContentDto, type GraphDto, type ModelNode } from '../../../../lib/api';
 import { useTheme } from '../../../../lib/useTheme';
 
-type ViewTab = 'code' | 'compiled' | 'preview';
+type ViewTab = 'code' | 'compiled';
 
 interface ViewPaneProps {
   projectId: number;
@@ -29,9 +29,10 @@ interface ViewPaneProps {
   canGoForward: boolean;
   onGoBack: () => void;
   onGoForward: () => void;
-  /** session-scoped dbt show cache from parent (survives route navigation) */
-  previewCache: Map<string, { columns: string[]; rows: unknown[][] }>;
-  onPreviewCached: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
+  /** YAML: test node to scroll the editor to when the file opens */
+  targetTestNode?: ModelNode | null;
+  /** YAML: called when the cursor moves into a test block; null if not in a test */
+  onTestSelected?: (testNode: ModelNode | null) => void;
 }
 
 function isSqlFile(path: string) {
@@ -63,11 +64,106 @@ function formatSql(sql: string): string {
   return formatted.replace(/__JINJA_(\d+)__/g, (_, i) => tokens[Number(i)] ?? '');
 }
 
+/**
+ * For a YAML schema file, find the 1-based line number where a test is defined.
+ * Searches for: model name block → column name block (if column_name) → test type.
+ * Falls back to a simple text search for the test type name if the structured search fails.
+ */
+function findTestLineInYaml(
+  content: string,
+  testMetadataName: string | null,
+  columnName: string | null,
+  attachedNode: string | null,
+): number | null {
+  if (!testMetadataName) return null;
+  const lines = content.split('\n');
+
+  // Normalise attached_node to just the model name (last segment of uid)
+  const modelName = attachedNode ? attachedNode.split('.').pop() ?? null : null;
+
+  let inModelBlock = modelName === null; // if no model name, search everywhere
+  let inColumnBlock = columnName === null; // if no column name, search everywhere
+  let modelIndent = -1;
+  let columnIndent = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+    const indent = line.length - trimmed.length;
+
+    if (!trimmed || trimmed.startsWith('#')) continue;
+
+    // Detect model name block: "- name: <modelName>" under "models:"
+    if (modelName && !inModelBlock) {
+      const m = trimmed.match(/^-?\s*name:\s*(.+)$/);
+      if (m && m[1].trim() === modelName) {
+        inModelBlock = true;
+        modelIndent = indent;
+        continue;
+      }
+    }
+
+    // Once inside a model block, detect when we leave it (dedent to same or lower level)
+    if (inModelBlock && modelName && indent <= modelIndent && trimmed.startsWith('-')) {
+      const m = trimmed.match(/^-?\s*name:\s*(.+)$/);
+      if (m && m[1].trim() !== modelName) {
+        inModelBlock = false;
+        inColumnBlock = columnName === null;
+        modelIndent = -1;
+        columnIndent = -1;
+        continue;
+      }
+    }
+
+    if (!inModelBlock) continue;
+
+    // Detect column name block: "- name: <columnName>" under "columns:"
+    if (columnName && !inColumnBlock) {
+      const m = trimmed.match(/^-?\s*name:\s*(.+)$/);
+      if (m && m[1].trim() === columnName) {
+        inColumnBlock = true;
+        columnIndent = indent;
+        continue;
+      }
+    }
+
+    // Detect when we leave a column block
+    if (inColumnBlock && columnName && indent <= columnIndent && trimmed.startsWith('-')) {
+      const m = trimmed.match(/^-?\s*name:\s*(.+)$/);
+      if (m && m[1].trim() !== columnName) {
+        inColumnBlock = false;
+        columnIndent = -1;
+        continue;
+      }
+    }
+
+    if (!inColumnBlock) continue;
+
+    // Match test entry: "- <testName>" or "- <testName>:" or "- name: <testName>"
+    const testSimple = trimmed.match(/^-\s*(\w+)\s*(?::|$)/);
+    const testNamed = trimmed.match(/^-?\s*name:\s*(\w+)\s*$/);
+    const matched = testSimple ? testSimple[1] : testNamed ? testNamed[1] : null;
+    if (matched && matched === testMetadataName) {
+      return i + 1; // 1-based line number
+    }
+  }
+
+  // Fallback: search for the test name as a standalone YAML key/value
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trimStart();
+    if (trimmed === `- ${testMetadataName}` || trimmed.startsWith(`- ${testMetadataName}:`)) {
+      return i + 1;
+    }
+  }
+
+  return null;
+}
+
 export function ViewPane({
   projectId, openFile, edited, onEdit, onSave, onDelete,
   saving, saveStatus, saveError, isDirty, modelUid, graph, onNavigateToFile,
   canGoBack, canGoForward, onGoBack, onGoForward,
-  previewCache, onPreviewCached,
+  targetTestNode, onTestSelected,
 }: ViewPaneProps) {
   const theme = useTheme();
   const monacoTheme = theme === 'light' ? 'vs-light' : 'vs-dark';
@@ -78,6 +174,15 @@ export function ViewPane({
   const onNavigateToFileRef = useRef(onNavigateToFile);
   useEffect(() => { onNavigateToFileRef.current = onNavigateToFile; }, [onNavigateToFile]);
 
+  const onTestSelectedRef = useRef(onTestSelected);
+  useEffect(() => { onTestSelectedRef.current = onTestSelected; }, [onTestSelected]);
+
+  const targetTestNodeRef = useRef(targetTestNode);
+  useEffect(() => { targetTestNodeRef.current = targetTestNode; }, [targetTestNode]);
+
+  // ref to the Monaco editor instance for imperative scroll/reveal
+  const editorRef = useRef<MonacoEditor.editor.IStandaloneCodeEditor | null>(null);
+
   const completionDisposableRef = useRef<MonacoEditor.IDisposable | null>(null);
   useEffect(() => () => { completionDisposableRef.current?.dispose(); }, []);
 
@@ -85,19 +190,31 @@ export function ViewPane({
   const [compiledSql, setCompiledSql] = useState<string | null>(null);
   const [compiledLoading, setCompiledLoading] = useState(false);
   const [compiledError, setCompiledError] = useState<string | null>(null);
-  const previewData = modelUid ? (previewCache.get(modelUid) ?? null) : null;
-  const [previewLoading, setPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-
   const canCompile = !!modelUid && isSqlFile(openFile.path);
 
-  // Reset sub-tabs when file changes (preview data is in the parent cache, not reset here)
+  // Reset sub-tabs when file changes
   useEffect(() => {
     setActiveTab('code');
     setCompiledSql(null);
     setCompiledError(null);
-    setPreviewError(null);
   }, [openFile.path]);
+
+  // Scroll editor to targetTestNode's line when it changes (e.g. DAG deep-link)
+  useEffect(() => {
+    if (!targetTestNode) return;
+    const content = edited ?? openFile.content;
+    const lineNumber = findTestLineInYaml(
+      content,
+      targetTestNode.test_metadata_name,
+      targetTestNode.column_name,
+      targetTestNode.attached_node,
+    );
+    if (lineNumber && editorRef.current) {
+      editorRef.current.revealLineInCenter(lineNumber);
+      editorRef.current.setPosition({ lineNumber, column: 1 });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetTestNode]);
 
   const fetchCompiledSql = async () => {
     if (!canCompile || !modelUid) return;
@@ -129,36 +246,10 @@ export function ViewPane({
     }
   };
 
-  const handleRefreshPreview = async () => {
-    if (!canCompile || !modelUid) return;
-    setPreviewLoading(true);
-    setPreviewError(null);
-    try {
-      const result = await api.models.show(projectId, modelUid, 1000);
-      onPreviewCached(modelUid, result);
-    } catch (e) {
-      setPreviewError(String(e));
-    } finally {
-      setPreviewLoading(false);
-    }
-  };
-
   const handleTabChange = async (tab: ViewTab) => {
     setActiveTab(tab);
     if (tab === 'compiled' && !compiledSql && canCompile && modelUid) {
       await fetchCompiledSql();
-    }
-    if (tab === 'preview' && !previewCache.get(modelUid!) && canCompile && modelUid) {
-      setPreviewLoading(true);
-      setPreviewError(null);
-      try {
-        const result = await api.models.show(projectId, modelUid, 1000);
-        onPreviewCached(modelUid, result);
-      } catch (e) {
-        setPreviewError(String(e));
-      } finally {
-        setPreviewLoading(false);
-      }
     }
   };
 
@@ -180,7 +271,6 @@ export function ViewPane({
   const tabs: { id: ViewTab; label: string; disabled?: boolean }[] = [
     { id: 'code', label: 'Code' },
     { id: 'compiled', label: 'Compiled SQL', disabled: !canCompile },
-    { id: 'preview', label: 'Data Preview', disabled: !canCompile },
   ];
 
   return (
@@ -265,17 +355,6 @@ export function ViewPane({
             Refresh
           </button>
         )}
-        {activeTab === 'preview' && canCompile && (
-          <button
-            onClick={handleRefreshPreview}
-            disabled={previewLoading}
-            className="ml-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 transition-colors shrink-0"
-            title="Re-run dbt show"
-          >
-            <RotateCw className={`w-3 h-3 ${previewLoading ? 'animate-spin' : ''}`} />
-            Refresh
-          </button>
-        )}
       </div>
 
       {/* Content area */}
@@ -289,6 +368,76 @@ export function ViewPane({
             theme={monacoTheme}
             onMount={(editor, monacoInstance: Monaco) => {
               type IRange = Monaco['Range'] extends new (...a: infer _) => infer R ? R : never;
+
+              // Store editor ref for imperative scroll
+              editorRef.current = editor;
+
+              // Scroll to targetTestNode if set (e.g. navigated from DAG for a test node)
+              const initialTarget = targetTestNodeRef.current;
+              if (initialTarget) {
+                const content = editor.getModel()?.getValue() ?? '';
+                const lineNumber = findTestLineInYaml(
+                  content,
+                  initialTarget.test_metadata_name,
+                  initialTarget.column_name,
+                  initialTarget.attached_node,
+                );
+                if (lineNumber) {
+                  setTimeout(() => {
+                    editor.revealLineInCenter(lineNumber);
+                    editor.setPosition({ lineNumber, column: 1 });
+                  }, 50);
+                }
+              }
+
+              // YAML cursor tracking: when cursor moves, find which test block it's in
+              const isYamlFile = openFile.path.endsWith('.yml') || openFile.path.endsWith('.yaml');
+              const cursorDisposable = editor.onDidChangeCursorPosition((e) => {
+                if (!onTestSelectedRef.current) return;
+                if (!isYamlFile) return;
+                const mdl = editor.getModel();
+                if (!mdl) return;
+
+                const cursorLine = e.position.lineNumber;
+                const content = mdl.getValue();
+                const graph = graphRef.current;
+                if (!graph) return;
+
+                // Build sorted list of (lineNumber, testNode) for tests in this file
+                const filePath = openFile.path;
+                const allTests = graph.nodes.filter((n) => n.resource_type === 'test');
+                const testNodes = allTests.filter(
+                  (n) => n.original_file_path &&
+                    (filePath === n.original_file_path || filePath.endsWith('/' + n.original_file_path) || filePath.endsWith(n.original_file_path))
+                );
+
+                type TestLine = { line: number; node: ModelNode };
+                const testLines: TestLine[] = [];
+                for (const testNode of testNodes) {
+                  const line = findTestLineInYaml(
+                    content,
+                    testNode.test_metadata_name,
+                    testNode.column_name,
+                    testNode.attached_node,
+                  );
+                  if (line != null) testLines.push({ line, node: testNode });
+                }
+
+                // Sort by line number and find the test whose block the cursor is in.
+                // A test block extends from its line until the next test's line (exclusive).
+                testLines.sort((a, b) => a.line - b.line);
+
+                let matched: ModelNode | null = null;
+                for (let i = 0; i < testLines.length; i++) {
+                  const start = testLines[i].line;
+                  const end = i + 1 < testLines.length ? testLines[i + 1].line - 1 : Infinity;
+                  if (cursorLine >= start && cursorLine <= end) {
+                    matched = testLines[i].node;
+                    break;
+                  }
+                }
+                onTestSelectedRef.current(matched);
+              });
 
               // SQL autocomplete for ref/source/column names
               completionDisposableRef.current?.dispose();
@@ -582,7 +731,9 @@ export function ViewPane({
                 window.removeEventListener('keydown', handleWindowKeyDown);
                 window.removeEventListener('keyup', handleWindowKeyUp);
                 onMouseDown.dispose();
+                cursorDisposable.dispose();
                 decorations.clear();
+                editorRef.current = null;
               };
             }}
             options={{
@@ -637,47 +788,6 @@ export function ViewPane({
           </div>
         )}
 
-        {activeTab === 'preview' && (
-          <div className="h-full overflow-auto">
-            {previewLoading && (
-              <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                Running dbt show…
-              </div>
-            )}
-            {previewError && (
-              <div className="flex items-center justify-center h-full text-red-400 text-sm px-8 text-center">
-                {previewError}
-              </div>
-            )}
-            {!previewLoading && !previewError && previewData && (
-              <table className="w-full text-xs text-gray-300 border-collapse">
-                <thead>
-                  <tr className="bg-surface-elevated sticky top-0">
-                    {previewData.columns.map((col) => (
-                      <th key={col} className="px-3 py-2 text-left text-gray-400 font-medium border-b border-gray-800 whitespace-nowrap">
-                        {col}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {previewData.rows.map((row, i) => (
-                    <tr key={i} className="border-b border-gray-800/50 hover:bg-surface-elevated/30">
-                      {(row as unknown[]).map((cell, j) => (
-                        <td key={j} className="px-3 py-1.5 font-mono whitespace-nowrap">{String(cell ?? '')}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-            {!previewLoading && !previewError && previewData && previewData.rows.length === 0 && (
-              <div className="flex items-center justify-center h-full text-gray-600 text-sm">
-                No rows returned
-              </div>
-            )}
-          </div>
-        )}
       </div>
     </div>
   );

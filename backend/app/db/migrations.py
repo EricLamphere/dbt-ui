@@ -55,6 +55,32 @@ async def run_migrations() -> None:
             await session.commit()
 
 
+        if not await _table_exists(session, "drift_snapshots"):
+            await session.execute(text(
+                "CREATE TABLE drift_snapshots ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, "
+                "started_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "finished_at DATETIME, "
+                "status TEXT NOT NULL DEFAULT 'running', "
+                "target TEXT, "
+                "total_models INTEGER NOT NULL DEFAULT 0, "
+                "checked_models INTEGER NOT NULL DEFAULT 0, "
+                "results_json TEXT NOT NULL DEFAULT '[]', "
+                "error_message TEXT)"
+            ))
+            await session.commit()
+
+        # Reset any snapshots that were left in 'running' state from a previous server process
+        await session.execute(
+            text(
+                "UPDATE drift_snapshots SET status = 'error', error_message = 'interrupted by server restart'"
+                " WHERE status = 'running'"
+            )
+        )
+        await session.commit()
+
+
 async def init_db() -> None:
     await ensure_db_initialized()
     await run_migrations()

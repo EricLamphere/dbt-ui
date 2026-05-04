@@ -20,7 +20,9 @@
       "Bash(cd frontend && npx tsc*)",
       "Bash(task install:list-pythons *)",
       "Bash(.venv/bin/ruff check *)",
-      "Bash(curl -s \"https://primer.style/foundations/color/overview\")"
+      "Bash(curl -s \"https://primer.style/foundations/color/overview\")",
+      "Read(//Users/ericlamphere/Projects/dbt_projects/duckdb_dbt/**)",
+      "Bash(dbt show *)"
     ]
   }
 }

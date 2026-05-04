@@ -93,6 +93,35 @@ useProjectEvents(projectId, useCallback((event) => {
 
 The hooks themselves use `handlerRef` internally (so the ref is always up to date), but the `useEffect` dep array only includes `projectId` — this is intentional.
 
+## DataTable — Always Use the Shared Component
+
+**Never render a `<table>` directly.** All tabular data goes through `DataTable` from `frontend/src/components/DataTable.tsx`. This ensures consistent font, spacing, selection, copy, and keyboard navigation across the entire app.
+
+```tsx
+import { DataTable } from '../../../../components/DataTable';
+
+// columns: ColumnDef[] — each entry is { key: string; align?: 'left' | 'right' }
+// rows: unknown[][] — each inner array maps positionally to columns
+
+<DataTable
+  columns={data.columns.map((c) => ({ key: c }))}
+  rows={data.rows}
+/>
+```
+
+**Default props are correct for almost all cases — do not override them without a good reason:**
+
+| Prop | Default | When to override |
+|------|---------|-----------------|
+| `fontSize` | `'xs'` | Never — all tables should be `xs` |
+| `maxHeight` | none (scrolls with container) | Never — let the parent container control height |
+| `className` | — | Only for one-off layout adjustments |
+
+Rules:
+- Never pass `fontSize="sm"`, `fontSize="2xs"`, or a custom `maxHeight` — the container provides scroll bounds
+- The component already handles: sticky header, row numbers, cell selection, drag-select, copy (Ctrl/Cmd+C), keyboard navigation, select-all (Ctrl/Cmd+A)
+- When adding a new panel or tab that shows tabular data, use `DataTable` — don't inline a `<table>` or reach for a third-party grid
+
 ## Component File Size
 
 - Target: 200–400 lines per file

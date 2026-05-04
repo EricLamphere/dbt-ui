@@ -88,6 +88,85 @@ export interface ModelNode {
   status: 'idle' | 'pending' | 'running' | 'success' | 'error' | 'stale' | 'warn';
   message: string | null;
   columns: ColumnInfo[];
+  // test-only: used to locate the test in its YAML schema file
+  test_metadata_name: string | null;
+  column_name: string | null;
+  attached_node: string | null;
+}
+
+export interface ProfileColumn {
+  name: string;
+  data_type: string;
+  null_count: number | null;
+  null_pct: number | null;
+  distinct_count: number | null;
+  min_value: string | null;
+  max_value: string | null;
+  profiled: boolean;
+}
+
+export interface ProfileResponse {
+  unique_id: string;
+  row_count: number;
+  column_count: number;
+  materialization: string | null;
+  is_view: boolean;
+  columns: ProfileColumn[];
+  duration_ms: number;
+  target: string | null;
+}
+
+export interface DebugCheck {
+  key: string;
+  label: string;
+  status: 'ok' | 'fail' | 'warn' | 'info';
+  detail: string;
+}
+
+export interface DebugResult {
+  overall_ok: boolean;
+  dbt_version: string | null;
+  python_version: string | null;
+  adapter_name: string | null;
+  adapter_version: string | null;
+  profiles_dir: string | null;
+  profile_name: string | null;
+  target_name: string | null;
+  checks: DebugCheck[];
+  raw_log: string;
+  started_at: string;
+  finished_at: string;
+}
+
+export interface ColumnDrift {
+  name: string;
+  in_manifest: boolean;
+  in_warehouse: boolean;
+  manifest_type: string;
+  warehouse_type: string;
+  type_mismatch: boolean;
+}
+
+export interface ModelDriftResult {
+  unique_id: string;
+  name: string;
+  materialized: string | null;
+  error: string | null;
+  columns: ColumnDrift[];
+  has_drift: boolean;
+}
+
+export interface DriftSnapshot {
+  id: number;
+  project_id: number;
+  started_at: string;
+  finished_at: string | null;
+  status: 'running' | 'done' | 'error';
+  target: string | null;
+  total_models: number;
+  checked_models: number;
+  results: ModelDriftResult[];
+  error_message: string | null;
 }
 
 export interface ColumnLineageEntry {
@@ -316,6 +395,8 @@ export const api = {
       post<{ created: boolean }>(`/projects/${projectId}/ensure-profiles-yml`),
     ignore: (id: number, ignored: boolean) =>
       patch<Project>(`/projects/${id}/ignore`, { ignored }),
+    debug: (id: number) => post<DebugResult>(`/projects/${id}/debug`),
+    debugLast: (id: number) => get<DebugResult | null>(`/projects/${id}/debug/last`),
   },
   filesystem: {
     browse: (path = '') =>
@@ -339,6 +420,8 @@ export const api = {
       get<{ compiled_sql: string }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/compiled${force ? '?force=true' : ''}`),
     show: (projectId: number, uniqueId: string, limit = 1000) =>
       post<{ columns: string[]; rows: unknown[][] }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/show`, { limit }),
+    profile: (projectId: number, uniqueId: string) =>
+      post<ProfileResponse>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/profile`),
   },
   runs: {
     run: (projectId: number, model: string, mode: string, opts?: RunOpts, select?: string) =>
@@ -503,6 +586,14 @@ export const api = {
     get: () => get<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; theme: string | null; configured: boolean }>('/settings'),
     update: (body: { dbt_projects_path?: string; data_dir?: string; log_level?: string; global_requirements_path?: string; theme?: string }) =>
       put<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; theme: string | null; configured: boolean }>('/settings', body),
+  },
+  drift: {
+    start: (projectId: number, select?: string[]) =>
+      post<DriftSnapshot>(`/projects/${projectId}/drift`, { select: select ?? null }),
+    latest: (projectId: number) =>
+      get<DriftSnapshot | null>(`/projects/${projectId}/drift`),
+    get: (projectId: number, snapshotId: number) =>
+      get<DriftSnapshot>(`/projects/${projectId}/drift/${snapshotId}`),
   },
   requirementsFile: {
     get: () => get<{ content: string }>('/settings/requirements-file'),

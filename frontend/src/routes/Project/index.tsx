@@ -6,6 +6,7 @@ import Editor from '@monaco-editor/react';
 import { api, type Project } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 import { useTheme } from '../../lib/useTheme';
+import NavRail from './components/NavRail';
 
 const PLATFORM_ICONS: Record<string, string> = {
   postgres: '🐘', bigquery: '☁️', snowflake: '❄️', redshift: '🔴',
@@ -150,7 +151,10 @@ export default function ProjectHome() {
   };
 
   return (
-    <div className="p-6 pb-12 max-w-4xl mx-auto w-full">
+    <div className="flex h-full overflow-hidden">
+      <NavRail projectId={id} current="home" />
+      <div className="flex-1 overflow-auto">
+      <div className="p-6 pb-12 max-w-4xl mx-auto w-full">
       {/* Header tile */}
       <div className="bg-surface-panel border border-gray-800 rounded-xl px-6 py-5 mb-6 w-full">
         <div className="flex items-start justify-between">
@@ -346,6 +350,8 @@ export default function ProjectHome() {
           onClose={() => setAppPickerOpen(false)}
         />
       )}
+    </div>
+    </div>
     </div>
   );
 }

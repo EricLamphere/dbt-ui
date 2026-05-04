@@ -7,6 +7,7 @@ import { format as sqlFormat } from 'sql-formatter';
 import { Play, Save, Trash2, WrapText, Plus, FolderPlus, ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
 import { api, type FileNode, type GraphDto } from '../../../lib/api';
 import { useProjectEvents } from '../../../lib/sse';
+import { DataTable } from '../../../components/DataTable';
 import { useTheme } from '../../../lib/useTheme';
 import NavRail from '../components/NavRail';
 import { TreeItem } from './TreeItem';
@@ -22,7 +23,7 @@ const TAB_KEY = (id: number) => `ws-tab-${id}`;
 
 const MIN_RESULTS_WIDTH = 200;
 const DEFAULT_RESULTS_WIDTH = 360;
-const MAX_RESULTS_WIDTH = 900;
+const MAX_RESULTS_WIDTH = 1200;
 const COLLAPSE_THRESHOLD = 80;
 
 type EditorTab = 'code' | 'compiled';
@@ -1127,30 +1128,10 @@ export default function WorkspacePage() {
                 <p className="text-xs text-gray-600 italic px-3 py-4">No rows returned.</p>
               )}
               {!running && !runError && results && results.rows.length > 0 && (
-                <table className="w-full text-xs border-collapse">
-                  <thead>
-                    <tr className="sticky top-0 bg-surface-panel border-b border-gray-800">
-                      {results.columns.map((col) => (
-                        <th key={col} className="text-left px-3 py-2 font-semibold text-gray-400 whitespace-nowrap border-r border-gray-800 last:border-r-0">
-                          {col}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.rows.map((row, ri) => (
-                      <tr key={ri} className={ri % 2 === 0 ? 'bg-surface-app' : 'bg-surface-panel'}>
-                        {(row as unknown[]).map((cell, ci) => (
-                          <td key={ci} className="px-3 py-1.5 text-gray-300 whitespace-nowrap border-r border-gray-800/50 last:border-r-0 font-mono">
-                            {cell === null || cell === undefined
-                              ? <span className="text-gray-600 italic">null</span>
-                              : String(cell)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <DataTable
+                  columns={results.columns.map((col) => ({ key: col }))}
+                  rows={results.rows as unknown[][]}
+                />
               )}
               {!running && !runError && !results && (
                 <div className="flex items-center justify-center h-32 text-gray-600 text-xs text-center px-4">

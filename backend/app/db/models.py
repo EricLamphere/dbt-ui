@@ -108,6 +108,25 @@ class GlobalProfileVar(Base):
     __table_args__ = (UniqueConstraint("profile_id", "key", name="uq_global_profile_var"),)
 
 
+class DriftSnapshot(Base):
+    __tablename__ = "drift_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="running")  # running | done | error
+    target: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    total_models: Mapped[int] = mapped_column(Integer, default=0)
+    checked_models: Mapped[int] = mapped_column(Integer, default=0)
+    results_json: Mapped[str] = mapped_column(Text, default="[]")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
 class RunInvocation(Base):
     __tablename__ = "run_invocations"
 

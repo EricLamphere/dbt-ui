@@ -1,6 +1,6 @@
 import asyncio
-import json
 import re
+import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
@@ -13,6 +13,7 @@ from app.db.engine import get_session
 from app.db.models import ModelStatus, Project
 from app.dbt.manifest import Manifest, ModelNode, load_manifest
 from app.dbt.column_lineage import build_column_lineage, ColumnRef
+from app.dbt.show_parser import parse_show_json
 from app.logs.project_logger import append_project_log
 
 # Column lineage is CPU-bound (sqlglot parsing). A ProcessPoolExecutor isolates
@@ -53,6 +54,9 @@ class ModelDto(BaseModel):
     status: str = "idle"
     message: str | None = None
     columns: list[ColumnDto] = []
+    test_metadata_name: str | None = None
+    column_name: str | None = None
+    attached_node: str | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -94,6 +98,9 @@ def _node_to_dto(node: ModelNode, status: ModelStatus | None) -> ModelDto:
             ColumnDto(name=c.name, description=c.description, data_type=c.data_type)
             for c in node.columns
         ],
+        test_metadata_name=node.test_metadata_name,
+        column_name=node.column_name,
+        attached_node=node.attached_node,
     )
 
 
@@ -340,30 +347,26 @@ async def show_model(
     parts = unique_id.split(".")
     resource_type = parts[0] if parts else ""
     model_name = parts[-2] if resource_type == "test" and len(parts) >= 4 else parts[-1]
-    from app.dbt.venv import venv_dbt
     limit = max(1, min(dto.limit, 5000))
     from app.api.init import load_project_env
+    from app.dbt.runner import RunRequest, runner
     env = await load_project_env(project_id)
+    target_val = env.get("DBT_TARGET")
+    target_args: tuple[str, ...] = ("--target", target_val) if target_val else ()
+    req = RunRequest(
+        project_id=project_id,
+        project_path=Path(project.path),
+        command="show",
+        select=model_name,
+        extra=("--limit", str(limit), "--output", "json") + target_args,
+        env=env,
+    )
     append_project_log(project.path, f">>> dbt show --select {model_name} --limit {limit}", project_id)
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            str(venv_dbt()), "show", "--select", model_name,
-            "--limit", str(limit),
-            "--output", "json",
-            cwd=project.path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            env=env,
-        )
-        stdout_bytes, stderr_bytes = await proc.communicate()
-    except Exception as exc:
-        append_project_log(project.path, f"ERROR: dbt show failed: {exc}", project_id)
-        raise HTTPException(status_code=500, detail=f"dbt show failed: {exc}")
-
+    returncode, stdout_bytes, stderr_bytes = await runner.run(req)
     stdout = stdout_bytes.decode(errors="replace")
     stderr = stderr_bytes.decode(errors="replace")
 
-    if proc.returncode != 0:
+    if returncode != 0:
         detail = stderr[-1000:] or stdout[-1000:]
         append_project_log(project.path, f"<<< dbt show --select {model_name} FAILED", project_id)
         for line in detail.splitlines():
@@ -371,55 +374,175 @@ async def show_model(
                 append_project_log(project.path, line, project_id)
         raise HTTPException(status_code=422, detail=f"dbt show failed:\n{detail}")
 
-    # Strip ANSI escape codes — dbt colorizes output even with --output json
-    _ansi_re = re.compile(r"\x1b\[[0-9;]*m")
-    clean_stdout = _ansi_re.sub("", stdout)
+    columns, rows = parse_show_json(stdout)
+    if columns or rows:
+        append_project_log(project.path, f"<<< dbt show --select {model_name} OK ({len(rows)} rows)", project_id)
+        return ShowResponseDto(columns=columns, rows=rows)
 
-    # dbt show --output json may emit a multi-line JSON object mixed with log lines.
-    # Collect all lines that are part of a JSON block and try to parse them together,
-    # then fall back to trying each line individually.
-    json_candidates: list[str] = []
-    buffer: list[str] = []
-    depth = 0
-    for line in clean_stdout.splitlines():
-        stripped = line.strip()
-        if not buffer and not stripped.startswith("{"):
-            continue
-        buffer.append(stripped)
-        depth += stripped.count("{") - stripped.count("}")
-        if depth <= 0 and buffer:
-            json_candidates.append("\n".join(buffer))
-            buffer = []
-            depth = 0
-
-    for candidate in json_candidates:
-        try:
-            parsed = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-
-        # Format 1: dbt >=1.5 structured output — {"results": [{"table": {...}}]}
-        results = parsed.get("results") or []
-        if results:
-            result = results[0]
-            table = result.get("table") or result.get("agate_table") or {}
-            columns: list[str] = table.get("column_names") or []
-            rows: list[list] = table.get("rows") or []
-            append_project_log(project.path, f"<<< dbt show --select {model_name} OK ({len(rows)} rows)", project_id)
-            return ShowResponseDto(columns=columns, rows=rows)
-
-        # Format 2: dbt 1.11+ compact output — {"node": "...", "show": [{col: val}, ...]}
-        show_rows = parsed.get("show")
-        if isinstance(show_rows, list) and show_rows:
-            columns = list(show_rows[0].keys())
-            rows = [[row.get(c) for c in columns] for row in show_rows]
-            append_project_log(project.path, f"<<< dbt show --select {model_name} OK ({len(rows)} rows)", project_id)
-            return ShowResponseDto(columns=columns, rows=rows)
-
-    # Nothing parseable found — surface raw output for diagnosis
     detail_lines = (stdout + "\n" + stderr).strip()[-1000:]
     append_project_log(project.path, f"<<< dbt show --select {model_name} FAILED (could not parse output)", project_id)
     raise HTTPException(status_code=422, detail=f"Could not parse dbt show output:\n{detail_lines}")
+
+
+class ProfileColumnDto(BaseModel):
+    name: str
+    data_type: str
+    null_count: int | None
+    null_pct: float | None
+    distinct_count: int | None
+    min_value: str | None
+    max_value: str | None
+    profiled: bool  # False = min/max skipped (unknown/text type)
+
+
+class ProfileResponseDto(BaseModel):
+    unique_id: str
+    row_count: int
+    column_count: int
+    materialization: str | None
+    is_view: bool
+    columns: list[ProfileColumnDto]
+    duration_ms: int
+    target: str | None
+
+
+@router.post("/{project_id}/models/{unique_id:path}/profile", response_model=ProfileResponseDto)
+async def profile_model(
+    project_id: int,
+    unique_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> ProfileResponseDto:
+    from app.dbt.profile import ProfileColumnSpec, build_profile_sql, numeric_or_temporal
+    from app.dbt.runner import RunRequest, runner
+    from app.api.init import load_project_env
+
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+
+    loop = asyncio.get_event_loop()
+    manifest = await loop.run_in_executor(
+        None, load_manifest, Path(project.path) / "target" / "manifest.json"
+    )
+    if manifest is None:
+        raise HTTPException(status_code=422, detail="manifest not found — run dbt compile first")
+
+    node = next((n for n in manifest.nodes if n.unique_id == unique_id), None)
+    if node is None:
+        raise HTTPException(status_code=404, detail="model not found")
+    if node.resource_type not in ("model", "snapshot", "seed"):
+        raise HTTPException(status_code=422, detail=f"profiling not supported for resource_type={node.resource_type!r}")
+
+    is_view = node.materialized == "view"
+
+    # Build column specs from manifest; fall back to warehouse probe if empty
+    if node.columns:
+        col_specs = tuple(
+            ProfileColumnSpec(
+                name=c.name,
+                data_type=c.data_type,
+                profile_min_max=numeric_or_temporal(c.data_type),
+            )
+            for c in node.columns
+        )
+    else:
+        # Probe column names with limit 0
+        env = await load_project_env(project_id)
+        target_val = env.get("DBT_TARGET")
+        target_args = ("--target", target_val) if target_val else ()
+        probe_req = RunRequest(
+            project_id=project_id,
+            project_path=Path(project.path),
+            command="show",
+            select=node.name,
+            extra=("--limit", "1", "--output", "json") + target_args,
+            env=env,
+        )
+        probe_stdout_lines: list[str] = []
+        async for kind, line in runner.stream(probe_req):
+            if kind == "stdout":
+                probe_stdout_lines.append(line)
+        probe_cols, _ = parse_show_json("\n".join(probe_stdout_lines))
+        col_specs = tuple(
+            ProfileColumnSpec(name=c, data_type="", profile_min_max=False)
+            for c in probe_cols
+        )
+
+    if not col_specs:
+        raise HTTPException(status_code=422, detail="could not determine column names — ensure the model has been built and schema.yml columns are defined")
+
+    ref_expr = f"{{% raw %}}{{{{ ref('{node.name}') }}}}{{% endraw %}}" if False else f"{{{{ ref('{node.name}') }}}}"
+    inline_sql = build_profile_sql(ref_expr, col_specs)
+
+    env = await load_project_env(project_id)
+    target_val = env.get("DBT_TARGET")
+    target_args = ("--target", target_val) if target_val else ()
+
+    profile_req = RunRequest(
+        project_id=project_id,
+        project_path=Path(project.path),
+        command="show",
+        extra=("--inline", inline_sql, "--output", "json", "--limit", "1") + target_args,
+        env=env,
+    )
+
+    t0 = time.monotonic()
+    stdout_lines: list[str] = []
+    stderr_lines: list[str] = []
+    try:
+        async with asyncio.timeout(120):
+            async for kind, line in runner.stream(profile_req):
+                if kind == "stdout":
+                    stdout_lines.append(line)
+                else:
+                    stderr_lines.append(line)
+    except TimeoutError:
+        raise HTTPException(status_code=504, detail="profile timed out after 120s")
+    duration_ms = int((time.monotonic() - t0) * 1000)
+
+    columns, rows = parse_show_json("\n".join(stdout_lines))
+    if not columns or not rows:
+        raw = "\n".join(stdout_lines + stderr_lines)[-1000:]
+        raise HTTPException(status_code=422, detail=f"could not parse profile output:\n{raw}")
+
+    # Map the single result row back into ProfileColumnDto list
+    result_row = rows[0]
+    col_map: dict[str, object] = dict(zip(columns, result_row))
+    total_rows = int(col_map.get("total_rows") or 0)
+
+    # Build case-insensitive lookup since warehouses may lowercase column aliases
+    col_map_lower: dict[str, object] = {k.lower(): v for k, v in col_map.items()}
+
+    profile_cols: list[ProfileColumnDto] = []
+    for spec in col_specs:
+        alias = spec.name.replace('"', "").replace(" ", "_").lower()
+        null_count_raw = col_map_lower.get(f"{alias}__nulls")
+        distinct_raw = col_map_lower.get(f"{alias}__distinct")
+        null_count = int(null_count_raw) if null_count_raw is not None else None
+        null_pct = round(null_count / total_rows, 4) if (null_count is not None and total_rows > 0) else None
+        min_raw = col_map_lower.get(f"{alias}__min")
+        max_raw = col_map_lower.get(f"{alias}__max")
+        profile_cols.append(ProfileColumnDto(
+            name=spec.name,
+            data_type=spec.data_type,
+            null_count=null_count,
+            null_pct=null_pct,
+            distinct_count=int(distinct_raw) if distinct_raw is not None else None,
+            min_value=str(min_raw) if min_raw is not None else None,
+            max_value=str(max_raw) if max_raw is not None else None,
+            profiled=True,
+        ))
+
+    return ProfileResponseDto(
+        unique_id=unique_id,
+        row_count=total_rows,
+        column_count=len(profile_cols),
+        materialization=node.materialized,
+        is_view=is_view,
+        columns=profile_cols,
+        duration_ms=duration_ms,
+        target=target_val,
+    )
 
 
 async def _compile_project(project_id: int, project_path: str) -> None:

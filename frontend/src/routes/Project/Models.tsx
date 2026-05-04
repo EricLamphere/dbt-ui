@@ -21,8 +21,7 @@ import { useProjectEvents } from '../../lib/sse';
 import ModelNodeComponent from './components/ModelNode';
 import NewModelModal from './components/NewModelModal';
 import NavRail from './components/NavRail';
-import { SidePane } from './components/SidePane';
-import { type ShowRows } from './components/SidePane/PropertiesTab';
+import { SidePane, type PreviewCache, type FailedRowsCache } from './components/SidePane';
 import DagFilterBar from './components/DagFilterBar';
 import { computeLayout, NODE_HEIGHT } from './lib/layout';
 import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserializeFilter } from './lib/dagFilter';
@@ -114,12 +113,19 @@ export default function ModelsPage() {
   const [compiling, setCompiling] = useState(false);
   const [closeDropdownsSignal, setCloseDropdownsSignal] = useState(0);
   const [failedTestUid, setFailedTestUid] = useState<string | null>(null);
-  const SHOW_ROWS_KEY = `dag-show-rows-${id}`;
-  const [testShowRows, setTestShowRows] = useState<Record<string, ShowRows>>(() => {
+  const DAG_PREVIEW_KEY = `preview-cache-${id}`;
+  const [dagPreviewCache, setDagPreviewCache] = useState<PreviewCache>(() => {
     try {
-      const saved = sessionStorage.getItem(`dag-show-rows-${id}`);
-      return saved ? JSON.parse(saved) : {};
-    } catch { return {}; }
+      const raw = sessionStorage.getItem(`preview-cache-${id}`);
+      return raw ? new Map(JSON.parse(raw) as [string, { columns: string[]; rows: unknown[][] }][]) : new Map();
+    } catch { return new Map(); }
+  });
+  const FAILED_ROWS_KEY = `failed-rows-cache-${id}`;
+  const [failedRowsCache, setFailedRowsCache] = useState<FailedRowsCache>(() => {
+    try {
+      const raw = sessionStorage.getItem(`failed-rows-cache-${id}`);
+      return raw ? new Map(JSON.parse(raw) as [string, { columns: string[]; rows: unknown[][] }][]) : new Map();
+    } catch { return new Map(); }
   });
   // Live run status overlay: model name → status, applied on top of cached graph data
   const [liveStatuses, setLiveStatuses] = useState<Record<string, LiveStatus>>({});
@@ -203,8 +209,6 @@ export default function ModelsPage() {
   useProjectEvents(id, useCallback((event) => {
     if (event.type === 'statuses_changed' || event.type === 'graph_changed') {
       setLiveStatuses({});
-      setTestShowRows({});
-      try { sessionStorage.removeItem(`dag-show-rows-${id}`); } catch {}
       if (event.type === 'graph_changed') {
         setActiveColumnSels(new Set());
         setExpandedNodes(new Set());
@@ -451,14 +455,6 @@ export default function ModelsPage() {
     })));
   }, [selectedModel?.unique_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const handleShowRows = useCallback((uid: string, rows: ShowRows | null) => {
-    setTestShowRows((prev) => {
-      const next = rows ? { ...prev, [uid]: rows } : prev;
-      try { sessionStorage.setItem(SHOW_ROWS_KEY, JSON.stringify(next)); } catch {}
-      return next;
-    });
-  }, [SHOW_ROWS_KEY]);
-
   const onNodeClick = useCallback(
     (_: React.MouseEvent, node: Node) => {
       const model = node.data?.model as ModelNode | undefined;
@@ -605,8 +601,18 @@ export default function ModelsPage() {
           onDelete={() => selectedModel && handleDeleteModel(selectedModel)}
           failedTestUid={failedTestUid}
           onFailedTestConsumed={() => setFailedTestUid(null)}
-          showRows={selectedModel ? (testShowRows[selectedModel.unique_id] ?? null) : null}
-          onShowRows={handleShowRows}
+          previewCache={dagPreviewCache}
+          onPreviewCached={(uid, data) => setDagPreviewCache((prev) => {
+            const next = new Map(prev).set(uid, data);
+            try { sessionStorage.setItem(DAG_PREVIEW_KEY, JSON.stringify([...next])); } catch {}
+            return next;
+          })}
+          failedRowsCache={failedRowsCache}
+          onFailedRowsCached={(uid, data) => setFailedRowsCache((prev) => {
+            const next = new Map(prev).set(uid, data);
+            try { sessionStorage.setItem(FAILED_ROWS_KEY, JSON.stringify([...next])); } catch {}
+            return next;
+          })}
         />
 
         {/* New model modal */}

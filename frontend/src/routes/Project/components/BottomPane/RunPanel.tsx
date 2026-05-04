@@ -15,6 +15,40 @@ import { api, type GraphDto } from '../../../../lib/api';
 import ModelNodeComponent from '../ModelNode';
 import { computeLayout } from '../../lib/layout';
 
+interface ProjectRunButtonsProps {
+  projectId: number;
+  disabled: boolean;
+}
+
+function ProjectRunButtons({ projectId, disabled }: ProjectRunButtonsProps) {
+  const run = useCallback((cmd: 'run' | 'build' | 'test') => {
+    const fn = api.runs[cmd];
+    fn(projectId, '', 'only').catch(() => {});
+  }, [projectId]);
+
+  const btn = (label: string, cmd: 'run' | 'build' | 'test', color: string) => (
+    <button
+      key={cmd}
+      onClick={() => run(cmd)}
+      disabled={disabled}
+      className={`px-3 py-1 rounded text-xs font-semibold tracking-wide border transition-colors
+        disabled:opacity-40 disabled:cursor-not-allowed
+        ${color}`}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-gray-600 mr-1">Full project:</span>
+      {btn('Run', 'run', 'border-brand-600 text-brand-400 hover:bg-brand-900/40')}
+      {btn('Build', 'build', 'border-amber-600 text-amber-400 hover:bg-amber-900/40')}
+      {btn('Test', 'test', 'border-emerald-700 text-emerald-400 hover:bg-emerald-900/40')}
+    </div>
+  );
+}
+
 type NodeStatus = 'pending' | 'running' | 'success' | 'error' | 'warn' | 'idle';
 
 interface RunInfo {
@@ -226,8 +260,9 @@ function RunPanelInner({ projectId, graph, onRunStart }: RunPanelProps) {
 
   if (!runInfo) {
     return (
-      <div className="flex-1 flex items-center justify-center text-xs text-gray-600 select-none">
-        No run yet — trigger a dbt run, build, or test to see results here.
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 select-none">
+        <span className="text-xs text-gray-600">No run yet — run the full project or trigger a model run from the DAG.</span>
+        <ProjectRunButtons projectId={projectId} disabled={running} />
       </div>
     );
   }
@@ -253,6 +288,9 @@ function RunPanelInner({ projectId, graph, onRunStart }: RunPanelProps) {
         ) : (
           <span className="text-xs text-gray-600">{elapsed}</span>
         )}
+        <div className="ml-auto">
+          <ProjectRunButtons projectId={projectId} disabled={running} />
+        </div>
       </div>
 
       {/* Execution DAG */}

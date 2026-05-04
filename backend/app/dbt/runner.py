@@ -44,6 +44,31 @@ class DbtRunner:
         args += list(req.extra)
         return args
 
+    async def run(self, req: RunRequest) -> tuple[int, bytes, bytes]:
+        """Acquire the per-project lock and run dbt, returning (returncode, stdout, stderr).
+
+        Does not publish bus events — use for non-user-visible commands like dbt show.
+        """
+        lock = self._lock_for(req.project_id)
+        async with lock:
+            args = self.build_args(req)
+            pid = req.project_id
+            selector_part = f" --select {req.select}" if req.select else ""
+            extra_part = (" " + " ".join(req.extra)) if req.extra else ""
+            append_project_log(str(req.project_path), f">>> dbt {req.command}{selector_part}{extra_part}", pid)
+            proc = await asyncio.create_subprocess_exec(
+                *args,
+                cwd=str(req.project_path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=req.env,
+            )
+            stdout_bytes, stderr_bytes = await proc.communicate()
+            rc = proc.returncode or 0
+            status = "OK" if rc == 0 else f"FAILED (rc={rc})"
+            append_project_log(str(req.project_path), f"<<< dbt {req.command} {status}", pid)
+            return rc, stdout_bytes, stderr_bytes
+
     async def stream(self, req: RunRequest) -> AsyncIterator[tuple[str, str]]:
         lock = self._lock_for(req.project_id)
         async with lock:

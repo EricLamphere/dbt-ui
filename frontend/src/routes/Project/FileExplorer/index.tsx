@@ -3,8 +3,9 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronsDownUp } from 'lucide-react';
 import { api, type FileContentDto, type ModelNode } from '../../../lib/api';
+import { useProjectEvents } from '../../../lib/sse';
 import NavRail from '../components/NavRail';
-import { SidePane } from '../components/SidePane';
+import { SidePane, type FailedRowsCache } from '../components/SidePane';
 import { ContextMenu } from './ContextMenu';
 import { TreeItem } from './TreeItem';
 import { ViewPane } from './panes/ViewPane';
@@ -31,17 +32,34 @@ export default function FileExplorerPage() {
   const [selectedModel, setSelectedModel] = useState<ModelNode | null>(null);
   /** unique_id of the model corresponding to the open file, for ViewPane compiled SQL */
   const [modelUid, setModelUid] = useState<string | null>(null);
-  const PREVIEW_CACHE_KEY = `file-explorer-preview-${id}`;
+  /** for YAML schema files: the test node currently active in the editor / SidePane */
+  const [selectedTestNode, setSelectedTestNode] = useState<ModelNode | null>(null);
+  /** test node to scroll the editor to on open (from deep-link) */
+  const [targetTestNode, setTargetTestNode] = useState<ModelNode | null>(null);
+  const PREVIEW_CACHE_KEY = `preview-cache-${id}`;
+  const FAILED_ROWS_KEY = `failed-rows-cache-${id}`;
 
   /** dbt show results keyed by modelUid — persisted to sessionStorage so it survives route navigation */
   const [previewCache, setPreviewCache] = useState<Map<string, { columns: string[]; rows: unknown[][] }>>(() => {
     try {
-      const raw = sessionStorage.getItem(`file-explorer-preview-${id}`);
+      const raw = sessionStorage.getItem(`preview-cache-${id}`);
       return raw ? new Map(JSON.parse(raw) as [string, { columns: string[]; rows: unknown[][] }][]) : new Map();
     } catch {
       return new Map();
     }
   });
+
+  /** failing test rows keyed by test uid — same session key as DAG page */
+  const [failedRowsCache, setFailedRowsCache] = useState<FailedRowsCache>(() => {
+    try {
+      const raw = sessionStorage.getItem(`failed-rows-cache-${id}`);
+      return raw ? new Map(JSON.parse(raw) as [string, { columns: string[]; rows: unknown[][] }][]) : new Map();
+    } catch {
+      return new Map();
+    }
+  });
+
+  const [failedTestUid, setFailedTestUid] = useState<string | null>(null);
 
   // File navigation history (max 10, session-scoped in component state)
   const [fileHistory, setFileHistory] = useState<string[]>([]);
@@ -137,10 +155,18 @@ export default function FileExplorerPage() {
     reloadDir();
   }, [reloadDir]);
 
-  const openFileNode = useCallback(async (path: string, skipHistory = false) => {
+  useProjectEvents(id, useCallback((event) => {
+    if (event.type === 'test_failed') {
+      const d = event.data as { test_uid: string };
+      setFailedTestUid(d.test_uid);
+    }
+  }, []));
+
+  const openFileNode = useCallback(async (path: string, skipHistory = false, testNode?: ModelNode | null) => {
     setLoadingPath(path);
     setEdited(undefined);
     setSaveStatus('idle');
+    setTargetTestNode(testNode ?? null);
     try {
       const file = await api.files.getContent(id, path);
       setOpenFile(file);
@@ -153,6 +179,22 @@ export default function FileExplorerPage() {
         } else {
           setModelUid(null);
           setSelectedModel(null);
+        }
+
+        // For YAML files: auto-select a test node in the SidePane
+        if (path.endsWith('.yml') || path.endsWith('.yaml')) {
+          if (testNode) {
+            // Specific test requested (e.g. from DAG deep-link)
+            setSelectedTestNode(testNode);
+          } else {
+            // Auto-select first test defined in this file
+            const firstTest = graph.nodes.find(
+              (n) => n.resource_type === 'test' && n.original_file_path && path.endsWith(n.original_file_path)
+            );
+            setSelectedTestNode(firstTest ?? null);
+          }
+        } else {
+          setSelectedTestNode(null);
         }
       }
       if (!skipHistory) {
@@ -263,7 +305,12 @@ export default function FileExplorerPage() {
       const node = graph.nodes.find((n) => n.unique_id === modelParam);
       if (node?.original_file_path) {
         expandToPath(node.original_file_path);
-        openFileNode(node.original_file_path);
+        // For test nodes, pass itself as the targetTestNode so the editor scrolls to it
+        const testNode = node.resource_type === 'test' ? node : null;
+        if (testNode) {
+          setSelectedTestNode(testNode);
+        }
+        openFileNode(node.original_file_path, false, testNode);
         return;
       }
     }
@@ -534,12 +581,8 @@ export default function FileExplorerPage() {
             canGoForward={historyIndex < fileHistory.length - 1}
             onGoBack={goBack}
             onGoForward={goForward}
-            previewCache={previewCache}
-            onPreviewCached={(uid, data) => setPreviewCache((prev) => {
-              const next = new Map(prev).set(uid, data);
-              try { sessionStorage.setItem(PREVIEW_CACHE_KEY, JSON.stringify([...next])); } catch { /* quota */ }
-              return next;
-            })}
+            targetTestNode={targetTestNode}
+            onTestSelected={(testNode) => setSelectedTestNode(testNode)}
           />
         ) : (
           <div className="flex items-center justify-center text-gray-600 text-sm select-none h-full">
@@ -551,13 +594,33 @@ export default function FileExplorerPage() {
       {/* Side panel */}
       <SidePane
         projectId={id}
-        model={selectedModel}
+        model={selectedTestNode ?? selectedModel}
         graph={graph ?? null}
         page="files"
-        onNavigateToDag={() => selectedModel && navigate(`/projects/${id}/models?model=${encodeURIComponent(selectedModel.unique_id)}`)}
-        onViewDocs={() => selectedModel && navigate(`/projects/${id}/docs?node=${encodeURIComponent(selectedModel.unique_id)}`)}
+        onNavigateToDag={() => {
+          const nav = selectedTestNode ?? selectedModel;
+          nav && navigate(`/projects/${id}/models?model=${encodeURIComponent(nav.unique_id)}`);
+        }}
+        onViewDocs={() => {
+          const nav = selectedTestNode ?? selectedModel;
+          nav && navigate(`/projects/${id}/docs?node=${encodeURIComponent(nav.unique_id)}`);
+        }}
         onDelete={handleDeleteModel}
         onNavigateToFile={navigateToFile}
+        previewCache={previewCache}
+        onPreviewCached={(uid, data) => setPreviewCache((prev) => {
+          const next = new Map(prev).set(uid, data);
+          try { sessionStorage.setItem(PREVIEW_CACHE_KEY, JSON.stringify([...next])); } catch { /* quota */ }
+          return next;
+        })}
+        failedTestUid={failedTestUid}
+        onFailedTestConsumed={() => setFailedTestUid(null)}
+        failedRowsCache={failedRowsCache}
+        onFailedRowsCached={(uid, data) => setFailedRowsCache((prev) => {
+          const next = new Map(prev).set(uid, data);
+          try { sessionStorage.setItem(FAILED_ROWS_KEY, JSON.stringify([...next])); } catch { /* quota */ }
+          return next;
+        })}
       />
 
       {/* Context menu */}

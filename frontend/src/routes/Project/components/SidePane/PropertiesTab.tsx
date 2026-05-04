@@ -1,10 +1,8 @@
-import { useEffect, useReducer, useState } from 'react';
+import { useReducer, useState } from 'react';
 import { BookOpen, Play, Hammer, FlaskConical, Layers, Plus, Trash2 } from 'lucide-react';
 import { api, type ModelNode, type GraphDto, type RunOpts } from '../../../../lib/api';
 
 type RunCommand = 'run' | 'build' | 'test';
-
-export type ShowRows = { columns: string[]; rows: unknown[][] };
 
 interface PropertiesTabProps {
   projectId: number;
@@ -12,10 +10,6 @@ interface PropertiesTabProps {
   selectedModels?: ModelNode[];
   graph: GraphDto | null;
   page: 'files' | 'dag';
-  failedTestUid?: string | null;
-  onFailedTestConsumed?: () => void;
-  showRows?: ShowRows | null;
-  onShowRows?: (uid: string, rows: ShowRows | null) => void;
   onNavigateToFiles?: () => void;
   onNavigateToDag?: () => void;
   onViewDocs?: () => void;
@@ -226,25 +220,11 @@ function Spinner() {
 }
 
 export function PropertiesTab({
-  projectId, model, selectedModels = [], graph, page, failedTestUid, onFailedTestConsumed,
-  showRows, onShowRows,
+  projectId, model, selectedModels = [], graph, page,
   onNavigateToFiles, onNavigateToDag, onViewDocs, onDelete, onNavigateToFile,
 }: PropertiesTabProps) {
   const [loading, setLoading] = useState<RunCommand | null>(null);
-  const [loadingShow, setLoadingShow] = useState(false);
   const [opts, dispatchOpts] = useReducer(runOptionsReducer, undefined, runOptionsInitial);
-
-  // Auto-fetch failing test rows on one-shot signal
-  useEffect(() => {
-    if (!model || model.resource_type !== 'test') return;
-    if (failedTestUid !== model.unique_id) return;
-    onFailedTestConsumed?.();
-    setLoadingShow(true);
-    api.models.show(projectId, model.unique_id, 100)
-      .then((r) => onShowRows?.(model.unique_id, r))
-      .catch(() => onShowRows?.(model.unique_id, null))
-      .finally(() => setLoadingShow(false));
-  }, [failedTestUid, model?.unique_id, model?.resource_type, projectId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleRun = async (cmd: RunCommand) => {
     if (!model) return;
@@ -274,7 +254,7 @@ export function PropertiesTab({
   const isTest = model.resource_type === 'test';
 
   return (
-    <div className="overflow-auto flex-1 p-4 flex flex-col gap-4">
+    <div className="flex-1 p-4 flex flex-col gap-4">
       {/* Name + type header */}
       <div className="flex flex-col gap-1">
         <span className="font-semibold text-gray-100 text-sm break-all">{model.name}</span>
@@ -444,40 +424,8 @@ export function PropertiesTab({
         </div>
       )}
 
-      {/* Failing test rows */}
-      {isTest && loadingShow && (
-        <p className="text-xs text-gray-500">Loading failing rows…</p>
-      )}
-      {isTest && showRows && (
-        <div className="flex flex-col gap-1">
-          <p className="text-xs text-red-400 font-medium">
-            {showRows.rows.length} failing row{showRows.rows.length !== 1 ? 's' : ''}
-          </p>
-          <div className="overflow-auto max-h-48 rounded border border-gray-800">
-            <table className="w-full text-[11px] text-gray-300 border-collapse">
-              <thead>
-                <tr className="bg-surface-elevated">
-                  {showRows.columns.map((c) => (
-                    <th key={c} className="px-2 py-1 text-left text-gray-500 font-medium border-b border-gray-800 whitespace-nowrap">{c}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {showRows.rows.map((row, i) => (
-                  <tr key={i} className="border-b border-gray-800/50 hover:bg-surface-elevated/40">
-                    {(row as unknown[]).map((cell, j) => (
-                      <td key={j} className="px-2 py-1 font-mono whitespace-nowrap">{String(cell ?? '')}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       {/* Action buttons */}
-      <div className="flex flex-col gap-2 mt-auto pt-2">
+      <div className="flex flex-col gap-2 pt-2">
         {page === 'dag' && model.original_file_path && (
           <button
             onClick={onNavigateToFiles}

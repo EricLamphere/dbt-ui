@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { type ModelNode, type GraphDto } from '../../../../lib/api';
-import { PropertiesTab, type ShowRows } from './PropertiesTab';
+import { ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
+import { api, type ModelNode, type GraphDto } from '../../../../lib/api';
+import { PropertiesTab } from './PropertiesTab';
+import ProfilePanel from './ProfilePanel';
+import { DataTable } from '../../../../components/DataTable';
+
+export type PreviewCache = Map<string, { columns: string[]; rows: unknown[][] }>;
 
 interface SidePaneProps {
   projectId: number;
@@ -17,13 +21,15 @@ interface SidePaneProps {
   onNavigateToFile?: (path: string) => void;
   failedTestUid?: string | null;
   onFailedTestConsumed?: () => void;
-  showRows?: ShowRows | null;
-  onShowRows?: (uid: string, rows: ShowRows | null) => void;
+  previewCache?: PreviewCache;
+  onPreviewCached?: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
+  failedRowsCache?: FailedRowsCache;
+  onFailedRowsCached?: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
 }
 
 const MIN_WIDTH = 200;
 const DEFAULT_WIDTH = 320;
-const MAX_WIDTH = 600;
+const MAX_WIDTH = 1200;
 const COLLAPSE_THRESHOLD = 80;
 
 function storageKey(page: string) {
@@ -41,6 +47,160 @@ function readStoredWidth(page: string): number {
   return DEFAULT_WIDTH;
 }
 
+// ---------------------------------------------------------------------------
+// DataPreviewPanel — inline Data Preview for the SidePane
+// ---------------------------------------------------------------------------
+
+interface DataPreviewPanelProps {
+  projectId: number;
+  model: ModelNode;
+  previewCache?: PreviewCache;
+  onPreviewCached?: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
+}
+
+function DataPreviewPanel({ projectId, model, previewCache, onPreviewCached }: DataPreviewPanelProps) {
+  const cached = previewCache?.get(model.unique_id) ?? null;
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchPreview = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.models.show(projectId, model.unique_id, 1000);
+      onPreviewCached?.(model.unique_id, result);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!cached && !loading) {
+      fetchPreview();
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 shrink-0">
+        <span className="text-xs text-gray-500">{cached ? `${cached.rows.length} rows` : ' '}</span>
+        <button
+          onClick={fetchPreview}
+          disabled={loading}
+          className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 transition-colors"
+          title="Re-run dbt show"
+        >
+          <RotateCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto">
+        {loading && (
+          <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+            Running dbt show…
+          </div>
+        )}
+        {error && !loading && (
+          <div className="flex items-center justify-center h-full text-red-400 text-sm px-4 text-center">
+            {error}
+          </div>
+        )}
+        {!loading && !error && cached && cached.rows.length === 0 && (
+          <div className="flex items-center justify-center h-full text-gray-600 text-sm">
+            No rows returned
+          </div>
+        )}
+        {!loading && !error && cached && cached.rows.length > 0 && (
+          <DataTable
+            columns={cached.columns.map((c) => ({ key: c }))}
+            rows={cached.rows as unknown[][]}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// FailedRowsPanel — runs dbt show on a failing test node
+// ---------------------------------------------------------------------------
+
+export type FailedRowsCache = Map<string, { columns: string[]; rows: unknown[][] }>;
+
+interface FailedRowsPanelProps {
+  projectId: number;
+  model: ModelNode;
+  failedRowsCache?: FailedRowsCache;
+  onFailedRowsCached?: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
+}
+
+function FailedRowsPanel({ projectId, model, failedRowsCache, onFailedRowsCached }: FailedRowsPanelProps) {
+  const cached = failedRowsCache?.get(model.unique_id) ?? null;
+  const [loading, setLoading] = useState(!cached);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchRows = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.models.show(projectId, model.unique_id, 100);
+      onFailedRowsCached?.(model.unique_id, result);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!cached) fetchRows();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between px-3 py-2 border-b border-gray-800 shrink-0">
+        <span className="text-xs text-gray-500">{cached ? `${cached.rows.length} row${cached.rows.length !== 1 ? 's' : ''}` : ' '}</span>
+        <button
+          onClick={fetchRows}
+          disabled={loading}
+          className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 transition-colors"
+          title="Re-run dbt show"
+        >
+          <RotateCw className={`w-3 h-3 ${loading ? 'animate-spin' : ''}`} />
+          Refresh
+        </button>
+      </div>
+      <div className="flex-1 overflow-auto">
+        {loading && (
+          <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+            Running dbt show…
+          </div>
+        )}
+        {error && !loading && (
+          <div className="flex items-center justify-center h-full text-red-400 text-sm px-4 text-center">
+            {error}
+          </div>
+        )}
+        {!loading && !error && cached && cached.rows.length === 0 && (
+          <div className="flex items-center justify-center h-full text-gray-600 text-sm">
+            No failing rows
+          </div>
+        )}
+        {!loading && !error && cached && cached.rows.length > 0 && (
+          <DataTable
+            columns={cached.columns.map((c) => ({ key: c }))}
+            rows={cached.rows}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+type SidePaneTab = 'properties' | 'preview' | 'profile' | 'failed_rows';
+
 export function SidePane({
   projectId,
   model,
@@ -54,11 +214,14 @@ export function SidePane({
   onNavigateToFile,
   failedTestUid,
   onFailedTestConsumed,
-  showRows,
-  onShowRows,
+  previewCache,
+  onPreviewCached,
+  failedRowsCache,
+  onFailedRowsCached,
 }: SidePaneProps) {
   const [open, setOpen] = useState(false);
   const [width, setWidth] = useState(() => readStoredWidth(page));
+  const [activeTab, setActiveTab] = useState<SidePaneTab>('properties');
   const resizing = useRef(false);
   const startX = useRef(0);
   const startW = useRef(0);
@@ -68,6 +231,19 @@ export function SidePane({
   useEffect(() => {
     if (model || selectedModels.length > 1) setOpen(true);
   }, [model?.unique_id, selectedModels.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Reset tab to 'properties' when the selected model changes
+  useEffect(() => {
+    setActiveTab('properties');
+  }, [model?.unique_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-switch to 'failed_rows' tab when failedTestUid matches the current test node
+  useEffect(() => {
+    if (!model || model.resource_type !== 'test') return;
+    if (failedTestUid !== model.unique_id) return;
+    onFailedTestConsumed?.();
+    setActiveTab('failed_rows');
+  }, [failedTestUid, model?.unique_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
@@ -147,23 +323,76 @@ export function SidePane({
         className="overflow-hidden flex flex-col transition-none"
         aria-hidden={!open}
       >
-        <div style={{ width }} className="flex flex-col h-full overflow-hidden">
-          <PropertiesTab
-            projectId={projectId}
-            model={model}
-            selectedModels={selectedModels}
-            graph={graph}
-            page={page}
-            failedTestUid={failedTestUid}
-            onFailedTestConsumed={onFailedTestConsumed}
-            showRows={showRows}
-            onShowRows={onShowRows}
-            onNavigateToFiles={onNavigateToFiles}
-            onNavigateToDag={onNavigateToDag}
-            onViewDocs={onViewDocs}
-            onDelete={onDelete}
-            onNavigateToFile={onNavigateToFile}
-          />
+        <div style={{ width }} className="flex flex-col h-full">
+          {/* Tab bar */}
+          {model && (model.resource_type === 'model' || (model.resource_type === 'test' && (model.status === 'error' || model.status === 'warn'))) && (() => {
+            const tabs: SidePaneTab[] = model.resource_type === 'model'
+              ? ['properties', 'preview', 'profile']
+              : ['properties', 'failed_rows'];
+            const TAB_LABELS: Record<SidePaneTab, string> = {
+              properties: 'Properties',
+              preview: 'Data Preview',
+              profile: 'Profile',
+              failed_rows: 'Failed Rows',
+            };
+            return (
+              <div className="flex items-center gap-0 border-b border-gray-800 shrink-0 px-2">
+                {tabs.map((tab) => (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`px-3 py-2 text-xs font-medium transition-colors border-b-2 -mb-px ${
+                      activeTab === tab
+                        ? 'border-brand-500 text-brand-300'
+                        : 'border-transparent text-gray-500 hover:text-gray-300'
+                    }`}
+                  >
+                    {TAB_LABELS[tab]}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+
+          {/* Tab content */}
+          <div className="flex-1 overflow-auto">
+            {activeTab === 'preview' && model && model.resource_type === 'model' ? (
+              <DataPreviewPanel
+                key={model.unique_id}
+                projectId={projectId}
+                model={model}
+                previewCache={previewCache}
+                onPreviewCached={onPreviewCached}
+              />
+            ) : activeTab === 'profile' && model && model.resource_type === 'model' ? (
+              <ProfilePanel
+                key={model.unique_id}
+                projectId={projectId}
+                model={model}
+              />
+            ) : activeTab === 'failed_rows' && model && model.resource_type === 'test' ? (
+              <FailedRowsPanel
+                key={model.unique_id}
+                projectId={projectId}
+                model={model}
+                failedRowsCache={failedRowsCache}
+                onFailedRowsCached={onFailedRowsCached}
+              />
+            ) : (
+              <PropertiesTab
+                projectId={projectId}
+                model={model}
+                selectedModels={selectedModels}
+                graph={graph}
+                page={page}
+                onNavigateToFiles={onNavigateToFiles}
+                onNavigateToDag={onNavigateToDag}
+                onViewDocs={onViewDocs}
+                onDelete={onDelete}
+                onNavigateToFile={onNavigateToFile}
+              />
+            )}
+          </div>
         </div>
       </div>
     </div>
