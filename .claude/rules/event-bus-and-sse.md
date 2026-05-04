@@ -81,6 +81,8 @@ Use `sse_response_with_replay` for PTY sessions (both `init:{session_id}` and `t
 | `drift_started` | project | `api/drift.py` — scan started |
 | `drift_progress` | project | `api/drift.py` — includes `checked`, `total` per-model progress |
 | `drift_finished` | project | `api/drift.py` — snapshot id + final status |
+| `freshness_started` | project | `api/freshness.py` — includes `snapshot_id` |
+| `freshness_finished` | project | `api/freshness.py` — includes `snapshot_id`, `ok`, `pass_count`, `warn_count`, `error_count` |
 
 ## Adding a New Event Type
 

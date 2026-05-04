@@ -226,6 +226,16 @@ drift_snapshots
   results_json    TEXT       -- JSON array of ModelDriftResult objects
   error_message   TEXT (nullable)
   -- Interrupted snapshots (status='running') are reset to 'error' on server restart
+
+freshness_snapshots
+  id              INTEGER PK
+  project_id      INTEGER FK→projects (CASCADE)
+  started_at      DATETIME
+  finished_at     DATETIME (nullable)
+  status          TEXT(32)   -- running | done | error
+  target          TEXT(255) (nullable)  -- dbt target used during the scan
+  results_json    TEXT       -- JSON array of SourceFreshnessResult objects
+  error_message   TEXT (nullable)
 ```
 
 ---
@@ -264,6 +274,9 @@ GET    /api/projects/{id}/debug/last                     get result of the most 
 POST   /api/projects/{id}/drift                          start async schema drift scan (202); returns DriftSnapshot
 GET    /api/projects/{id}/drift                          get the latest DriftSnapshot for a project
 GET    /api/projects/{id}/drift/{snapshot_id}            get a specific DriftSnapshot by id
+
+POST   /api/projects/{id}/freshness                      start async source freshness check (202); returns FreshnessSnapshot
+GET    /api/projects/{id}/freshness                      get the latest FreshnessSnapshot for a project
 
 POST   /api/projects/{id}/run
 POST   /api/projects/{id}/build
@@ -391,6 +404,8 @@ Each SSE client gets its own queue. `publish` is non-blocking (`put_nowait`); ev
 | `drift_started` | `drift.py` | Drift panel shows progress bar |
 | `drift_progress` | `drift.py` | Drift panel updates checked/total counter |
 | `drift_finished` | `drift.py` | Drift panel renders column diff results |
+| `freshness_started` | `freshness.py` | Freshness panel shows running state |
+| `freshness_finished` | `freshness.py` | Freshness panel invalidates query, renders results |
 
 ### Init Session Event Types
 

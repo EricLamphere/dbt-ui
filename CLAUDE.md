@@ -19,9 +19,9 @@ Backend on `:8001`, frontend on `:5173`.
 
 ```
 backend/app/
-  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git, debug, drift)
+  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git, debug, drift, freshness)
   db/
-    models.py     — All SQLAlchemy models (11 tables)
+    models.py     — All SQLAlchemy models (12 tables)
     engine.py     — get_session dependency
     migrations.py — DDL-on-startup migrations
   dbt/
@@ -57,18 +57,19 @@ frontend/src/
       ProjectLayout.tsx  — Shared layout wrapper (outlet + BottomPane; outlet has overflow-auto for scrolling)
       index.tsx          — Project homepage (README, dbt_project.yml, profiles.yml tabbed viewer)
       Models.tsx         — React Flow DAG page (/projects/:projectId/models); supports ?model=<uid> deep-link; uses SidePane(page="dag")
-      Docs.tsx           — Native docs browser (folder tree)
+      Docs.tsx           — Native docs browser (folder tree); MacroDetail includes "Try It" section with arg inputs, editable Jinja call textarea, and inline compile button
       FileExplorer/      — File browser + editor; uses SidePane(page="files") with navigation to DAG
       Git/               — Source Control page (VSCode-style SCM): ChangesList, DiffView (Monaco DiffEditor), CommitBox, BranchPicker, HistoryPanel
       Workspace/         — SQL Workspace page: file tree + Monaco editor + Compiled SQL tab + resizable results pane; SQL/dbt autocomplete; cmd+click refs navigate to File Explorer
       Environment.tsx    — Env vars + profiles
       InitScripts.tsx    — Init pipeline management
-      Health.tsx         — Health page: tabbed view of dbt Health Check + Schema Drift
+      Health.tsx         — Health page: tabbed view of dbt Health Check + Schema Drift + Source Freshness
       components/
         NavRail.tsx      — Collapsible left nav sidebar; persists collapsed state in localStorage; resizable when expanded; never re-opens on navigation
         ProjectNav.tsx   — Nav items (DAG/Files/Docs/Workspace/Git/Environment/Init/Health); icon-only when NavRail collapsed
         HealthCheckPanel.tsx — Runs dbt debug; renders structured per-check pass/fail table + version info
         DriftPanel.tsx   — Triggers schema drift scan; renders per-model column diff accordion
+        FreshnessPanel.tsx — Triggers dbt source freshness; renders per-source collapsible groups with age, thresholds, and pass/warn/error badges; resizable columns; filter pills
         SidePane/
           index.tsx      — Right collapsible/draggable panel (horizontal drag); tabs: Properties + Profile; props: projectId, model, graph, page, navigation callbacks, onNavigateToFile
           PropertiesTab.tsx — Model metadata; Refs/Sources + Referenced By chips (cmd+clickable → onNavigateToFile); run controls (run/build/test grid); test failures; action buttons
@@ -97,6 +98,7 @@ All 11 in `backend/app/db/models.py`:
 - `global_profiles` — named env var sets shared across all projects
 - `global_profile_vars` — key/value vars belonging to a global profile
 - `drift_snapshots` — schema drift scan results per project; stores status (running/done/error), progress counters, and results_json (array of per-model column diffs)
+- `freshness_snapshots` — source freshness scan results per project; stores status (running/done/error), target, started_at, finished_at, results_json (array of per-source freshness results), and error_message
 
 ## Critical Architecture Rules
 
@@ -196,6 +198,8 @@ finally:
 | `drift_started` | project | schema drift scan started |
 | `drift_progress` | project | one model checked; payload includes `checked` and `total` counts |
 | `drift_finished` | project | schema drift scan finished |
+| `freshness_started` | project | source freshness scan started; payload includes `snapshot_id` |
+| `freshness_finished` | project | source freshness scan finished; payload includes `snapshot_id`, `ok`, `pass_count`, `warn_count`, `error_count` |
 
 ### Init Pipeline System
 

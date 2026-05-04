@@ -62,6 +62,7 @@ When handling SSE events, invalidate the relevant query:
 | `compile_finished` | `['graph', projectId]` |
 | `docs_generated` | `['docs-status', projectId]` |
 | `init_pipeline_finished` | nothing (UI updates from step events) |
+| `freshness_finished` | `['freshness-latest', projectId]` |
 
 When adding a new event type that signals stale data, add an entry here.
 
