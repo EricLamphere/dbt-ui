@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api import debug as debug_api
 from app.api import docs as docs_api
 from app.api import drift as drift_api
+from app.api import freshness as freshness_api
 from app.api import env as env_api
 from app.api import events as events_api
 from app.api import files as files_api
@@ -68,6 +69,7 @@ app.include_router(projects_api.router)
 app.include_router(models_api.router)
 app.include_router(debug_api.router)
 app.include_router(drift_api.router)
+app.include_router(freshness_api.router)
 app.include_router(runs_api.router)
 app.include_router(sql_api.router)
 app.include_router(init_api.router)

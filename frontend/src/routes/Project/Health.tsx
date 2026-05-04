@@ -3,12 +3,14 @@ import { useParams } from 'react-router-dom';
 import NavRail from './components/NavRail';
 import HealthCheckPanel from './components/HealthCheckPanel';
 import DriftPanel from './components/DriftPanel';
+import FreshnessPanel from './components/FreshnessPanel';
 
-type HealthTab = 'health-check' | 'schema-drift';
+type HealthTab = 'health-check' | 'schema-drift' | 'source-freshness';
 
 const TABS: { id: HealthTab; label: string }[] = [
   { id: 'health-check', label: 'dbt Health Check' },
   { id: 'schema-drift', label: 'Schema Drift' },
+  { id: 'source-freshness', label: 'Source Freshness' },
 ];
 
 export default function HealthPage() {
@@ -65,11 +67,12 @@ export default function HealthPage() {
         {/* Tab content */}
         <div className="flex-1 overflow-auto">
           {activeTab === 'health-check' && (
-            <div className="p-6 pb-12 max-w-3xl mx-auto w-full">
+            <div className="p-6 pb-12 max-w-[62rem] mx-auto w-full">
               <HealthCheckPanel projectId={id} />
             </div>
           )}
           {activeTab === 'schema-drift' && <DriftPanel projectId={id} />}
+          {activeTab === 'source-freshness' && <FreshnessPanel projectId={id} />}
         </div>
       </div>
     </div>

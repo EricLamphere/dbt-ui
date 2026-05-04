@@ -153,7 +153,7 @@ export default function DriftPanel({ projectId }: DriftPanelProps) {
   const filteredResults = driftedResults.filter((r) => matchesFilter(r, filter));
 
   return (
-    <div className="p-6 pb-12 max-w-3xl mx-auto w-full">
+    <div className="p-6 pb-12 max-w-[62rem] mx-auto w-full">
       <div className="bg-surface-panel border border-gray-800 rounded-xl overflow-hidden">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">

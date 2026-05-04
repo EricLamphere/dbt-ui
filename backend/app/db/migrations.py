@@ -80,6 +80,29 @@ async def run_migrations() -> None:
         )
         await session.commit()
 
+        if not await _table_exists(session, "freshness_snapshots"):
+            await session.execute(text(
+                "CREATE TABLE freshness_snapshots ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, "
+                "started_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "finished_at DATETIME, "
+                "status TEXT NOT NULL DEFAULT 'running', "
+                "target TEXT, "
+                "results_json TEXT NOT NULL DEFAULT '[]', "
+                "error_message TEXT)"
+            ))
+            await session.commit()
+
+        # Reset any freshness snapshots left running from a crashed server process
+        await session.execute(
+            text(
+                "UPDATE freshness_snapshots SET status = 'error', error_message = 'interrupted by server restart'"
+                " WHERE status = 'running'"
+            )
+        )
+        await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()

@@ -31,6 +31,7 @@ export function useProjectEvents(projectId: number | null, onEvent: SseHandler) 
         'project_log', 'api_log',
         'health_check_started', 'health_check_finished',
         'drift_started', 'drift_progress', 'drift_finished',
+        'freshness_started', 'freshness_finished',
       ];
       types.forEach((type) => {
         es.addEventListener(type, (e: MessageEvent) => {

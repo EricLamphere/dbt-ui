@@ -136,7 +136,7 @@ async def compile_workspace_sql(
         raise HTTPException(status_code=400, detail="SQL cannot be empty")
 
     env = await load_project_env(project_id)
-    append_project_log(project.path, ">>> dbt compile --inline ...", project_id)
+    append_project_log(project.path, f">>> dbt compile --inline {sql}", project_id)
 
     try:
         proc = await asyncio.create_subprocess_exec(

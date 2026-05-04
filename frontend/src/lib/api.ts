@@ -169,6 +169,32 @@ export interface DriftSnapshot {
   error_message: string | null;
 }
 
+export interface SourceFreshnessResult {
+  unique_id: string;
+  source_name: string;
+  table_name: string;
+  status: 'pass' | 'warn' | 'error' | 'runtime error';
+  max_loaded_at: string | null;
+  snapshotted_at: string | null;
+  age_seconds: number | null;
+  warn_after_count: number | null;
+  warn_after_period: string | null;
+  error_after_count: number | null;
+  error_after_period: string | null;
+  error: string | null;
+}
+
+export interface FreshnessSnapshot {
+  id: number;
+  project_id: number;
+  started_at: string;
+  finished_at: string | null;
+  status: 'running' | 'done' | 'error';
+  target: string | null;
+  results: SourceFreshnessResult[];
+  error_message: string | null;
+}
+
 export interface ColumnLineageEntry {
   node: string;
   column: string;
@@ -594,6 +620,12 @@ export const api = {
       get<DriftSnapshot | null>(`/projects/${projectId}/drift`),
     get: (projectId: number, snapshotId: number) =>
       get<DriftSnapshot>(`/projects/${projectId}/drift/${snapshotId}`),
+  },
+  freshness: {
+    start: (projectId: number) =>
+      post<FreshnessSnapshot>(`/projects/${projectId}/freshness`),
+    latest: (projectId: number) =>
+      get<FreshnessSnapshot | null>(`/projects/${projectId}/freshness`),
   },
   requirementsFile: {
     get: () => get<{ content: string }>('/settings/requirements-file'),

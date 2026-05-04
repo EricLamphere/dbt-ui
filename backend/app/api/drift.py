@@ -114,7 +114,10 @@ async def start_drift(
     if manifest is None:
         raise HTTPException(status_code=422, detail="manifest not found — run dbt compile first")
 
-    eligible = [n for n in manifest.nodes if is_eligible_for_drift_check(n)]
+    eligible = sorted(
+        (n for n in manifest.nodes if is_eligible_for_drift_check(n)),
+        key=lambda n: n.name,
+    )
     if dto.select:
         uid_set = set(dto.select)
         eligible = [n for n in eligible if n.unique_id in uid_set]
@@ -292,6 +295,7 @@ async def _run_drift_check(
             },
         ))
 
+    results.sort(key=lambda r: r.get("name", ""))
     drifted_count = sum(1 for r in results if r.get("has_drift"))
 
     async with SessionLocal() as session:

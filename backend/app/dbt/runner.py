@@ -20,6 +20,7 @@ class RunRequest:
     select: str | None = None
     extra: tuple[str, ...] = ()
     env: dict[str, str] | None = None  # if None, inherits process environment
+    inject_profiles_dir: bool = True  # set False when extra already contains --profiles-dir
 
 
 class DbtRunner:
@@ -37,7 +38,7 @@ class DbtRunner:
 
     def build_args(self, req: RunRequest) -> list[str]:
         args = [str(venv_dbt()), req.command]
-        if (req.project_path / "profiles.yml").exists():
+        if req.inject_profiles_dir and (req.project_path / "profiles.yml").exists():
             args += ["--profiles-dir", str(req.project_path)]
         if req.select:
             args += ["--select", req.select]
