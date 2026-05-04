@@ -76,6 +76,11 @@ Use `sse_response_with_replay` for PTY sessions (both `init:{session_id}` and `t
 | `init_finished` | init | `dbt/interactive.py` PTY reader |
 | `terminal_output` | terminal | `dbt/interactive.py` PTY reader (bash terminal) |
 | `terminal_finished` | terminal | `dbt/interactive.py` PTY reader (bash terminal) |
+| `health_check_started` | project | `api/debug.py` — dbt debug run started |
+| `health_check_finished` | project | `api/debug.py` — includes full DebugResultDto payload |
+| `drift_started` | project | `api/drift.py` — scan started |
+| `drift_progress` | project | `api/drift.py` — includes `checked`, `total` per-model progress |
+| `drift_finished` | project | `api/drift.py` — snapshot id + final status |
 
 ## Adding a New Event Type
 

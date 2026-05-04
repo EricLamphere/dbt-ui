@@ -21,11 +21,14 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 - **Source control (Git)** — VSCode-style source control panel: view changed files, stage/unstage, Monaco diff viewer, commit, push/pull with live streaming output, branch switch/create, and commit history
 - **SQL Workspace** — standalone SQL scratchpad with a file tree, Monaco editor, Compiled SQL tab (via `dbt compile --inline`), and a resizable results pane (via `dbt show --inline`); files are saved under a configurable `workspace/` folder inside the project; Cmd+Enter runs, Cmd+S saves
 - **Autocomplete** - Autocomplete on refs, sources, and documented columns to make writing and running jinja SQL easier than ever
+- **Health check** — run `dbt debug` from the UI and see a structured pass/fail table per check (connection, profiles.yml, project.yml, etc.) with version info and raw log
+- **Schema drift** — scan all materialized models and compare warehouse column schemas against `manifest.json` declarations; shows per-model diffs (added/removed/type-mismatch columns)
+- **Column profiling** — run a column profile on any model from the SidePane to see row count, null%, distinct count, min/max, and sample values per column
 
 ## Stack highlights
 - Backend: FastAPI, SQLAlchemy (async), aiosqlite, sse-starlette, watchfiles, ptyprocess
 - Frontend: React 18, Vite, TypeScript, @xyflow/react, dagre, Monaco, xterm.js, TanStack Query, Tailwind CSS
-- DB: SQLite (10 tables)
+- DB: SQLite (11 tables)
 - dbt invocation: subprocess only via `backend/.venv/bin/dbt` (serialized per project via asyncio.Lock)
 
 ## Quickstart

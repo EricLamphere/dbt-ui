@@ -19,18 +19,22 @@ Backend on `:8001`, frontend on `:5173`.
 
 ```
 backend/app/
-  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git)
+  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git, debug, drift)
   db/
-    models.py     — All SQLAlchemy models (10 tables)
+    models.py     — All SQLAlchemy models (11 tables)
     engine.py     — get_session dependency
     migrations.py — DDL-on-startup migrations
   dbt/
-    runner.py     — DbtRunner singleton; subprocess execution + serialization lock; adds --profiles-dir when project-local profiles.yml exists
+    runner.py     — DbtRunner singleton; subprocess execution + serialization lock; .stream() publishes bus events; .run() is silent (returns stdout/stderr)
     select.py     — build_selector(name, mode) → --select string
     manifest.py   — Parse target/manifest.json
     run_results.py — Parse target/run_results.json
     init_scripts.py — Read/write init/{script_path}/*.sh scripts per project
     interactive.py — InteractiveInitManager (ptyprocess PTY sessions; reused for terminal too)
+    debug_parser.py — parse_debug_output() → structured DebugResult from dbt debug stdout
+    drift.py      — diff_columns() + is_eligible_for_drift_check() — column schema diff helpers
+    profile.py    — build_column_profile() — per-column stats from dbt show output
+    show_parser.py — parse_show_json() — handles dbt 1.5+ and 1.11+ show output formats
   events/
     bus.py        — EventBus singleton `bus`; in-process pub/sub
     sse.py        — sse_response(), sse_response_with_replay()
@@ -59,24 +63,29 @@ frontend/src/
       Workspace/         — SQL Workspace page: file tree + Monaco editor + Compiled SQL tab + resizable results pane; SQL/dbt autocomplete; cmd+click refs navigate to File Explorer
       Environment.tsx    — Env vars + profiles
       InitScripts.tsx    — Init pipeline management
+      Health.tsx         — Health page: tabbed view of dbt Health Check + Schema Drift
       components/
         NavRail.tsx      — Collapsible left nav sidebar; persists collapsed state in localStorage; resizable when expanded; never re-opens on navigation
-        ProjectNav.tsx   — Nav items (DAG/Files/Docs/Workspace/Git/Environment/Init); icon-only when NavRail collapsed
+        ProjectNav.tsx   — Nav items (DAG/Files/Docs/Workspace/Git/Environment/Init/Health); icon-only when NavRail collapsed
+        HealthCheckPanel.tsx — Runs dbt debug; renders structured per-check pass/fail table + version info
+        DriftPanel.tsx   — Triggers schema drift scan; renders per-model column diff accordion
         SidePane/
-          index.tsx      — Right collapsible/draggable panel (horizontal drag); renders PropertiesTab; props: projectId, model, graph, page, navigation callbacks, onNavigateToFile
+          index.tsx      — Right collapsible/draggable panel (horizontal drag); tabs: Properties + Profile; props: projectId, model, graph, page, navigation callbacks, onNavigateToFile
           PropertiesTab.tsx — Model metadata; Refs/Sources + Referenced By chips (cmd+clickable → onNavigateToFile); run controls (run/build/test grid); test failures; action buttons
+          ProfilePanel.tsx — Column profile stats (row count, null%, distinct, min/max, samples) via dbt show
         BottomPane/
-          RunPanel.tsx     — Execution DAG (parses run_log to show real-time status)
+          RunPanel.tsx     — Execution DAG (parses run_log to show real-time status); shows full-run notice when no model is selected
           TerminalPanel.tsx — xterm.js terminals (multi-instance tabs); optimized resize with lastSizeRef to prevent spurious SIGWINCH
           LogPanel.tsx     — Project and API logs
         Header.tsx         — Navigation + ProjectSelectors (Profile/Target dropdowns)
         StatusBadge        — Shared UI
-  components/     — Other shared UI components
+  components/
+    DataTable.tsx   — Shared table component (sticky header, row numbers, keyboard nav, copy); use for ALL tabular data
 ```
 
 ## Database Tables
 
-All 10 in `backend/app/db/models.py`:
+All 11 in `backend/app/db/models.py`:
 - `projects` — discovered dbt projects (includes `init_script_path: str` per-project init dir; `ignored: bool` to hide from list)
 - `init_steps` — ordered init pipeline steps per project (includes `script_path` for linked external scripts)
 - `model_statuses` — per-model run status (idle/pending/running/success/error/warn/stale)
@@ -87,6 +96,7 @@ All 10 in `backend/app/db/models.py`:
 - `app_settings` — global app config (key/value); keys: `dbt_projects_path`, `global_requirements_path`, `data_dir`, `log_level`
 - `global_profiles` — named env var sets shared across all projects
 - `global_profile_vars` — key/value vars belonging to a global profile
+- `drift_snapshots` — schema drift scan results per project; stores status (running/done/error), progress counters, and results_json (array of per-model column diffs)
 
 ## Critical Architecture Rules
 
@@ -181,6 +191,11 @@ finally:
 | `git_log` | project | one line of git push/pull output |
 | `git_finished` | project | git push/pull exited |
 | `git_error` | project | git executable not found on PATH |
+| `health_check_started` | project | dbt debug run started |
+| `health_check_finished` | project | dbt debug run finished; payload includes structured check results |
+| `drift_started` | project | schema drift scan started |
+| `drift_progress` | project | one model checked; payload includes `checked` and `total` counts |
+| `drift_finished` | project | schema drift scan finished |
 
 ### Init Pipeline System
 

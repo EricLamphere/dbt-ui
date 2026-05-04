@@ -35,7 +35,7 @@ dbt-ui/
 │   │   ├── logging_setup.py         # structlog configuration
 │   │   ├── api/
 │   │   │   ├── projects.py          # /api/projects — list, get, rescan, ensure-profiles-yml; returns dbt_project_yml + profiles_yml
-│   │   │   ├── models.py            # /api/projects/{id}/models — DAG, create, compile
+│   │   │   ├── models.py            # /api/projects/{id}/models — DAG, create, compile, show, profile
 │   │   │   ├── runs.py              # /api/projects/{id}/run|build|test (loads dbt_target from project_env_vars → --target)
 │   │   │   ├── sql.py               # /api/projects/{id}/models/{uid}/sql GET/PUT
 │   │   │   ├── files.py             # /api/projects/{id}/files — file browser
@@ -46,18 +46,24 @@ dbt-ui/
 │   │   │   ├── terminal.py          # /api/terminal — integrated bash PTY sessions
 │   │   │   ├── settings.py          # /api/settings — global app config (dbt_projects_path)
 │   │   │   ├── events.py            # /api/projects/{id}/events — SSE endpoint
+│   │   │   ├── debug.py             # /api/projects/{id}/debug — runs dbt debug, parses output into structured checks
+│   │   │   ├── drift.py             # /api/projects/{id}/drift — schema drift check (dbt show per model vs manifest columns)
 │   │   │   └── health.py            # /api/health
 │   │   ├── db/
 │   │   │   ├── engine.py            # Async SQLAlchemy engine, SessionLocal, get_session
-│   │   │   ├── models.py            # ORM: 10 tables (see Database Schema below)
+│   │   │   ├── models.py            # ORM: 11 tables (see Database Schema below)
 │   │   │   └── migrations.py        # DDL-on-startup migrations (idempotent; no Alembic)
 │   │   ├── dbt/
 │   │   │   ├── manifest.py          # Parse target/manifest.json → nodes + edges
 │   │   │   ├── run_results.py       # Parse target/run_results.json → statuses
-│   │   │   ├── runner.py            # DbtRunner singleton; subprocess + asyncio.Lock per project
+│   │   │   ├── runner.py            # DbtRunner singleton; subprocess + asyncio.Lock per project; .run() for silent invocations
 │   │   │   ├── select.py            # Build --select strings (only/upstream/downstream/full)
 │   │   │   ├── venv.py              # venv_dbt/venv_pip/venv_python — resolve binaries in backend/.venv/bin/
 │   │   │   ├── init_scripts.py      # Read/write init/*.sh custom scripts
+│   │   │   ├── debug_parser.py      # Parse dbt debug stdout → structured DebugResult with per-check status
+│   │   │   ├── drift.py             # diff_columns / is_eligible_for_drift_check — column drift helpers
+│   │   │   ├── profile.py           # Parse dbt show --output json output into column profile stats
+│   │   │   ├── show_parser.py       # parse_show_json() — handles dbt 1.5+ and 1.11+ show output formats
 │   │   │   └── interactive.py       # InteractiveInitManager singleton (PTY sessions; reused for terminal)
 │   │   ├── git/
 │   │   │   ├── runner.py            # GitRunner singleton; subprocess + asyncio.Lock per project
@@ -92,20 +98,24 @@ dbt-ui/
 │   │           ├── Docs.tsx             # Native docs browser (folder tree)
 │   │           ├── Environment.tsx      # Env vars + profiles
 │   │           ├── InitScripts.tsx      # Init pipeline management
+│   │           ├── Health.tsx           # Health page: two tabs — dbt Health Check + Schema Drift
 │   │           ├── FileExplorer/        # File browser + Monaco editor; SidePane replaces old tab bar
 │   │           ├── Git/                 # Source Control page (VSCode-style SCM)
 │   │           ├── Workspace/           # SQL Workspace — file tree + Monaco editor + results pane + autocomplete
 │   │           └── components/
 │   │               ├── BottomPane/
 │   │               │   ├── index.tsx        # Drag-to-resize pane; tab management; terminal instances
-│   │               │   ├── RunPanel.tsx     # Execution DAG (real-time run_log parsing)
+│   │               │   ├── RunPanel.tsx     # Execution DAG (real-time run_log parsing); shows full-run notice when no model selected
 │   │               │   ├── TerminalPanel.tsx # xterm.js multi-instance terminal; only resizes PTY when dims change
 │   │               │   └── LogPanel.tsx     # Project and API logs
 │   │               ├── NavRail.tsx          # Collapsible left nav sidebar (persists collapsed state in localStorage; resizable when expanded)
-│   │               ├── ProjectNav.tsx       # Nav items (DAG/Files/Docs/Workspace/Git/Environment/Init); icon-only mode when collapsed
+│   │               ├── ProjectNav.tsx       # Nav items (DAG/Files/Docs/Workspace/Git/Environment/Init/Health); icon-only mode when collapsed
+│   │               ├── HealthCheckPanel.tsx # dbt debug runner — shows per-check status table, version info, raw log
+│   │               ├── DriftPanel.tsx       # Schema drift UI — triggers drift scan, shows per-model column diff table
 │   │               ├── SidePane/
-│   │               │   ├── index.tsx        # Right-side collapsible panel (drag/collapse); renders PropertiesTab
-│   │               │   └── PropertiesTab.tsx # Model metadata; Refs/Sources + Referenced By as cmd+clickable chips; run controls; action buttons
+│   │               │   ├── index.tsx        # Right-side collapsible panel (drag/collapse); tabs: Properties, Profile
+│   │               │   ├── PropertiesTab.tsx # Model metadata; Refs/Sources + Referenced By as cmd+clickable chips; run controls; action buttons
+│   │               │   └── ProfilePanel.tsx  # Column profile stats for a model via dbt show (min/max/nulls/distinct/sample)
 │   │               ├── ModelNode.tsx
 │   │               ├── NewProjectModal.tsx  # dbt init PTY terminal; writes profiles.yml after rescan
 │   │               └── DagFilterBar.tsx     # filter bar: text selector + dropdown pills + Clear + node count
@@ -121,7 +131,7 @@ dbt-ui/
 
 ## Database Schema
 
-10 tables, all in `backend/app/db/models.py`:
+11 tables, all in `backend/app/db/models.py`:
 
 ```
 projects
@@ -203,6 +213,19 @@ global_profile_vars
   key           TEXT(255)
   value         TEXT
   UNIQUE (profile_id, key)
+
+drift_snapshots
+  id              INTEGER PK
+  project_id      INTEGER FK→projects (CASCADE)
+  started_at      DATETIME
+  finished_at     DATETIME (nullable)
+  status          TEXT(32)   -- running | done | error
+  target          TEXT(255) (nullable)  -- dbt target used during the scan
+  total_models    INTEGER    -- number of eligible models
+  checked_models  INTEGER    -- models processed so far (progress)
+  results_json    TEXT       -- JSON array of ModelDriftResult objects
+  error_message   TEXT (nullable)
+  -- Interrupted snapshots (status='running') are reset to 'error' on server restart
 ```
 
 ---
@@ -230,9 +253,17 @@ DELETE /api/projects/{id}/models/{unique_id}
 POST   /api/projects/{id}/compile
 GET    /api/projects/{id}/models/{unique_id}/compiled    on-demand compile + return compiled SQL
 POST   /api/projects/{id}/models/{unique_id}/show        run dbt show, return rows
+POST   /api/projects/{id}/models/{unique_id}/profile    run dbt show (full table), return column profile stats
 GET    /api/projects/{id}/models/{unique_id}/sql
 PUT    /api/projects/{id}/models/{unique_id}/sql
 GET    /api/projects/{id}/column-lineage                 column-level lineage graph parsed from manifest.json
+
+POST   /api/projects/{id}/debug                          run dbt debug, return structured check results + raw log
+GET    /api/projects/{id}/debug/last                     get result of the most recent debug run (from cache)
+
+POST   /api/projects/{id}/drift                          start async schema drift scan (202); returns DriftSnapshot
+GET    /api/projects/{id}/drift                          get the latest DriftSnapshot for a project
+GET    /api/projects/{id}/drift/{snapshot_id}            get a specific DriftSnapshot by id
 
 POST   /api/projects/{id}/run
 POST   /api/projects/{id}/build
@@ -355,6 +386,11 @@ Each SSE client gets its own queue. `publish` is non-blocking (`put_nowait`); ev
 | `git_log` | `git/runner.py` | Appends push/pull output line to sync log |
 | `git_finished` | `git/runner.py` | Source Control re-fetches status after push/pull |
 | `git_error` | `git/runner.py` | Source Control shows error (e.g. git not on PATH) |
+| `health_check_started` | `debug.py` | Health page shows spinner |
+| `health_check_finished` | `debug.py` | Health page renders check results table |
+| `drift_started` | `drift.py` | Drift panel shows progress bar |
+| `drift_progress` | `drift.py` | Drift panel updates checked/total counter |
+| `drift_finished` | `drift.py` | Drift panel renders column diff results |
 
 ### Init Session Event Types
 
@@ -526,7 +562,55 @@ In the frontend (`Models.tsx`):
 
 Session state (`sessionStorage`) persists open file path, expanded tree nodes, active tab, and last query results across navigation within a browser session.
 
-### 12. File Watching
+### 12. Health Check (dbt debug)
+
+`POST /api/projects/{id}/debug` → `debug.py`:
+1. Loads project env via `load_project_env()` and reads active dbt target
+2. Runs `dbt debug` via `runner.stream(req)` — streams stdout into a buffer
+3. Publishes `health_check_started`; stores raw log output
+4. `dbt/debug_parser.py` → `parse_debug_output()` extracts:
+   - dbt/Python/adapter version strings
+   - Active profiles dir, profile name, target name
+   - Per-check status rows (`ok | fail | warn | info`) for connection, profile YAML, project YAML, etc.
+5. Publishes `health_check_finished` with the full result payload
+6. Result is stored in-memory in a `_cache` dict keyed by project_id; `GET /api/projects/{id}/debug/last` returns the cached result without re-running
+
+`HealthCheckPanel.tsx` (Health → "dbt Health Check" tab):
+- Shows per-check status table (green tick / red x / amber warn / info)
+- Displays version info block and raw log accordion
+
+### 13. Schema Drift
+
+`POST /api/projects/{id}/drift` (202 Accepted) → `drift.py`:
+1. Creates a `DriftSnapshot` DB row with `status=running`
+2. Launches `_run_drift_check()` as a background asyncio task (one per project; concurrent requests return 409)
+3. Reads manifest via `load_manifest()` and filters to eligible models (`is_eligible_for_drift_check` — materialized views and tables only)
+4. For each model:
+   - Runs `dbt show --select <uid> --limit 0 --output json` via `runner.run()` (silent — no bus events)
+   - `parse_show_json()` returns the warehouse column schema
+   - `diff_columns()` compares manifest-declared columns against warehouse columns
+   - Publishes `drift_progress` with `checked / total` counts
+5. Writes all results to `drift_snapshots.results_json` and sets `status=done`; publishes `drift_finished`
+6. `GET /api/projects/{id}/drift` returns the latest snapshot; `GET /api/projects/{id}/drift/{id}` returns a specific one
+
+`DriftPanel.tsx` (Health → "Schema Drift" tab):
+- Triggers scan and polls via SSE for `drift_progress` / `drift_finished`
+- Shows per-model accordion: green (no drift) or red (has drift), with a column-level diff table inside each row
+- Interrupted snapshots (server restart mid-scan) are reset to `status=error` on startup
+
+### 14. Model Column Profile
+
+`POST /api/projects/{id}/models/{unique_id}/profile` → `models.py`:
+1. Runs `dbt show --select <uid> --output json` against the full materialized table via `runner.run()` (silent)
+2. `dbt/profile.py` → `build_column_profile()` computes per-column stats: row count, null count/pct, distinct count, min, max, and up to 5 sample values
+3. Returns `ProfileResponseDto { columns: [ProfileColumnDto] }`
+
+`ProfilePanel.tsx` (SidePane → "Profile" tab):
+- Appears alongside the Properties tab when a model is selected in the SidePane
+- Shows a compact stats table per column (rows, nulls%, distinct, min, max, sample)
+- Only available for models that are materialized (not ephemeral/view on unsupported adapters)
+
+### 15. File Watching
 
 `WatcherManager` runs one `watchfiles.awatch` task per project. Watched paths: `models/`, `tests/`, `seeds/`, `snapshots/`, `macros/`, `analyses/`, `target/`.
 
@@ -616,6 +700,12 @@ task install PYTHON=python3.12
 **Global profiles as reusable env var templates** — `global_profiles` / `global_profile_vars` store named env var sets that are not tied to any project. They serve as templates that can be imported into project profiles, enabling teams to share common variable sets (e.g., a "prod credentials" profile) without duplicating them per project.
 
 **Requirements install in the dbt venv** — `pip install -r <requirements.txt>` targets the pip binary co-located with the `dbt` executable (`venv_pip()`). This ensures packages install into whichever Python environment dbt actually runs in, not the app's own venv. A global path (for shared adapters or tools) and a per-project path (for project-specific packages) are both supported and installed in sequence.
+
+**`runner.run()` for silent invocations** — `DbtRunner.stream()` publishes `run_started`/`run_log`/`run_finished` events to the bus, which opens the Run tab and activates the Execution DAG. Operations like schema drift checks and column profiling run `dbt show` repeatedly and should not appear as user-visible runs. `runner.run()` uses the same per-project lock and env setup but returns `(returncode, stdout, stderr)` without emitting any bus events.
+
+**Schema drift stored in SQLite** — `drift_snapshots` persists the full results_json so the last drift report survives server restarts. A single in-memory `_running` dict (project_id → asyncio.Task) prevents concurrent drift scans per project. Interrupted snapshots are auto-corrected to `status=error` on startup.
+
+**dbt debug result cached in memory** — `dbt debug` is quick (~1s) but re-running it on every page load is unnecessary. The last result is stored in `_cache[project_id]` and served by `GET /debug/last` until explicitly re-triggered. The cache is process-local (no persistence across restarts).
 
 **All dbt commands use the venv binary** — `venv_dbt()` / `venv_pip()` / `venv_python()` in `dbt/venv.py` resolve binaries relative to `backend/.venv/bin/`. This ensures adapter packages installed during setup (e.g. `dbt-snowflake`) are available to every dbt invocation regardless of what's on `$PATH`.
 
