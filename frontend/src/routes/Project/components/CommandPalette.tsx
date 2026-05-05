@@ -138,7 +138,7 @@ function buildProjectCommands(projectId: number, navigate: NavigateFunction): Co
       category: 'project',
       title: 'Check health',
       icon: <HeartPulse size={14} />,
-      onExecute: () => navigate(`${base}/health`),
+      onExecute: () => navigate(`${base}/health?tab=health-check`),
     },
     {
       id: 'proj-freshness',
@@ -146,7 +146,7 @@ function buildProjectCommands(projectId: number, navigate: NavigateFunction): Co
       title: 'Check source freshness',
       icon: <RefreshCw size={14} />,
       onExecute: () => {
-        navigate(`${base}/health`);
+        navigate(`${base}/health?tab=source-freshness`);
         api.freshness.start(projectId);
       },
     },
@@ -156,7 +156,7 @@ function buildProjectCommands(projectId: number, navigate: NavigateFunction): Co
       title: 'Check schema drift',
       icon: <RefreshCw size={14} />,
       onExecute: () => {
-        navigate(`${base}/health`);
+        navigate(`${base}/health?tab=schema-drift`);
         api.drift.start(projectId);
       },
     },

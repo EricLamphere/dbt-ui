@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useParams, useSearchParams } from 'react-router-dom';
 import NavRail from './components/NavRail';
 import HealthCheckPanel from './components/HealthCheckPanel';
 import DriftPanel from './components/DriftPanel';
@@ -17,9 +17,20 @@ export default function HealthPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
   const storageKey = `health-tab:${id}`;
+  const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<HealthTab>(
     () => (sessionStorage.getItem(storageKey) as HealthTab) ?? 'health-check'
   );
+
+  // Honor ?tab= param on initial load and when it changes (e.g. command palette navigates here)
+  useEffect(() => {
+    const tab = searchParams.get('tab') as HealthTab | null;
+    if (tab && TABS.some((t) => t.id === tab)) {
+      setActiveTab(tab);
+      sessionStorage.setItem(storageKey, tab);
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, storageKey, setSearchParams]);
 
   function handleTabChange(tab: HealthTab) {
     sessionStorage.setItem(storageKey, tab);
