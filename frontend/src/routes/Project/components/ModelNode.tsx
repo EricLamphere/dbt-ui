@@ -2,6 +2,7 @@ import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelNode } from '../../../lib/api';
 import { useColumnLineage } from '../lib/columnLineageContext';
+import { bucketFor, badgeClassesFor, COVERAGE_CLASS, type NodeCoverageData } from '../lib/testCoverage';
 
 const STATUS_RING: Record<string, string> = {
   idle: 'ring-gray-700',
@@ -36,11 +37,12 @@ interface Props extends NodeProps {
     model: ModelNode;
     dimmed?: boolean;
     expanded?: boolean;
+    coverage?: NodeCoverageData;
   };
 }
 
 function ModelNodeComponent({ data, selected }: Props) {
-  const { model, dimmed, expanded } = data;
+  const { model, dimmed, expanded, coverage } = data;
   const { activeColumnSels, relatedColumnsMap, onColumnClick, onToggleExpand } = useColumnLineage();
 
   const ring = STATUS_RING[model.status] ?? STATUS_RING.idle;
@@ -68,6 +70,17 @@ function ModelNodeComponent({ data, selected }: Props) {
         <div className="flex items-center justify-between gap-2">
           <span className="text-gray-400 text-xs">{icon}</span>
           <span className="text-[10px] text-gray-500 font-mono truncate flex-1">{model.resource_type}</span>
+          {coverage && model.resource_type === 'model' && hasColumns && (() => {
+            const badge = badgeClassesFor(coverage.stats.percent, hasColumns);
+            return (
+              <span
+                className={`text-[9px] px-1 rounded font-mono shrink-0 ${badge.bg} ${badge.text}`}
+                title={`${coverage.stats.testedColumns}/${coverage.stats.totalColumns} columns tested`}
+              >
+                {badge.label}
+              </span>
+            );
+          })()}
           <span className={`w-2 h-2 rounded-full shrink-0 ${dot}`} />
         </div>
 
@@ -106,6 +119,14 @@ function ModelNodeComponent({ data, selected }: Props) {
             {model.columns.map((col) => {
               const isActive = activeColumnSels.has(`${uid}::${col.name}`);
               const isRelated = !isActive && (relatedColumns?.has(col.name) ?? false);
+              const cvg = coverage?.columnsMap.get(col.name);
+              const bucket = coverage && !isActive && !isRelated ? bucketFor(cvg?.count ?? 0) : null;
+              const cc = bucket ? COVERAGE_CLASS[bucket] : null;
+              const rowTitle = coverage
+                ? cvg
+                  ? `${cvg.count} test${cvg.count !== 1 ? 's' : ''}${cvg.testTypes.length ? ': ' + cvg.testTypes.join(', ') : ''}`
+                  : 'untested'
+                : undefined;
               return (
                 <div
                   key={col.name}
@@ -113,6 +134,7 @@ function ModelNodeComponent({ data, selected }: Props) {
                     e.stopPropagation();
                     onColumnClick(uid, col.name, e.metaKey || e.ctrlKey);
                   }}
+                  title={rowTitle}
                   className={`
                     px-1 py-0.5 cursor-pointer rounded text-[10px] font-mono
                     flex justify-between items-center gap-1
@@ -120,12 +142,17 @@ function ModelNodeComponent({ data, selected }: Props) {
                       ? 'bg-brand-500/20 text-white ring-1 ring-brand-500/40'
                       : isRelated
                         ? 'text-gray-100 font-semibold bg-zinc-700/50 hover:bg-zinc-700'
-                        : 'text-gray-400 hover:bg-zinc-700 hover:text-gray-300'}
+                        : cc
+                          ? `${cc.bg} ${cc.text} hover:brightness-110`
+                          : 'text-gray-400 hover:bg-zinc-700 hover:text-gray-300'}
                   `}
                 >
                   <span className="truncate flex items-center gap-1">
                     {isRelated && (
                       <span className="inline-block w-1.5 h-1.5 rounded-full bg-brand-400/70 shrink-0" />
+                    )}
+                    {!isRelated && cc && (
+                      <span className={`inline-block w-1.5 h-1.5 rounded-full ${cc.dot} shrink-0`} />
                     )}
                     {col.name}
                   </span>
@@ -148,6 +175,7 @@ export default memo(ModelNodeComponent, (prev, next) => {
     prev.selected === next.selected &&
     prev.data.dimmed === next.data.dimmed &&
     prev.data.expanded === next.data.expanded &&
-    prev.data.model === next.data.model
+    prev.data.model === next.data.model &&
+    prev.data.coverage === next.data.coverage
   );
 });

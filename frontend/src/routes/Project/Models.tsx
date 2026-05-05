@@ -26,6 +26,8 @@ import DagFilterBar from './components/DagFilterBar';
 import { computeLayout, NODE_HEIGHT } from './lib/layout';
 import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserializeFilter } from './lib/dagFilter';
 import { ColumnLineageContext, type ColumnLineageContextValue } from './lib/columnLineageContext';
+import { buildCoverageMap, getModelCoverageStats } from './lib/testCoverage';
+import CoverageLegend from './components/CoverageLegend';
 
 type LiveStatus = 'running' | 'success' | 'error' | 'warn';
 
@@ -98,6 +100,7 @@ export default function ModelsPage() {
   const selectedModelKey = `dag-selected-model-${id}`;
   const expandedNodesKey = `dag-expanded-nodes-${id}`;
   const columnSelsKey = `dag-column-sels-${id}`;
+  const coverageKey = `dag-coverage-overlay-${id}`;
 
   const [filter, setFilter] = useState<FilterState>(() => {
     const saved = sessionStorage.getItem(filterKey);
@@ -108,6 +111,18 @@ export default function ModelsPage() {
     setFilter(f);
     sessionStorage.setItem(filterKey, serializeFilter(f));
   }, [filterKey]);
+
+  const [coverageOverlay, setCoverageOverlay] = useState<boolean>(() => {
+    try { return sessionStorage.getItem(coverageKey) === '1'; } catch { return false; }
+  });
+  const handleToggleCoverage = useCallback(() => {
+    setCoverageOverlay((prev) => {
+      const next = !prev;
+      try { sessionStorage.setItem(coverageKey, next ? '1' : '0'); } catch {}
+      return next;
+    });
+  }, [coverageKey]);
+
   const [selectedModels, setSelectedModels] = useState<ModelNode[]>([]);
   const [newModelOpen, setNewModelOpen] = useState(false);
   const [compiling, setCompiling] = useState(false);
@@ -248,6 +263,10 @@ export default function ModelsPage() {
     const liveGraph = applyLiveStatuses(graph, liveStatuses);
     return applyFilter(liveGraph, filter);
   }, [graph, filter, liveStatuses]);
+
+  // Derived from raw graph (not filtered) so coverage reflects all tests.
+  // Recomputes automatically when graph_changed SSE fires and invalidates ['models', id].
+  const coverageMap = useMemo(() => (graph ? buildCoverageMap(graph) : null), [graph]);
 
   // Per-node heights for expanded nodes (used by dagre layout)
   const nodeHeights = useMemo(() => {
@@ -424,7 +443,7 @@ export default function ModelsPage() {
     });
   }, [expandedNodesKey, columnSelsKey]);
 
-  // Sync layout + node-level dimming/expand into React Flow state.
+  // Sync layout + node-level dimming/expand/coverage into React Flow state.
   // Column highlight state is NOT stored in nodes — it lives in context so only
   // nodes that actually need it re-render when selections change.
   useEffect(() => {
@@ -432,7 +451,8 @@ export default function ModelsPage() {
     setNodes((prev) => {
       const prevSelected = new Map(prev.map((n) => [n.id, n.selected ?? false]));
       return layoutNodes.map((n) => {
-        const uid = (n.data?.model as ModelNode | undefined)?.unique_id ?? '';
+        const model = n.data?.model as ModelNode | undefined;
+        const uid = model?.unique_id ?? '';
         return {
           ...n,
           selected: prevSelected.get(n.id) ?? false,
@@ -440,12 +460,18 @@ export default function ModelsPage() {
             ...n.data,
             dimmed: effectiveConnected !== null && !effectiveConnected.has(uid),
             expanded: expandedNodes.has(uid),
+            coverage: coverageOverlay && coverageMap && model
+              ? {
+                  columnsMap: coverageMap.get(uid) ?? new Map(),
+                  stats: getModelCoverageStats(coverageMap, model),
+                }
+              : undefined,
           },
         };
       });
     });
     setEdges(layoutEdges);
-  }, [layoutNodes, layoutEdges, connectedUids, columnConnectedUids, expandedNodes, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [layoutNodes, layoutEdges, connectedUids, columnConnectedUids, expandedNodes, coverageOverlay, coverageMap, setNodes, setEdges]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!selectedModel) return;
@@ -527,6 +553,8 @@ export default function ModelsPage() {
             onRefresh={handleRefreshDag}
             onNewModel={() => setNewModelOpen(true)}
             closeDropdownsSignal={closeDropdownsSignal}
+            coverageOverlay={coverageOverlay}
+            onToggleCoverage={handleToggleCoverage}
           />
 
           {/* React Flow */}
@@ -567,6 +595,11 @@ export default function ModelsPage() {
                   )}
                 </div>
               </Panel>
+              {coverageOverlay && (
+                <Panel position="top-right">
+                  <CoverageLegend />
+                </Panel>
+              )}
               <Background variant={BackgroundVariant.Dots} gap={24} size={1} color="#1f2937" />
               <Controls showInteractive={false} className="!bg-surface-panel !border-gray-800" />
               <MiniMap

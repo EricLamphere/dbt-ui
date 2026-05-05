@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
-import { X, ChevronDown } from 'lucide-react';
+import { X, ChevronDown, FlaskConical } from 'lucide-react';
 import type { GraphDto } from '../../../lib/api';
 import { type FilterState, emptyFilter, isFilterActive, getAvailableFilters } from '../lib/dagFilter';
 
@@ -89,6 +89,8 @@ interface DagFilterBarProps {
   onRefresh: () => void;
   onNewModel: () => void;
   closeDropdownsSignal?: number;
+  coverageOverlay?: boolean;
+  onToggleCoverage?: () => void;
 }
 
 export default function DagFilterBar({
@@ -100,6 +102,8 @@ export default function DagFilterBar({
   onRefresh,
   onNewModel,
   closeDropdownsSignal = 0,
+  coverageOverlay,
+  onToggleCoverage,
 }: DagFilterBarProps) {
   const available = useMemo(
     () => (graph ? getAvailableFilters(graph) : { resourceTypes: [], materializations: [], tags: [], statuses: [] }),
@@ -151,6 +155,22 @@ export default function DagFilterBar({
         onChange={(v) => set('statuses', v)}
         closeSignal={closeDropdownsSignal}
       />
+
+      {/* Coverage overlay toggle */}
+      {onToggleCoverage && (
+        <button
+          onClick={onToggleCoverage}
+          title="Toggle column-level test coverage overlay"
+          className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded border transition-colors shrink-0 ${
+            coverageOverlay
+              ? 'bg-emerald-600/20 border-emerald-500 text-emerald-300'
+              : 'bg-surface-elevated border-gray-700 text-gray-400 hover:border-gray-600 hover:text-gray-300'
+          }`}
+        >
+          <FlaskConical size={12} />
+          Coverage
+        </button>
+      )}
 
       {/* Clear */}
       {anyActive && (

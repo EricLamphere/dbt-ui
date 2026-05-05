@@ -60,7 +60,7 @@ frontend/src/
       components/
         CommandPalette.tsx — VS Code-style palette; nav + project actions + model search
       index.tsx          — Project homepage (README, dbt_project.yml, profiles.yml tabbed viewer)
-      Models.tsx         — React Flow DAG page (/projects/:projectId/models); supports ?model=<uid> deep-link; uses SidePane(page="dag")
+      Models.tsx         — React Flow DAG page (/projects/:projectId/models); supports ?model=<uid> deep-link; uses SidePane(page="dag"); optional test coverage overlay with toggle in DagFilterBar; persists coverage state per-project in sessionStorage
       Docs.tsx           — Native docs browser (folder tree); MacroDetail includes "Try It" section with arg inputs, editable Jinja call textarea, and inline compile button
       FileExplorer/      — File browser + editor; uses SidePane(page="files") with navigation to DAG
       Git/               — Source Control page (VSCode-style SCM): ChangesList, DiffView (Monaco DiffEditor), CommitBox, BranchPicker, HistoryPanel
@@ -74,6 +74,7 @@ frontend/src/
         HealthCheckPanel.tsx — Runs dbt debug; renders structured per-check pass/fail table + version info
         DriftPanel.tsx   — Triggers schema drift scan; renders per-model column diff accordion
         FreshnessPanel.tsx — Triggers dbt source freshness; renders per-source collapsible groups with age, thresholds, and pass/warn/error badges; resizable columns; filter pills
+        CoverageLegend.tsx — Legend panel for test coverage overlay showing 4 buckets (untested/1 test/2 tests/3+ tests); rendered as ReactFlow Panel in top-right when coverage toggle is on
         SidePane/
           index.tsx      — Right collapsible/draggable panel (horizontal drag); tabs: Properties + Profile; props: projectId, model, graph, page, navigation callbacks, onNavigateToFile
           PropertiesTab.tsx — Model metadata; Refs/Sources + Referenced By chips (cmd+clickable → onNavigateToFile); run controls (run/build/test grid); test failures; action buttons
@@ -84,6 +85,8 @@ frontend/src/
           LogPanel.tsx     — Project and API logs
         Header.tsx         — Navigation + ProjectSelectors (Profile/Target dropdowns)
         StatusBadge        — Shared UI
+      lib/
+        testCoverage.ts  — Test coverage utility module; buildCoverageMap(), getModelCoverageStats(), bucketFor(), badgeClassesFor(); types: ColumnCoverage, CoverageMap, ModelCoverageStats, NodeCoverageData, CoverageBucket; derives coverage data client-side from GraphDto
   components/
     DataTable.tsx   — Shared table component (sticky header, row numbers, keyboard nav, copy); use for ALL tabular data
 ```

@@ -78,6 +78,26 @@ Four dropdown pills let you filter by:
 
 Filters within a dropdown are **OR** (any match). Filters between dropdowns are **AND** (all must match). This means "Type: model AND Status: error" shows only failed models.
 
+### Test coverage overlay
+
+Click the **Coverage** button (beaker icon) in the filter bar to toggle an optional overlay showing per-column test coverage.
+
+When the overlay is active:
+- **Model headers** display a badge showing the percentage of schema-defined columns with at least one test:
+  - Red (0% coverage)
+  - Amber (1–66% coverage)
+  - Light emerald (67–99% coverage)
+  - Bright emerald (100% coverage)
+- **Expanded column rows** are color-coded by test count:
+  - Gray — untested (0 tests)
+  - Light green — low coverage (1 test)
+  - Medium green — medium coverage (2 tests)
+  - Bright green — high coverage (3+ tests)
+- Hover over a column row to see the exact test count and test type names (e.g., "uniqueness", "not_null")
+- A **legend** appears in the top-right corner showing all four coverage buckets
+
+Coverage data is derived client-side from the full DAG (not filtered) — the overlay reflects all tests even if you've applied other filters. The toggle state persists across page reloads via sessionStorage.
+
 ### Clearing filters
 
 Click **Clear** in the filter bar to reset all filters and return to the full graph.

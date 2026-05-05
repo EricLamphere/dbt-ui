@@ -94,11 +94,13 @@ dbt-ui/
 │   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet overflow-auto>); global ⌘K listener; CommandPaletteContext
 │   │           ├── lib/
 │   │           │   └── commandPaletteContext.tsx # React context (CommandPaletteContext) + useCommandPalette() hook
+│   │       │   └── testCoverage.ts # Test coverage utility; buildCoverageMap(), getModelCoverageStats(), bucketFor(), badgeClassesFor(); derives per-column test counts
 │   │           ├── components/
 │   │           │   └── CommandPalette.tsx # VS Code-style palette (z-[60]); nav + project actions + model search
 │   │           ├── index.tsx            # Project home: tiles + tabbed README/dbt_project.yml/profiles.yml viewer
 │   │           ├── Models.tsx           # React Flow DAG with real-time run overlays; ?model= deep-link; SidePane; DagFilterBar
-│   │           │                        #   DagFilterBar: text selector (+model, tag:x), Type/Materialization/Tag/Status dropdowns
+│   │           │                        #   DagFilterBar: text selector (+model, tag:x), Type/Materialization/Tag/Status dropdowns; optional Coverage overlay
+│   │           │                        #   Coverage: per-column test count heatmap; derives from GraphDto client-side; persists toggle state per-project
 │   │           ├── Docs.tsx             # Native docs browser (folder tree)
 │   │           ├── Environment.tsx      # Env vars + profiles
 │   │           ├── InitScripts.tsx      # Init pipeline management
@@ -122,7 +124,8 @@ dbt-ui/
 │   │               │   └── ProfilePanel.tsx  # Column profile stats for a model via dbt show (min/max/nulls/distinct/sample)
 │   │               ├── ModelNode.tsx
 │   │               ├── NewProjectModal.tsx  # dbt init PTY terminal; writes profiles.yml after rescan
-│   │               └── DagFilterBar.tsx     # filter bar: text selector + dropdown pills + Clear + node count
+│   │               ├── DagFilterBar.tsx     # filter bar: text selector + dropdown pills + Clear + node count
+│   │               ├── CoverageLegend.tsx  # Test coverage legend; shows 4 coverage buckets (untested/1 test/2 tests/3+ tests) rendered as ReactFlow Panel
 │   ├── vite.config.ts               # Dev proxy → :8001; prod build output
 │   └── tailwind.config.ts
 ├── docs/
