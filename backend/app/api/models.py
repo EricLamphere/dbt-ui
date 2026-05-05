@@ -4,6 +4,7 @@ import time
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
@@ -13,6 +14,7 @@ from app.db.engine import get_session
 from app.db.models import ModelStatus, Project
 from app.dbt.manifest import Manifest, ModelNode, load_manifest
 from app.dbt.column_lineage import build_column_lineage, ColumnRef
+from app.dbt.runner import RunRequest, runner
 from app.dbt.show_parser import parse_show_json
 from app.logs.project_logger import append_project_log
 
@@ -57,6 +59,7 @@ class ModelDto(BaseModel):
     test_metadata_name: str | None = None
     column_name: str | None = None
     attached_node: str | None = None
+    patch_path: str | None = None
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -101,6 +104,7 @@ def _node_to_dto(node: ModelNode, status: ModelStatus | None) -> ModelDto:
         test_metadata_name=node.test_metadata_name,
         column_name=node.column_name,
         attached_node=node.attached_node,
+        patch_path=node.patch_path,
     )
 
 
@@ -349,7 +353,6 @@ async def show_model(
     model_name = parts[-2] if resource_type == "test" and len(parts) >= 4 else parts[-1]
     limit = max(1, min(dto.limit, 5000))
     from app.api.init import load_project_env
-    from app.dbt.runner import RunRequest, runner
     env = await load_project_env(project_id)
     target_val = env.get("DBT_TARGET")
     target_args: tuple[str, ...] = ("--target", target_val) if target_val else ()
@@ -413,7 +416,6 @@ async def profile_model(
     session: AsyncSession = Depends(get_session),
 ) -> ProfileResponseDto:
     from app.dbt.profile import ProfileColumnSpec, build_profile_sql, numeric_or_temporal
-    from app.dbt.runner import RunRequest, runner
     from app.api.init import load_project_env
 
     project = await session.get(Project, project_id)
@@ -543,6 +545,102 @@ async def profile_model(
         duration_ms=duration_ms,
         target=target_val,
     )
+
+
+class PatchDescriptionDto(BaseModel):
+    description: str
+
+
+@router.patch("/{project_id}/models/{unique_id:path}/description")
+async def patch_model_description(
+    project_id: int,
+    unique_id: str,
+    dto: PatchDescriptionDto,
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, bool]:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+
+    loop = asyncio.get_event_loop()
+    manifest = await loop.run_in_executor(
+        None, load_manifest, Path(project.path) / "target" / "manifest.json"
+    )
+    if manifest is None:
+        raise HTTPException(status_code=404, detail="manifest not found — run dbt compile first")
+
+    node = next((n for n in manifest.nodes if n.unique_id == unique_id), None)
+    if node is None:
+        raise HTTPException(status_code=404, detail="model not found")
+
+    if node.patch_path is None:
+        raise HTTPException(
+            status_code=422,
+            detail="model has no schema file — create one in the File Explorer first",
+        )
+
+    # patch_path format: "package_name://models/path/schema.yml"
+    relative_path = node.patch_path.split("://", 1)[-1]
+    schema_file = Path(project.path) / relative_path
+
+    if not schema_file.is_file():
+        raise HTTPException(status_code=404, detail=f"schema file not found: {relative_path}")
+
+    try:
+        raw_text = schema_file.read_text(encoding="utf-8")
+        data: dict = yaml.safe_load(raw_text) or {}
+    except (OSError, yaml.YAMLError) as exc:
+        raise HTTPException(status_code=500, detail=f"failed to read schema file: {exc}")
+
+    models_list: list = data.get("models") or []
+    entry = next((m for m in models_list if isinstance(m, dict) and m.get("name") == node.name), None)
+    if entry is None:
+        models_list.append({"name": node.name, "description": dto.description})
+        data["models"] = models_list
+    else:
+        entry["description"] = dto.description
+
+    try:
+        schema_file.write_text(
+            yaml.dump(data, allow_unicode=True, default_flow_style=False, sort_keys=False),
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"failed to write schema file: {exc}")
+
+    asyncio.create_task(_compile_model(project_id, project.path, node.name))
+    return {"ok": True}
+
+
+async def _compile_model(project_id: int, project_path: str, model_name: str) -> None:
+    from app.events.bus import Event, bus
+    from app.api.init import load_project_env
+
+    topic = f"project:{project_id}"
+    env = await load_project_env(project_id)
+    project = Path(project_path)
+
+    req = RunRequest(
+        project_id=project_id,
+        project_path=project,
+        command="compile",
+        select=model_name,
+        env=env,
+    )
+
+    await bus.publish(Event(topic=topic, type="compile_started", data={}))
+    append_project_log(project_path, f">>> dbt compile --select {model_name}", project_id)
+    ok = False
+    try:
+        async for _kind, _line in runner.stream(req):
+            pass
+        ok = True
+    except Exception:
+        pass
+    append_project_log(project_path, f"<<< dbt compile --select {model_name} {'OK' if ok else 'FAILED'}", project_id)
+    await bus.publish(Event(topic=topic, type="compile_finished", data={"ok": ok}))
+    if ok:
+        await bus.publish(Event(topic=topic, type="graph_changed", data={}))
 
 
 async def _compile_project(project_id: int, project_path: str) -> None:

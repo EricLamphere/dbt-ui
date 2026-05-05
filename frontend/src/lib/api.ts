@@ -92,6 +92,7 @@ export interface ModelNode {
   test_metadata_name: string | null;
   column_name: string | null;
   attached_node: string | null;
+  patch_path: string | null;
 }
 
 export interface ProfileColumn {
@@ -448,6 +449,8 @@ export const api = {
       post<{ columns: string[]; rows: unknown[][] }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/show`, { limit }),
     profile: (projectId: number, uniqueId: string) =>
       post<ProfileResponse>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/profile`),
+    patchDescription: (projectId: number, uniqueId: string, description: string) =>
+      patch<{ ok: boolean }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/description`, { description }),
   },
   runs: {
     run: (projectId: number, model: string, mode: string, opts?: RunOpts, select?: string) =>

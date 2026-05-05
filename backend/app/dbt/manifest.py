@@ -34,6 +34,9 @@ class ModelNode:
     test_metadata_name: str | None = None  # e.g. "unique", "not_null", "relationships"
     column_name: str | None = None  # column the test applies to, if any
     attached_node: str | None = None  # unique_id of the model this test is attached to
+    # path to the schema YAML file that defines this node's description/columns
+    # format: "package_name://models/subdir/schema.yml"; None if no schema file exists
+    patch_path: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +57,7 @@ class ModelNode:
             "test_metadata_name": self.test_metadata_name,
             "column_name": self.column_name,
             "attached_node": self.attached_node,
+            "patch_path": self.patch_path,
         }
 
 
@@ -106,6 +110,7 @@ def _extract_node(unique_id: str, raw: dict[str, Any]) -> ModelNode | None:
         test_metadata_name=test_meta.get("name") if resource_type == "test" else None,
         column_name=raw.get("column_name") if resource_type == "test" else None,
         attached_node=raw.get("attached_node") if resource_type == "test" else None,
+        patch_path=raw.get("patch_path"),
     )
 
 

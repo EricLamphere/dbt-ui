@@ -1,5 +1,6 @@
-import { useReducer, useState } from 'react';
-import { BookOpen, Play, Hammer, FlaskConical, Layers, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useReducer, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import { BookOpen, Play, Hammer, FlaskConical, Layers, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, type ModelNode, type GraphDto, type RunOpts } from '../../../../lib/api';
 
 type RunCommand = 'run' | 'build' | 'test';
@@ -226,6 +227,46 @@ export function PropertiesTab({
   const [loading, setLoading] = useState<RunCommand | null>(null);
   const [opts, dispatchOpts] = useReducer(runOptionsReducer, undefined, runOptionsInitial);
 
+  const qc = useQueryClient();
+  const [descEditing, setDescEditing] = useState(false);
+  const [descDraft, setDescDraft] = useState('');
+  const [descSaving, setDescSaving] = useState(false);
+  const [descError, setDescError] = useState<string | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const startEditDesc = () => {
+    setDescDraft(model?.description ?? '');
+    setDescError(null);
+    setDescEditing(true);
+    setTimeout(() => textareaRef.current?.focus(), 0);
+  };
+
+  const cancelEditDesc = () => {
+    setDescEditing(false);
+    setDescError(null);
+  };
+
+  // Reset edit state when the selected model changes
+  useEffect(() => {
+    setDescEditing(false);
+    setDescError(null);
+  }, [model?.unique_id]);
+
+  const saveDesc = async () => {
+    if (!model) return;
+    setDescSaving(true);
+    setDescError(null);
+    try {
+      await api.models.patchDescription(projectId, model.unique_id, descDraft.trim());
+      setDescEditing(false);
+      qc.invalidateQueries({ queryKey: ['graph', projectId] });
+    } catch (err) {
+      setDescError(err instanceof Error ? err.message : 'Failed to save description');
+    } finally {
+      setDescSaving(false);
+    }
+  };
+
   const handleRun = async (cmd: RunCommand) => {
     if (!model) return;
     setLoading(cmd);
@@ -274,10 +315,61 @@ export function PropertiesTab({
         </p>
       )}
 
-      {/* Description */}
-      {model.description && (
+      {/* Description — click-to-edit for models */}
+      {(model.description || model.resource_type === 'model') && (
         <Row label="Description">
-          <span className="text-gray-300 leading-relaxed">{model.description}</span>
+          {model.resource_type === 'model' ? (
+            descEditing ? (
+              <div className="flex flex-col gap-1.5">
+                <textarea
+                  ref={textareaRef}
+                  value={descDraft}
+                  onChange={(e) => setDescDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') cancelEditDesc();
+                  }}
+                  disabled={descSaving}
+                  rows={4}
+                  className="w-full bg-surface-elevated border border-zinc-700 rounded px-2 py-1.5 text-xs text-gray-200 resize-y focus:outline-none focus:border-brand-500 disabled:opacity-50"
+                  placeholder="Describe this model…"
+                />
+                {descError && (
+                  <p className="text-[10px] text-red-400">{descError}</p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={saveDesc}
+                    disabled={descSaving}
+                    className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-50"
+                  >
+                    {descSaving && <Loader2 size={10} className="animate-spin" />}
+                    Save
+                  </button>
+                  <button
+                    onClick={cancelEditDesc}
+                    disabled={descSaving}
+                    className="px-2 py-0.5 rounded text-[10px] text-gray-400 hover:text-gray-200 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={startEditDesc}
+                className="group text-left w-full flex items-start gap-1.5 hover:text-gray-100"
+              >
+                {model.description ? (
+                  <span className="text-gray-300 leading-relaxed">{model.description}</span>
+                ) : (
+                  <span className="text-gray-600 italic">Add description…</span>
+                )}
+                <Pencil size={10} className="mt-0.5 shrink-0 text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </button>
+            )
+          ) : (
+            <span className="text-gray-300 leading-relaxed">{model.description}</span>
+          )}
         </Row>
       )}
 
