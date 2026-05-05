@@ -222,6 +222,7 @@ export interface InitStepDto {
   is_base: boolean;
   enabled: boolean;
   script_path: string | null;
+  captured_vars: string[];
 }
 
 export interface SqlDto {
@@ -516,6 +517,8 @@ export const api = {
       post<InitStepDto>(`/projects/${projectId}/init/steps/link`, { path }),
     runStep: (projectId: number, stepName: string) =>
       post<void>(`/projects/${projectId}/init/run-step`, { step_name: stepName }),
+    setCapturedVars: (projectId: number, name: string, captured_vars: string[]) =>
+      put<InitStepDto>(`/projects/${projectId}/init/steps/${encodeURIComponent(name)}/captured-vars`, { captured_vars }),
     getEnvVars: (projectId: number) =>
       get<EnvVarDto[]>(`/projects/${projectId}/init/env`),
     setEnvVar: (projectId: number, key: string, value: string) =>

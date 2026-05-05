@@ -32,12 +32,29 @@ class InitStepDto(BaseModel):
     is_base: bool
     enabled: bool
     script_path: str | None
+    captured_vars: list[str]
 
 
 class InitStepCreateDto(BaseModel):
     name: str
     content: str
     order: int | None = None
+
+
+def _parse_captured_vars(raw: str) -> list[str]:
+    return [v.strip() for v in raw.split(",") if v.strip()]
+
+
+def _row_to_dto(r: "InitStep") -> InitStepDto:
+    return InitStepDto(
+        id=r.id,
+        name=r.name,
+        order=r.order,
+        is_base=r.is_base,
+        enabled=r.enabled,
+        script_path=r.script_path,
+        captured_vars=_parse_captured_vars(r.captured_vars),
+    )
 
 
 class InitReorderDto(BaseModel):
@@ -149,17 +166,7 @@ async def get_steps(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
     rows = await _sync_steps_from_disk(session, project)
-    return [
-        InitStepDto(
-            id=r.id,
-            name=r.name,
-            order=r.order,
-            is_base=r.is_base,
-            enabled=r.enabled,
-            script_path=r.script_path,
-        )
-        for r in rows
-    ]
+    return [_row_to_dto(r) for r in rows]
 
 
 @router.post("/{project_id}/init/steps", response_model=InitStepDto)
@@ -198,14 +205,7 @@ async def post_step(
         row.script_path = str(script.path)
     await session.commit()
     await session.refresh(row)
-    return InitStepDto(
-        id=row.id,
-        name=row.name,
-        order=row.order,
-        is_base=row.is_base,
-        enabled=row.enabled,
-        script_path=row.script_path,
-    )
+    return _row_to_dto(row)
 
 
 @router.delete("/{project_id}/init/steps/{name}")
@@ -264,10 +264,35 @@ async def toggle_step(
     row.enabled = dto.enabled
     await session.commit()
     await session.refresh(row)
-    return InitStepDto(
-        id=row.id, name=row.name, order=row.order,
-        is_base=row.is_base, enabled=row.enabled, script_path=row.script_path,
+    return _row_to_dto(row)
+
+
+class InitStepCapturedVarsDto(BaseModel):
+    captured_vars: list[str]
+
+
+@router.put("/{project_id}/init/steps/{name}/captured-vars", response_model=InitStepDto)
+async def put_captured_vars(
+    project_id: int,
+    name: str,
+    dto: InitStepCapturedVarsDto,
+    session: AsyncSession = Depends(get_session),
+) -> InitStepDto:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    display = f"custom: {name}"
+    result = await session.execute(
+        select(InitStep).where(InitStep.project_id == project_id, InitStep.name == display)
     )
+    row = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="step not found")
+    valid = [v.strip() for v in dto.captured_vars if v.strip()]
+    row.captured_vars = ",".join(valid)
+    await session.commit()
+    await session.refresh(row)
+    return _row_to_dto(row)
 
 
 @router.get("/{project_id}/init/steps/{name}/content")
@@ -383,10 +408,7 @@ async def link_step(
         row.script_path = str(candidate)
     await session.commit()
     await session.refresh(row)
-    return InitStepDto(
-        id=row.id, name=row.name, order=row.order,
-        is_base=row.is_base, enabled=row.enabled, script_path=row.script_path,
-    )
+    return _row_to_dto(row)
 
 
 @router.post("/{project_id}/init/reorder", response_model=list[InitStepDto])
@@ -609,8 +631,10 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                     ["bash", "-euo", "pipefail", step.script_path], script_dir, env
                 )
                 ok = return_code == 0
-                if ok:
-                    new_exports = await _capture_script_exports(step.script_path, script_dir, env)
+                wanted = _parse_captured_vars(step.captured_vars)
+                if ok and wanted:
+                    all_exports = await _capture_script_exports(step.script_path, script_dir, env)
+                    new_exports = {k: v for k, v in all_exports.items() if k in wanted}
                     if new_exports:
                         from app.db.engine import SessionLocal
                         async with SessionLocal() as _exp_session:
@@ -627,11 +651,17 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                                 else:
                                     row.value = value
                             await _exp_session.commit()
-                        # Merge into the running env so subsequent steps see the new vars
                         env.update(new_exports)
                         append_project_log(
                             project_path,
                             f"[init] captured {len(new_exports)} exported var(s): {', '.join(new_exports.keys())}",
+                            project_id,
+                        )
+                    missing = [k for k in wanted if k not in all_exports]
+                    if missing:
+                        append_project_log(
+                            project_path,
+                            f"[init] warning: var(s) not found after script: {', '.join(missing)}",
                             project_id,
                         )
             else:

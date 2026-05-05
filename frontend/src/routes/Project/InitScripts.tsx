@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api, type InitStepDto } from '../../lib/api';
@@ -126,6 +126,14 @@ export default function InitScriptsPage() {
     mutationFn: (name: string) => {
       const bareName = name.replace(/^custom:\s*/, '');
       return api.init.deleteStep(id, bareName);
+    },
+    onSuccess: invalidate,
+  });
+
+  const capturedVarsMutation = useMutation({
+    mutationFn: ({ name, vars }: { name: string; vars: string[] }) => {
+      const bareName = name.replace(/^custom:\s*/, '');
+      return api.init.setCapturedVars(id, bareName, vars);
     },
     onSuccess: invalidate,
   });
@@ -274,6 +282,7 @@ export default function InitScriptsPage() {
                 onRunStep={() => api.init.runStep(id, step.name)}
                 onEdit={!step.is_base ? () => setEditStep(step) : undefined}
                 onDelete={!step.is_base ? () => handleDelete(step) : undefined}
+                onCapturedVarsChange={(vars) => capturedVarsMutation.mutate({ name: step.name, vars })}
                 onDragStart={() => handleDragStart(idx)}
                 onDragOver={(e) => handleDragOver(e, idx)}
                 onDrop={handleDrop}
@@ -347,6 +356,7 @@ interface StepTileProps {
   onRunStep: () => void;
   onEdit?: () => void;
   onDelete?: () => void;
+  onCapturedVarsChange: (vars: string[]) => void;
   onDragStart: () => void;
   onDragOver: (e: React.DragEvent) => void;
   onDrop: () => void;
@@ -354,12 +364,31 @@ interface StepTileProps {
   isDragging: boolean;
 }
 
-function StepTile({ step, projectId, runState, onToggle, onRunStep, onEdit, onDelete, onDragStart, onDragOver, onDrop, onDragEnd, isDragging }: StepTileProps) {
+function StepTile({ step, projectId, runState, onToggle, onRunStep, onEdit, onDelete, onCapturedVarsChange, onDragStart, onDragOver, onDrop, onDragEnd, isDragging }: StepTileProps) {
   const displayName = step.name.replace(/^(base|custom):\s*/, '');
   const prefix = step.is_base ? 'base' : 'custom';
   const status: StepStatus = runState?.status ?? 'idle';
   const [preview, setPreview] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [newVar, setNewVar] = useState('');
+  const [varInputOpen, setVarInputOpen] = useState(false);
+  const varInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (varInputOpen) varInputRef.current?.focus();
+  }, [varInputOpen]);
+
+  const handleAddVar = useCallback(() => {
+    const trimmed = newVar.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_');
+    if (!trimmed || step.captured_vars.includes(trimmed)) { setNewVar(''); setVarInputOpen(false); return; }
+    onCapturedVarsChange([...step.captured_vars, trimmed]);
+    setNewVar('');
+    setVarInputOpen(false);
+  }, [newVar, step.captured_vars, onCapturedVarsChange]);
+
+  const handleRemoveVar = useCallback((v: string) => {
+    onCapturedVarsChange(step.captured_vars.filter((x) => x !== v));
+  }, [step.captured_vars, onCapturedVarsChange]);
 
   useEffect(() => {
     if (step.is_base) {
@@ -440,6 +469,49 @@ function StepTile({ step, projectId, runState, onToggle, onRunStep, onEdit, onDe
         <pre className="text-[11px] text-gray-500 font-mono bg-surface-elevated/60 rounded px-3 py-2 overflow-hidden leading-relaxed max-h-[4.5rem] select-none whitespace-pre-wrap break-all">
           {preview}
         </pre>
+      )}
+
+      {/* Captured variables (custom steps only) */}
+      {!step.is_base && (
+        <div className="flex flex-col gap-1.5 pt-0.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[10px] text-gray-600 font-medium uppercase tracking-wider shrink-0">Captured vars</span>
+            {step.captured_vars.map((v) => (
+              <span
+                key={v}
+                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-surface-elevated border border-gray-700 text-[11px] font-mono text-gray-300"
+              >
+                {v}
+                <button
+                  onClick={() => handleRemoveVar(v)}
+                  className="text-gray-600 hover:text-red-400 transition-colors leading-none"
+                  title="Remove"
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+            {varInputOpen ? (
+              <input
+                ref={varInputRef}
+                value={newVar}
+                onChange={(e) => setNewVar(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '_'))}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleAddVar(); } if (e.key === 'Escape') { setVarInputOpen(false); setNewVar(''); } }}
+                onBlur={handleAddVar}
+                placeholder="VAR_NAME"
+                className="w-28 px-1.5 py-0.5 rounded bg-surface-elevated border border-brand-600 text-[11px] font-mono text-gray-200 placeholder-gray-600 focus:outline-none"
+              />
+            ) : (
+              <button
+                onClick={() => setVarInputOpen(true)}
+                className="text-[10px] text-gray-600 hover:text-brand-400 transition-colors"
+                title="Add a variable to capture"
+              >
+                + add
+              </button>
+            )}
+          </div>
+        </div>
       )}
 
       {/* Action buttons */}

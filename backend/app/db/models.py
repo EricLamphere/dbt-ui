@@ -38,6 +38,7 @@ class InitStep(Base):
     script_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     is_base: Mapped[bool] = mapped_column(default=False)
     enabled: Mapped[bool] = mapped_column(default=True)
+    captured_vars: Mapped[str] = mapped_column(Text, default="")
 
     project: Mapped[Project] = relationship(back_populates="init_steps")
 

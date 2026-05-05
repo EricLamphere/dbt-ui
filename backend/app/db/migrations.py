@@ -103,6 +103,12 @@ async def run_migrations() -> None:
         )
         await session.commit()
 
+        if not await _column_exists(session, "init_steps", "captured_vars"):
+            await session.execute(
+                text("ALTER TABLE init_steps ADD COLUMN captured_vars TEXT NOT NULL DEFAULT ''")
+            )
+            await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()
