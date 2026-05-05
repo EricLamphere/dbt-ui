@@ -54,7 +54,11 @@ frontend/src/
   routes/
     Home.tsx      — Project list (respects DBT_UI_PROJECTS_PATH configured banner)
     Project/
-      ProjectLayout.tsx  — Shared layout wrapper (outlet + BottomPane; outlet has overflow-auto for scrolling)
+      ProjectLayout.tsx  — Shared layout wrapper (outlet + BottomPane; outlet has overflow-auto for scrolling); global ⌘K listener
+      lib/
+        commandPaletteContext.tsx — React context + useCommandPalette() hook for open/close
+      components/
+        CommandPalette.tsx — VS Code-style palette; nav + project actions + model search
       index.tsx          — Project homepage (README, dbt_project.yml, profiles.yml tabbed viewer)
       Models.tsx         — React Flow DAG page (/projects/:projectId/models); supports ?model=<uid> deep-link; uses SidePane(page="dag")
       Docs.tsx           — Native docs browser (folder tree); MacroDetail includes "Try It" section with arg inputs, editable Jinja call textarea, and inline compile button

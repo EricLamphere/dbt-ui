@@ -91,7 +91,11 @@ dbt-ui/
 │   │   └── routes/
 │   │       ├── Home.tsx             # Project list, search, rescan, new project modal, global settings modal
 │   │       └── Project/
-│   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet overflow-auto>)
+│   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet overflow-auto>); global ⌘K listener; CommandPaletteContext
+│   │           ├── lib/
+│   │           │   └── commandPaletteContext.tsx # React context (CommandPaletteContext) + useCommandPalette() hook
+│   │           ├── components/
+│   │           │   └── CommandPalette.tsx # VS Code-style palette (z-[60]); nav + project actions + model search
 │   │           ├── index.tsx            # Project home: tiles + tabbed README/dbt_project.yml/profiles.yml viewer
 │   │           ├── Models.tsx           # React Flow DAG with real-time run overlays; ?model= deep-link; SidePane; DagFilterBar
 │   │           │                        #   DagFilterBar: text selector (+model, tag:x), Type/Materialization/Tag/Status dropdowns
@@ -631,6 +635,35 @@ Session state (`sessionStorage`) persists open file path, expanded tree nodes, a
 
 - `manifest.json` / `run_results.json` changes → `graph_changed`
 - `.sql` / `.yml` / `.yaml` changes → `files_changed`
+
+### 16. Command Palette
+
+`ProjectLayout.tsx` listens for ⌘K / Ctrl+K globally and opens `CommandPalette.tsx` (portal-rendered at z-[60]). The palette provides:
+
+**Navigation commands** (always visible when query is empty):
+- Go to [page name] for each project route (DAG, Files, Docs, Workspace, Git, Environment, Init, Health)
+
+**Project actions** (always visible):
+- Run / Build / Test all models
+- Generate docs
+- Check health → navigates to `/health?tab=health-check` and runs `dbt debug`
+- Check source freshness → navigates to `/health?tab=source-freshness` and triggers freshness scan
+- Check schema drift → navigates to `/health?tab=schema-drift` and triggers drift scan
+
+**Model commands** (appear when searching):
+- Show DAG, Open file, View docs, Run, Run upstream/downstream, Build, Test [model name]
+
+Behavior:
+- ⌘K with empty query shows Navigation + Project sections only (50 results max)
+- Typing filters all sections with substring match, ranked: nav → project → model
+- Arrow keys navigate, Enter executes, Escape or backdrop click closes
+- Re-pressing ⌘K while open closes the palette
+
+**Health page `?tab=` deep-link**:
+- `/health?tab=health-check` activates the dbt Health Check tab
+- `/health?tab=source-freshness` activates the Source Freshness tab
+- `/health?tab=schema-drift` activates the Schema Drift tab
+- Links from the command palette use these params to pre-select the tab even if the page is already mounted
 
 ---
 

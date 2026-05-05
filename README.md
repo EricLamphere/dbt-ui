@@ -18,6 +18,7 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 - **Environment profiles** — define named env var sets globally and apply them per-project; switch profiles and dbt targets from the header
 - **Interactive project creation** — `dbt init` runs in a full in-browser terminal; adapter install, profiles.yml setup, and project discovery all handled automatically
 - **Column-level lineage** — click any column in the DAG to trace its data flow upstream and downstream across models; edges highlight the exact columns that feed into each transformation
+- **Command palette** — ⌘K / Ctrl+K to open a VS Code-style command palette for quick navigation (go to any page), running dbt commands, and searching models
 - **Source control (Git)** — VSCode-style source control panel: view changed files, stage/unstage, Monaco diff viewer, commit, push/pull with live streaming output, branch switch/create, and commit history
 - **SQL Workspace** — standalone SQL scratchpad with a file tree, Monaco editor, Compiled SQL tab (via `dbt compile --inline`), and a resizable results pane (via `dbt show --inline`); files are saved under a configurable `workspace/` folder inside the project; Cmd+Enter runs, Cmd+S saves
 - **Autocomplete** - Autocomplete on refs, sources, and documented columns to make writing and running jinja SQL easier than ever
