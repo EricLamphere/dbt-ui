@@ -594,6 +594,8 @@ export const api = {
       get<GitDiffDto>(`/projects/${projectId}/git/diff?path=${encodeURIComponent(path)}&staged=${staged}`),
     fileAtHead: (projectId: number, path: string) =>
       get<GitFileAtHeadDto>(`/projects/${projectId}/git/file-at-head?path=${encodeURIComponent(path)}`),
+    fileWorking: (projectId: number, path: string) =>
+      get<GitFileAtHeadDto>(`/projects/${projectId}/git/file-working?path=${encodeURIComponent(path)}`),
     stage: (projectId: number, paths: string[]) =>
       post<GitAcceptedDto>(`/projects/${projectId}/git/stage`, { paths }),
     unstage: (projectId: number, paths: string[]) =>

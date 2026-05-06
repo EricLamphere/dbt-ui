@@ -65,16 +65,6 @@ export default function GitPage() {
   const selectedChange: GitFileChange | null =
     status?.changes.find((c) => c.path === selectedPath) ?? null;
 
-  // git paths are relative to repo_root; files API expects paths relative to project root.
-  // Strip the project_subpath prefix so they match when the repo root is above the project.
-  const toProjectRelativePath = (gitPath: string): string => {
-    const subpath = status?.project_subpath;
-    if (subpath && gitPath.startsWith(subpath + '/')) {
-      return gitPath.slice(subpath.length + 1);
-    }
-    return gitPath;
-  };
-
   const { data: headData, isLoading: headLoading } = useQuery({
     queryKey: ['git', 'fileAtHead', id, selectedPath],
     queryFn: () => api.git.fileAtHead(id, selectedPath!),
@@ -84,11 +74,10 @@ export default function GitPage() {
   // Don't fetch working tree content when the file is deleted there (worktree_status 'D')
   // or when the file is untracked-deleted — it won't exist on disk.
   const workingTreeDeleted = selectedChange?.worktree_status === 'D';
-  const projectRelativePath = selectedPath ? toProjectRelativePath(selectedPath) : null;
   const { data: workingData, isLoading: workingLoading } = useQuery({
-    queryKey: ['files', 'content', id, projectRelativePath],
-    queryFn: () => api.files.getContent(id, projectRelativePath!),
-    enabled: projectRelativePath !== null && selectedChange !== null && !workingTreeDeleted,
+    queryKey: ['git', 'fileWorking', id, selectedPath],
+    queryFn: () => api.git.fileWorking(id, selectedPath!),
+    enabled: selectedPath !== null && selectedChange !== null && !workingTreeDeleted,
   });
 
   // ---- SSE ----

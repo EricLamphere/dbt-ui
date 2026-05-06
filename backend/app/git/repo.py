@@ -31,10 +31,21 @@ class BranchInfo:
 
 
 def find_repo_root(start: Path) -> Path | None:
-    """Walk upward from start looking for a .git directory or file."""
+    """Walk upward from start looking for a valid git repository root.
+
+    Accepts a .git FILE (gitlink — submodule or worktree) unconditionally.
+    Accepts a .git DIRECTORY only when it contains a HEAD file, so that
+    incomplete/spurious .git directories (e.g. from git-crypt or other tools)
+    are skipped and the walk continues upward.
+    """
     current = start.resolve()
     while True:
-        if (current / ".git").exists():
+        git_path = current / ".git"
+        if git_path.is_file():
+            # Gitlink file — this directory is a valid submodule/worktree root
+            return current
+        if git_path.is_dir() and (git_path / "HEAD").exists():
+            # Proper git repository
             return current
         parent = current.parent
         if parent == current:

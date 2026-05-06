@@ -164,13 +164,19 @@ async def get_git_status(
     expanded: list[FileChange] = []
     for c in changes:
         if c.is_untracked and c.path.endswith("/"):
+            # Skip directories that don't exist on disk — ls-files would emit a warning
+            # to stderr (merged into stdout) that would be misread as a file path.
+            dir_path = repo / c.path.rstrip("/")
+            if not dir_path.is_dir():
+                continue
             rc2, ls_out = await _git(
                 project_id, repo,
                 "ls-files", "--others", "--exclude-standard", "-z", "--", c.path,
             )
             if rc2 == 0 and ls_out.strip("\0"):
                 for file_path in ls_out.split("\0"):
-                    if file_path:
+                    # Filter out git warning/error lines that leak through merged stderr
+                    if file_path and not file_path.lstrip("\n").startswith(("warning:", "error:", "fatal:")):
                         expanded.append(FileChange(path=file_path, index_status="?", worktree_status="?"))
             # If ls-files fails or returns nothing, skip the directory entry entirely
         else:
@@ -243,6 +249,32 @@ async def get_file_at_head(
     rc, content = await _git(project_id, repo, "show", f"HEAD:{path}")
     if rc != 0:
         # New file not yet in HEAD — return empty string so DiffEditor shows blank original
+        content = ""
+    return FileAtHeadDto(path=path, content=content)
+
+
+@router.get("/{project_id}/git/file-working", response_model=FileAtHeadDto)
+async def get_file_working(
+    project_id: int,
+    path: str = Query(...),
+    session: AsyncSession = Depends(get_session),
+) -> FileAtHeadDto:
+    """Read working-tree file content; path is relative to the repo root."""
+    project = await _get_project(project_id, session)
+    repo = _require_repo(project_id, Path(project.path))
+
+    file_path = (repo / path).resolve()
+    try:
+        file_path.relative_to(repo)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="path escapes repo root")
+
+    if not file_path.is_file():
+        return FileAtHeadDto(path=path, content="")
+
+    try:
+        content = file_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
         content = ""
     return FileAtHeadDto(path=path, content=content)
 
