@@ -172,6 +172,20 @@ html[data-theme="light"] {
   stroke: rgb(var(--brand-400) / 1) !important;
 }
 
+/* React Flow Controls — keep icons visible in dark mode */
+.react-flow__controls-button {
+  background-color: #ffffff !important;
+  border-color: #e5e7eb !important;
+  color: #111827 !important;
+  fill: #111827 !important;
+}
+.react-flow__controls-button:hover {
+  background-color: #f3f4f6 !important;
+}
+.react-flow__controls-button svg {
+  fill: #111827 !important;
+}
+
 /* DAG node selection highlight */
 .node-selected {
   background-color: rgb(8 47 73);       /* sky-950 */
