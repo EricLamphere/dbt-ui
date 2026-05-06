@@ -43,8 +43,8 @@ function ProjectRunButtons({ projectId, disabled }: ProjectRunButtonsProps) {
     <div className="flex items-center gap-2">
       <span className="text-xs text-gray-600 mr-1">Full project:</span>
       {btn('Run', 'run', 'border-brand-600 text-brand-400 hover:bg-brand-900/40')}
-      {btn('Build', 'build', 'border-amber-600 text-amber-400 hover:bg-amber-900/40')}
-      {btn('Test', 'test', 'border-emerald-700 text-emerald-400 hover:bg-emerald-900/40')}
+      {btn('Build', 'build', 'border-purple-600 text-purple-400 hover:bg-purple-900/40')}
+      {btn('Test', 'test', 'border-yellow-600 text-yellow-400 hover:bg-yellow-900/40')}
     </div>
   );
 }
@@ -255,8 +255,8 @@ function RunPanelInner({ projectId, graph, onRunStart }: RunPanelProps) {
   const elapsed = `${Math.floor(elapsedSec / 60).toString().padStart(2, '0')}:${(elapsedSec % 60).toString().padStart(2, '0')}`;
   const commandColor =
     runInfo?.command === 'run'   ? 'text-brand-400' :
-    runInfo?.command === 'build' ? 'text-amber-400' :
-    'text-emerald-400';
+    runInfo?.command === 'build' ? 'text-purple-400' :
+    'text-yellow-400';
 
   if (!runInfo) {
     return (
