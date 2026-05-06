@@ -367,6 +367,7 @@ export interface GitFileChange {
 
 export interface GitStatusDto {
   repo_root: string;
+  project_subpath: string;
   branch: GitBranchInfo;
   changes: GitFileChange[];
 }

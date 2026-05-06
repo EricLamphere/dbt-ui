@@ -76,6 +76,7 @@ class BranchInfoDto(BaseModel):
 
 class GitStatusDto(BaseModel):
     repo_root: str
+    project_subpath: str  # path of the dbt project relative to repo_root (empty string when they are the same)
     branch: BranchInfoDto
     changes: list[FileChangeDto]
 
@@ -196,8 +197,15 @@ async def get_git_status(
             oid=b.oid,
         )
 
+    project_path = Path(project.path).resolve()
+    try:
+        project_subpath = str(project_path.relative_to(repo))
+    except ValueError:
+        project_subpath = ""
+
     return GitStatusDto(
         repo_root=str(repo),
+        project_subpath=project_subpath,
         branch=_bi(branch),
         changes=[_fc(c) for c in changes],
     )
