@@ -48,6 +48,20 @@ tasks:
       - open http://localhost:5173 || xdg-open http://localhost:5173 2>/dev/null || true
       - echo "dbt-ui running. Logs in data/logs/. Run 'task stop' to shut down."
 
+  kill:ports:
+    desc: Kill any processes using the backend (8001) and frontend (5173) ports
+    cmds:
+      - |
+        for port in 8001 5173; do
+          pids=$(lsof -ti tcp:$port 2>/dev/null)
+          if [ -n "$pids" ]; then
+            echo "$pids" | xargs kill -9
+            echo "Killed processes on port $port: $pids"
+          else
+            echo "No process on port $port"
+          fi
+        done
+
   stop:
     desc: Stop background dbt-ui daemons started by task start:bg
     cmds:
