@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Plus, Trash2, Check } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, Trash2, Check, X } from 'lucide-react';
 import { api, type EnvVarDto, type Project } from '../../lib/api';
 import NavRail from './components/NavRail';
 
@@ -41,10 +41,10 @@ export default function EnvironmentPage() {
   });
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className="flex min-h-full">
       <NavRail projectId={id} current="environment" />
 
-      <div className="flex-1 overflow-auto p-6 flex flex-col gap-4">
+      <div className="flex-1 p-6 flex flex-col gap-4">
         <Tile title="Settings">
           <ProjectSettingsSection projectId={id} project={project ?? null} />
         </Tile>
@@ -261,6 +261,23 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
   const [saving, setSaving] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+
+  const allSelected = envVars.length > 0 && selected.size === envVars.length;
+  const someSelected = selected.size > 0;
+
+  const toggleSelect = (key: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelected(allSelected ? new Set() : new Set(envVars.map((v) => v.key)));
+  };
 
   const handleAdd = async () => {
     if (!newKey.trim() || RESERVED_ENV_KEYS.has(newKey.trim())) return;
@@ -281,9 +298,24 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
     if (!confirm(`Delete '${key}'?`)) return;
     try {
       await api.init.deleteEnvVar(projectId, key);
+      setSelected((prev) => { const next = new Set(prev); next.delete(key); return next; });
       qc.invalidateQueries({ queryKey: ['env-vars', projectId] });
     } catch (e) {
       alert(String(e));
+    }
+  };
+
+  const handleDeleteSelected = async () => {
+    if (!confirm(`Delete ${selected.size} variable${selected.size > 1 ? 's' : ''}?`)) return;
+    setDeleting(true);
+    try {
+      await Promise.all([...selected].map((key) => api.init.deleteEnvVar(projectId, key)));
+      setSelected(new Set());
+      qc.invalidateQueries({ queryKey: ['env-vars', projectId] });
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -299,14 +331,60 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
 
   return (
     <div>
-      <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Environment Variables</h3>
+      <div className="flex items-center justify-between mb-1">
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Environment Variables</h3>
+        {someSelected && (
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500">{selected.size} selected</span>
+            <button
+              onClick={handleDeleteSelected}
+              disabled={deleting}
+              className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-red-900/40 hover:bg-red-800/60 text-red-400 hover:text-red-300 border border-red-800/50 disabled:opacity-40 transition-colors"
+            >
+              <Trash2 className="w-3 h-3" />
+              Delete
+            </button>
+            <button
+              onClick={() => setSelected(new Set())}
+              className="text-gray-600 hover:text-gray-400 p-0.5"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
       <p className="text-xs text-gray-500 mb-3">Applied to all init script runs. Profile variables override these.</p>
       <div className="flex flex-col gap-1.5 mb-3">
         {envVars.length === 0 && (
           <p className="text-xs text-gray-600 italic">No environment variables.</p>
         )}
+        {envVars.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5">
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={toggleSelectAll}
+              className="w-3.5 h-3.5 rounded accent-brand-500 cursor-pointer shrink-0"
+            />
+            <span className="text-xs text-gray-600 select-none">Select all</span>
+          </div>
+        )}
         {envVars.map((v: EnvVarDto) => (
-          <div key={v.key} className="flex items-center gap-2 px-3 py-2 bg-surface-panel rounded border border-gray-800 text-xs">
+          <div
+            key={v.key}
+            className={`flex items-center gap-2 px-3 py-2 rounded border text-xs transition-colors ${
+              selected.has(v.key)
+                ? 'bg-brand-950/40 border-brand-700/50'
+                : 'bg-surface-panel border-gray-800'
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={selected.has(v.key)}
+              onChange={() => toggleSelect(v.key)}
+              onClick={(e) => e.stopPropagation()}
+              className="w-3.5 h-3.5 rounded accent-brand-500 cursor-pointer shrink-0"
+            />
             <span className="font-mono text-brand-300 w-40 shrink-0 truncate">{v.key}</span>
             <span className="text-gray-600">=</span>
             {editingKey === v.key ? (
