@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom';
 import { NavigateFunction, useNavigate } from 'react-router-dom';
 import {
   BookOpen,
+  Braces,
   FileCode,
   FlaskConical,
   GitBranch,
@@ -125,6 +126,13 @@ function buildProjectCommands(projectId: number, navigate: NavigateFunction): Co
       title: 'Test all models',
       icon: <FlaskConical size={14} />,
       onExecute: () => api.runs.test(projectId, '', 'only'),
+    },
+    {
+      id: 'proj-compile',
+      category: 'project',
+      title: 'Compile project',
+      icon: <Braces size={14} />,
+      onExecute: () => api.models.compile(projectId),
     },
     {
       id: 'proj-gen-docs',
