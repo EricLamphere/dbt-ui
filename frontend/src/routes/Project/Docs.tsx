@@ -321,7 +321,7 @@ export default function DocsPage() {
 
   const selectedUid = searchParams.get('node') ?? null;
 
-  const { data: status } = useQuery({
+  const { data: status, isFetching: statusFetching } = useQuery({
     queryKey: ['docs-status', id],
     queryFn: () => api.docs.status(id),
     refetchInterval: false,
@@ -348,13 +348,13 @@ export default function DocsPage() {
 
   useEffect(() => {
     if (autoGenerateTriggered.current) return;
-    if (!status) return;
+    if (!status || statusFetching) return;
     if (!status.generated_at) {
       autoGenerateTriggered.current = true;
       setGenerating(true);
       api.docs.generate(id).catch(() => setGenerating(false));
     }
-  }, [status, id]);
+  }, [status, statusFetching, id]);
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
