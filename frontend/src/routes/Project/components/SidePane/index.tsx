@@ -325,7 +325,7 @@ export function SidePane({
       >
         <div style={{ width }} className="flex flex-col h-full">
           {/* Tab bar */}
-          {model && (model.resource_type === 'model' || (model.resource_type === 'test' && (model.status === 'error' || model.status === 'warn'))) && (() => {
+          {model && (model.resource_type === 'model' || (model.resource_type === 'test' && (model.status === 'error' || model.status === 'warn' || activeTab === 'failed_rows'))) && (() => {
             const tabs: SidePaneTab[] = model.resource_type === 'model'
               ? ['properties', 'preview', 'profile']
               : ['properties', 'failed_rows'];

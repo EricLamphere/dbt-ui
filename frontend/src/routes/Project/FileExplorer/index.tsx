@@ -77,6 +77,20 @@ export default function FileExplorerPage() {
     refetchInterval: false,
   });
 
+  // When graph re-fetches (e.g. after statuses_changed), refresh stale node references
+  // so selectedTestNode always has the current status (needed for SidePane tab bar condition)
+  useEffect(() => {
+    if (!graph) return;
+    setSelectedTestNode((prev) => {
+      if (!prev) return prev;
+      return graph.nodes.find((n) => n.unique_id === prev.unique_id) ?? prev;
+    });
+    setSelectedModel((prev) => {
+      if (!prev) return prev;
+      return graph.nodes.find((n) => n.unique_id === prev.unique_id) ?? prev;
+    });
+  }, [graph]);
+
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (treeResizing.current) {
