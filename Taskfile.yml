@@ -53,9 +53,9 @@ tasks:
     cmds:
       - |
         for port in 8001 5173; do
-          pids=$(lsof -ti tcp:$port 2>/dev/null)
+          pids=$(lsof -ti tcp:$port 2>/dev/null) || true
           if [ -n "$pids" ]; then
-            echo "$pids" | xargs kill -9
+            echo "$pids" | xargs kill -9 2>/dev/null || true
             echo "Killed processes on port $port: $pids"
           else
             echo "No process on port $port"
@@ -66,20 +66,16 @@ tasks:
     desc: Stop background dbt-ui daemons started by task start:bg
     cmds:
       - |
-        for pidfile in "{{.ROOT_DIR}}/data/backend.pid" "{{.ROOT_DIR}}/data/frontend.pid"; do
-          if [ -f "$pidfile" ]; then
-            pid=$(cat "$pidfile")
-            if kill -0 "$pid" 2>/dev/null; then
-              kill "$pid"
-              echo "Stopped PID $pid"
-            else
-              echo "PID $pid already stopped"
-            fi
-            rm -f "$pidfile"
+        for port in 8001 5173; do
+          pids=$(lsof -ti tcp:$port 2>/dev/null) || true
+          if [ -n "$pids" ]; then
+            echo "$pids" | xargs kill -9 2>/dev/null || true
+            echo "Stopped processes on port $port"
           else
-            echo "No pidfile at $pidfile"
+            echo "Nothing running on port $port"
           fi
         done
+        rm -f "{{.ROOT_DIR}}/data/backend.pid" "{{.ROOT_DIR}}/data/frontend.pid"
 
   # ---- Install ----
 
