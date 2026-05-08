@@ -185,7 +185,8 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
   const workspacePath = envVars.find((v) => v.key === 'WORKSPACE_PATH')?.value ?? '';
 
   const handleSaveInitScriptPath = async (val: string) => {
-    await api.projects.updateSettings(projectId, { init_script_path: val || 'init' });
+    const normalized = val.trim().replace(/\/+$/, '');
+    await api.projects.updateSettings(projectId, { init_script_path: normalized || 'init' });
     qc.invalidateQueries({ queryKey: ['project', projectId] });
   };
 
@@ -200,8 +201,9 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
   };
 
   const handleSaveWorkspacePath = async (val: string) => {
-    if (val) {
-      await api.init.setEnvVar(projectId, 'WORKSPACE_PATH', val);
+    const normalized = val.trim().replace(/\/+$/, '');
+    if (normalized) {
+      await api.init.setEnvVar(projectId, 'WORKSPACE_PATH', normalized);
     } else {
       await api.init.deleteEnvVar(projectId, 'WORKSPACE_PATH');
     }

@@ -152,9 +152,10 @@ async def patch_project_settings(
     row = await session.get(Project, project_id)
     if row is None:
         raise HTTPException(status_code=404, detail="project not found")
-    if not dto.init_script_path or "/" in dto.init_script_path or dto.init_script_path.startswith("."):
+    normalized = dto.init_script_path.strip().rstrip("/")
+    if not normalized or ".." in Path(normalized).parts:
         raise HTTPException(status_code=400, detail="invalid init_script_path")
-    row.init_script_path = dto.init_script_path
+    row.init_script_path = normalized
     await session.commit()
     await session.refresh(row)
     return ProjectOut.from_row(row)

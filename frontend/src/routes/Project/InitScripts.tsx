@@ -297,6 +297,7 @@ export default function InitScriptsPage() {
       {newStepOpen && (
         <ScriptEditorModal
           projectId={id}
+          initScriptPath={project?.init_script_path ?? 'init'}
           onClose={() => { setNewStepOpen(false); invalidate(); }}
         />
       )}
@@ -304,6 +305,7 @@ export default function InitScriptsPage() {
       {editStep && (
         <ScriptEditorModal
           projectId={id}
+          initScriptPath={project?.init_script_path ?? 'init'}
           existing={editStep}
           onClose={() => { setEditStep(null); invalidate(); }}
         />
@@ -537,11 +539,12 @@ function StepTile({ step, projectId, runState, onToggle, onRunStep, onEdit, onDe
 
 interface ScriptEditorProps {
   projectId: number;
+  initScriptPath: string;
   existing?: InitStepDto;
   onClose: () => void;
 }
 
-function ScriptEditorModal({ projectId, existing, onClose }: ScriptEditorProps) {
+function ScriptEditorModal({ projectId, initScriptPath, existing, onClose }: ScriptEditorProps) {
   const isEdit = !!existing;
   const bareExistingName = existing?.name.replace(/^custom:\s*/, '') ?? '';
 
@@ -613,7 +616,7 @@ function ScriptEditorModal({ projectId, existing, onClose }: ScriptEditorProps) 
             <p className="text-[11px] text-gray-600">
               {isEdit && existing?.script_path
                 ? <>Saved to <code className="font-mono text-gray-500">{existing.script_path}</code></>
-                : <>Saved as <code className="font-mono text-gray-500">init/{name || 'script_name'}.sh</code></>
+                : <>Saved as <code className="font-mono text-gray-500">{initScriptPath}/{name || 'script_name'}.sh</code></>
               }
             </p>
           </div>
