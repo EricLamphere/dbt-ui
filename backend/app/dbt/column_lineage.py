@@ -2,10 +2,14 @@
 Column-level lineage builder using sqlglot.
 
 Strategy:
-- For each model node, normalize its SQL (strip Jinja; replace fully-qualified
-  relation names with short model names).
-- Build a column-stub SELECT for each parent model (SELECT col1, col2 FROM x)
-  so sqlglot can resolve column names without recursing into full parent SQL.
+- For each model node, use compiled_code from the manifest (requires dbt compile
+  to have been run).  Models without compiled SQL are skipped — Jinja-stripped raw
+  SQL produces unreliable lineage because macro expansions, conditional blocks, and
+  Jinja variables in SQL expressions are impossible to recover accurately.
+- Replace fully-qualified relation names with short model names so sqlglot sees
+  'stg_customers' rather than '"db"."schema"."stg_customers"'.
+- Build a column-stub SELECT for each parent model so sqlglot can resolve column
+  names without recursing into full parent SQL.
 - Use sqlglot.lineage.lineage() with these stubs as `sources`.
 - Match lineage nodes back to parent unique_ids via source_name.
 
@@ -17,18 +21,11 @@ Cached in-process by manifest path + mtime.
 
 import json
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 log = logging.getLogger(__name__)
-
-_RE_CONFIG_BLOCK = re.compile(r"\{\{[\s\S]*?config\([\s\S]*?\)\s*\}\}", re.DOTALL)
-_RE_JINJA_TAG = re.compile(r"\{%-?\s.*?-?%\}", re.DOTALL)
-_RE_REF = re.compile(r"""\{\{\s*ref\(['"](\w+)['"]\)\s*\}\}""")
-_RE_SOURCE = re.compile(r"""\{\{\s*source\(['"][^'"]+['"],\s*['"](\w+)['"]\)\s*\}\}""")
-_RE_JINJA_EXPR = re.compile(r"\{\{[^}]*\}\}")
 
 
 @dataclass(frozen=True)
@@ -38,15 +35,6 @@ class ColumnRef:
 
 
 _cache: dict[str, tuple[float, dict[str, dict[str, list[ColumnRef]]]]] = {}
-
-
-def _strip_jinja(sql: str) -> str:
-    sql = _RE_CONFIG_BLOCK.sub("", sql)
-    sql = _RE_JINJA_TAG.sub("", sql)
-    sql = _RE_REF.sub(r"\1", sql)
-    sql = _RE_SOURCE.sub(r"\1", sql)
-    sql = _RE_JINJA_EXPR.sub("'__jinja__'", sql)
-    return sql.strip()
 
 
 def _normalize_sql(sql: str, rel_to_short: dict[str, str]) -> str:
@@ -78,6 +66,13 @@ def _strip_ctes(sql: str, dialect: str | None) -> str | None:
 def build_column_lineage(
     manifest_path: Path,
 ) -> dict[str, dict[str, list[ColumnRef]]]:
+    import sys
+    import logging as _logging
+    # This runs in a subprocess — configure its root logger so debug output is visible.
+    _logging.basicConfig(level=_logging.DEBUG, format="%(levelname)s %(name)s %(message)s")
+    # sqlglot's lineage optimizer can recurse very deeply on complex compiled SQL.
+    sys.setrecursionlimit(5000)
+
     try:
         mtime = manifest_path.stat().st_mtime
     except OSError:
@@ -101,7 +96,7 @@ def build_column_lineage(
 
     short_names: dict[str, str] = {}         # uid → short name
     rel_to_short: dict[str, str] = {}        # relation_name → short name
-    node_sql: dict[str, str] = {}            # uid → best available SQL (compiled or jinja-stripped raw)
+    node_sql: dict[str, str] = {}            # uid → compiled SQL only (no Jinja stripping)
     node_columns: dict[str, list[str]] = {}  # uid → documented column names
 
     for uid, raw in raw_nodes.items():
@@ -112,11 +107,12 @@ def build_column_lineage(
         if rel:
             rel_to_short[rel] = name
 
+        # Only use compiled SQL — Jinja-stripped raw SQL produces unreliable lineage
+        # because stripped Jinja leaves broken expressions that confuse sqlglot's
+        # optimizer (unknown columns, invalid date literals, macro expansions, etc.).
+        # If the project hasn't been compiled yet, compiled_code will be absent and
+        # lineage will simply be skipped for those nodes.
         sql = raw.get("compiled_code") or raw.get("compiled_sql") or ""
-        if not sql:
-            raw_sql = raw.get("raw_code") or raw.get("raw_sql") or ""
-            if raw_sql:
-                sql = _strip_jinja(raw_sql)
 
         cols = list((raw.get("columns") or {}).keys())
         if cols:
@@ -148,18 +144,30 @@ def build_column_lineage(
         parent_uids = parent_map.get(uid, [])
         parent_short_names = {short_names[p] for p in parent_uids if p in short_names}
 
-        # Build sources: short_name → parent's CTE-stripped final SELECT.
-        # Stripping the WITH clause prevents sqlglot from recursing into
-        # grandparent CTEs, while still exposing the full column list.
+        # Build sources: short_name → SQL stub for sqlglot to resolve columns against.
+        # Prefer a simple "SELECT col1, col2" stub from documented columns — this is
+        # recursion-safe and gives sqlglot exactly what it needs.  Full compiled SQL
+        # (even CTE-stripped) can cause sqlglot to recurse into dangling CTE references
+        # and blow Python's stack on complex models.  Fall back to stripped compiled SQL
+        # only when the parent has no documented columns.
         sources: dict[str, str] = {}
         for p in parent_uids:
             pname = short_names.get(p)
+            if not pname:
+                continue
+            pcols = node_columns.get(p)
+            if pcols:
+                sources[pname] = "SELECT " + ", ".join(pcols)
+                continue
             psql = node_sql.get(p)
-            if not pname or not psql:
+            if not psql:
                 continue
             normalized = _normalize_sql(psql, rel_to_short)
             source_sql = _strip_ctes(normalized, dialect) or normalized
             sources[pname] = source_sql
+
+        if not parent_short_names:
+            continue
 
         col_lineage: dict[str, list[ColumnRef]] = {}
         for col_name in columns:
@@ -177,12 +185,21 @@ def build_column_lineage(
 def _resolve_dialect(adapter_type: str | None) -> str | None:
     if not adapter_type:
         return None
+    # Explicit mappings for adapters whose name doesn't match the sqlglot dialect name.
+    _aliases = {
+        "athena": "trino",   # AWS Athena is based on Trino
+        "glue": "spark",     # AWS Glue uses Spark SQL
+        "synapse": "tsql",   # Azure Synapse uses T-SQL
+        "fabric": "tsql",
+    }
+    lower = adapter_type.lower()
+    if lower in _aliases:
+        return _aliases[lower]
     _known = {
         "bigquery", "duckdb", "hive", "mysql", "postgres", "presto",
         "redshift", "snowflake", "spark", "sqlite", "starrocks",
         "teradata", "trino", "tsql",
     }
-    lower = adapter_type.lower()
     for known in _known:
         if known in lower:
             return known
@@ -200,15 +217,19 @@ def _trace_column(
     try:
         from sqlglot.lineage import lineage as sg_lineage
 
-        node = sg_lineage(col_name, sql, dialect=dialect, sources=sources)
+        node = sg_lineage(col_name, sql, dialect=dialect, sources=sources,
+                          validate_qualify_columns=False)
         refs: list[ColumnRef] = []
         seen: set[tuple[str, str]] = set()
 
+        found_source_names: set[str] = set()
         for ln in node.walk():
             # source_name identifies which named source this column came from
             raw_sname = ln.source_name or ""
             # Normalize: strip quotes, take last segment (handles qualified names)
             table_name = raw_sname.replace('"', '').split(".")[-1]
+            if table_name:
+                found_source_names.add(table_name)
             if not table_name or table_name not in parent_short_names:
                 continue
             parent_uid = name_to_uid.get(table_name)
@@ -220,6 +241,11 @@ def _trace_column(
                 seen.add(key)
                 refs.append(ColumnRef(node=parent_uid, column=upstream_col))
 
+        if not refs and parent_short_names:
+            log.debug(
+                "column_lineage_no_refs col=%s expected_parents=%s found_source_names=%s",
+                col_name, parent_short_names, found_source_names,
+            )
         return refs
 
     except Exception as exc:

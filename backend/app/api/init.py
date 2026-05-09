@@ -677,6 +677,7 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
             append_project_log(project_path, line, project_id)
         status_str = "SUCCESS" if ok else f"FAILED (rc={return_code})"
         append_project_log(project_path, f"--- {step.name}: {status_str} ---", project_id)
+        await asyncio.sleep(0)  # let pending project_log tasks publish before init_step
 
         finished_at = datetime.now(timezone.utc).isoformat()
         await bus.publish(
@@ -695,6 +696,7 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
         )
         if not ok:
             append_project_log(project_path, f"=== Init pipeline finished: FAILED at '{step.name}' ===", project_id)
+            await asyncio.sleep(0)  # let pending project_log tasks publish before pipeline_finished
             await bus.publish(
                 Event(
                     topic=topic,
@@ -704,6 +706,7 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
             )
             return
     append_project_log(project_path, "=== Init pipeline finished: SUCCESS ===", project_id)
+    await asyncio.sleep(0)  # let pending project_log tasks publish before pipeline_finished
     await bus.publish(
         Event(
             topic=topic,

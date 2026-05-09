@@ -170,7 +170,7 @@ export default function ModelsPage() {
     staleTime: 0,
   });
 
-  const { data: columnLineage, isLoading: columnLineageLoading } = useQuery({
+  const { data: columnLineage, isFetching: columnLineageLoading } = useQuery({
     queryKey: ['column-lineage', id],
     queryFn: () => api.models.columnLineage(id),
     refetchInterval: false,

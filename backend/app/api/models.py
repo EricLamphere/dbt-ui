@@ -1,4 +1,5 @@
 import asyncio
+import json
 import re
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -6,6 +7,7 @@ from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,7 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.engine import get_session
 from app.db.models import ModelStatus, Project
 from app.dbt.manifest import Manifest, ModelNode, load_manifest
-from app.dbt.column_lineage import build_column_lineage, ColumnRef
+from app.dbt.column_lineage import build_column_lineage
 from app.dbt.runner import RunRequest, runner
 from app.dbt.show_parser import parse_show_json
 from app.logs.project_logger import append_project_log
@@ -22,6 +24,30 @@ from app.logs.project_logger import append_project_log
 # this work in a separate OS process, bypassing the GIL so the asyncio event loop
 # is never starved during lineage computation.
 _lineage_executor = ProcessPoolExecutor(max_workers=1)
+
+# Cache pre-serialized JSON bytes keyed by (manifest_path, mtime).
+# Storing bytes (not a dict) means cache hits return immediately with no CPU work,
+# and cache misses only need to transfer a flat byte string between processes
+# (much cheaper to pickle than a nested dict full of ColumnRef dataclasses).
+_lineage_json_cache: dict[str, tuple[float, bytes]] = {}  # path → (mtime, json_bytes)
+
+
+def _build_lineage_json(manifest_path: Path) -> bytes:
+    """Run in subprocess: compute lineage and serialize to JSON bytes.
+
+    Serializing inside the worker means we only ever pickle a flat bytes object
+    back to the main process — not a deeply-nested dict with dataclass instances.
+    """
+    raw = build_column_lineage(manifest_path)
+    lineage: dict = {
+        uid: {
+            col: [{"node": ref.node, "column": ref.column} for ref in refs]
+            for col, refs in col_map.items()
+        }
+        for uid, col_map in raw.items()
+    }
+    return json.dumps({"lineage": lineage}).encode()
+
 
 router = APIRouter(prefix="/api/projects", tags=["models"])
 
@@ -62,15 +88,6 @@ class ModelDto(BaseModel):
     patch_path: str | None = None
 
     model_config = ConfigDict(populate_by_name=True)
-
-
-class ColumnLineageEntryDto(BaseModel):
-    node: str
-    column: str
-
-
-class ColumnLineageDto(BaseModel):
-    lineage: dict[str, dict[str, list[ColumnLineageEntryDto]]]
 
 
 class EdgeDto(BaseModel):
@@ -135,26 +152,35 @@ async def get_models(
     return GraphDto(nodes=nodes, edges=edges)
 
 
-@router.get("/{project_id}/column-lineage", response_model=ColumnLineageDto)
+@router.get("/{project_id}/column-lineage")
 async def get_column_lineage(
     project_id: int, session: AsyncSession = Depends(get_session)
-) -> ColumnLineageDto:
+) -> Response:
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
 
-    manifest_path = Path(project.path) / "target" / "manifest.json"
-    loop = asyncio.get_event_loop()
-    raw = await loop.run_in_executor(_lineage_executor, build_column_lineage, manifest_path)
+    # Capture what we need, then release the session immediately.
+    # The subprocess computation can take minutes; holding an open SQLite
+    # transaction for that long blocks all other DB-touching endpoints.
+    project_path = project.path
+    await session.close()
 
-    lineage: dict[str, dict[str, list[ColumnLineageEntryDto]]] = {
-        uid: {
-            col: [ColumnLineageEntryDto(node=ref.node, column=ref.column) for ref in refs]
-            for col, refs in col_map.items()
-        }
-        for uid, col_map in raw.items()
-    }
-    return ColumnLineageDto(lineage=lineage)
+    manifest_path = Path(project_path) / "target" / "manifest.json"
+    cache_key = str(manifest_path)
+
+    try:
+        current_mtime = manifest_path.stat().st_mtime
+        cached = _lineage_json_cache.get(cache_key)
+        if cached is not None and cached[0] == current_mtime:
+            return Response(content=cached[1], media_type="application/json")
+
+        loop = asyncio.get_event_loop()
+        json_bytes = await loop.run_in_executor(_lineage_executor, _build_lineage_json, manifest_path)
+        _lineage_json_cache[cache_key] = (current_mtime, json_bytes)
+        return Response(content=json_bytes, media_type="application/json")
+    except OSError:
+        return Response(content=b'{"lineage":{}}', media_type="application/json")
 
 
 @router.get("/{project_id}/models/{unique_id}", response_model=ModelDto)
@@ -638,6 +664,7 @@ async def _compile_model(project_id: int, project_path: str, model_name: str) ->
     except Exception:
         pass
     append_project_log(project_path, f"<<< dbt compile --select {model_name} {'OK' if ok else 'FAILED'}", project_id)
+    await asyncio.sleep(0)  # let pending project_log tasks publish before compile_finished
     await bus.publish(Event(topic=topic, type="compile_finished", data={"ok": ok}))
     if ok:
         await bus.publish(Event(topic=topic, type="graph_changed", data={}))
@@ -673,6 +700,7 @@ async def _compile_project(project_id: int, project_path: str) -> None:
     except Exception:
         pass
     append_project_log(project_path, f"<<< dbt compile {'OK' if ok else 'FAILED'}", project_id)
+    await asyncio.sleep(0)  # let pending project_log tasks publish before compile_finished
     await bus.publish(Event(topic=topic, type="compile_finished", data={"ok": ok}))
     if ok:
         await bus.publish(Event(topic=topic, type="graph_changed", data={}))
