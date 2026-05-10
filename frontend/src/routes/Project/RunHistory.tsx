@@ -168,10 +168,9 @@ type DetailTab = 'nodes' | 'log';
 interface DetailPanelProps {
   projectId: number;
   invocation: RunInvocationDto;
-  onClose: () => void;
 }
 
-function DetailPanel({ projectId, invocation, onClose }: DetailPanelProps) {
+function DetailPanel({ projectId, invocation }: DetailPanelProps) {
   const [tab, setTab] = useState<DetailTab>('nodes');
   const [nodeFilter, setNodeFilter] = useState('');
   const [kindFilter, setKindFilter] = useState<'all' | 'model' | 'test'>('all');
@@ -215,11 +214,6 @@ function DetailPanel({ projectId, invocation, onClose }: DetailPanelProps) {
           <span className="text-xs text-zinc-400 truncate">{invocation.selector ?? 'all models'}</span>
           <StatusBadge status={invocation.status} />
         </div>
-        <button onClick={onClose} className="shrink-0 ml-2 text-zinc-500 hover:text-zinc-300 transition-colors" title="Close">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
       </div>
 
       {/* Meta row */}
@@ -566,7 +560,7 @@ export default function RunHistoryPage() {
                     <th className="px-4 py-2 font-medium">Cmd</th>
                     <th className="px-4 py-2 font-medium">Selector</th>
                     <th className="px-4 py-2 font-medium text-right">Duration</th>
-                    <th className="px-4 py-2 font-medium text-right">Nodes</th>
+                    <th className="px-4 py-2 font-medium text-right">Results</th>
                     <th className="px-4 py-2 font-medium">Status</th>
                   </tr>
                 </thead>
@@ -585,7 +579,18 @@ export default function RunHistoryPage() {
                           {inv.selector ?? <span className="text-zinc-600 italic">all</span>}
                         </td>
                         <td className="px-4 py-2.5 text-right text-zinc-300 tabular-nums">{formatDuration(inv.duration_seconds)}</td>
-                        <td className="px-4 py-2.5 text-right text-zinc-300 tabular-nums">{inv.model_count}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">
+                          {inv.status === 'running' ? (
+                            <span className="text-zinc-500">—</span>
+                          ) : inv.model_count === 0 ? (
+                            <span className="text-zinc-600">—</span>
+                          ) : (
+                            <span className="inline-flex items-center gap-2">
+                              <span className="text-emerald-400">{inv.success_count} ok</span>
+                              {inv.error_count > 0 && <span className="text-red-400">{inv.error_count} err</span>}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-2.5"><StatusBadge status={inv.status} /></td>
                       </tr>
                     );
@@ -663,7 +668,7 @@ export default function RunHistoryPage() {
           >
             <div style={{ width: paneWidth }} className="flex flex-col h-full">
               {selected
-                ? <DetailPanel projectId={id} invocation={selected} onClose={() => clearSelected()} />
+                ? <DetailPanel projectId={id} invocation={selected} />
                 : (
                   <div className="flex items-center justify-center h-full text-zinc-600 text-sm px-6 text-center">
                     Select a run to see node timings and logs.

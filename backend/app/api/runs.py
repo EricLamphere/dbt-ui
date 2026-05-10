@@ -53,6 +53,8 @@ class RunInvocationDto(BaseModel):
     finished_at: datetime | None
     duration_seconds: float | None
     model_count: int
+    success_count: int
+    error_count: int
 
 
 class ModelTimingDto(BaseModel):
@@ -355,7 +357,12 @@ async def post_test(
     return await _launch(project, "test", dto)
 
 
-def _invocation_to_dto(inv: RunInvocation, model_count: int) -> RunInvocationDto:
+def _invocation_to_dto(
+    inv: RunInvocation,
+    model_count: int,
+    success_count: int = 0,
+    error_count: int = 0,
+) -> RunInvocationDto:
     duration: float | None = None
     if inv.started_at and inv.finished_at:
         duration = (inv.finished_at - inv.started_at).total_seconds()
@@ -368,6 +375,8 @@ def _invocation_to_dto(inv: RunInvocation, model_count: int) -> RunInvocationDto
         finished_at=inv.finished_at,
         duration_seconds=duration,
         model_count=model_count,
+        success_count=success_count,
+        error_count=error_count,
     )
 
 
@@ -407,14 +416,26 @@ async def get_run_history(
         return RunHistoryPageDto(items=[], total=total, offset=offset, limit=limit)
 
     inv_ids = [inv.id for inv in invocations]
+    from sqlalchemy import case
     counts_result = await session.execute(
-        select(InvocationModelResult.invocation_id, sa_func.count(InvocationModelResult.id))
+        select(
+            InvocationModelResult.invocation_id,
+            sa_func.count(InvocationModelResult.id),
+            sa_func.sum(case((InvocationModelResult.status == "success", 1), else_=0)),
+            sa_func.sum(case((InvocationModelResult.status == "error", 1), else_=0)),
+        )
         .where(InvocationModelResult.invocation_id.in_(inv_ids))
         .group_by(InvocationModelResult.invocation_id)
     )
-    count_by_id: dict[int, int] = {row[0]: row[1] for row in counts_result.fetchall()}
+    count_by_id: dict[int, tuple[int, int, int]] = {
+        row[0]: (row[1], int(row[2] or 0), int(row[3] or 0))
+        for row in counts_result.fetchall()
+    }
 
-    items = [_invocation_to_dto(inv, count_by_id.get(inv.id, 0)) for inv in invocations]
+    items = [
+        _invocation_to_dto(inv, *count_by_id.get(inv.id, (0, 0, 0)))
+        for inv in invocations
+    ]
     return RunHistoryPageDto(items=items, total=total, offset=offset, limit=limit)
 
 
@@ -450,7 +471,9 @@ async def get_run_invocation_detail(
         for r in results
     ]
 
-    base = _invocation_to_dto(inv, len(nodes))
+    success_count = sum(1 for r in results if r.status == "success")
+    error_count = sum(1 for r in results if r.status == "error")
+    base = _invocation_to_dto(inv, len(nodes), success_count, error_count)
     return RunInvocationDetailDto(**base.model_dump(), nodes=nodes)
 
 

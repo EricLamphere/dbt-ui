@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import Editor from '@monaco-editor/react';
-import { api, type Project } from '../../lib/api';
+import { api, type GraphDto, type Project, type RunInvocationDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 import { useTheme } from '../../lib/useTheme';
 import NavRail from './components/NavRail';
@@ -26,27 +26,26 @@ const APP_EDITORS: { id: string; label: string; appName: string }[] = [
   { id: 'finder',  label: 'Finder',       appName: 'Finder' },
 ];
 
-type Editor =
+type EditorChoice =
   | { id: string; label: string; kind: 'protocol'; protocol: string }
   | { id: string; label: string; kind: 'app'; appName: string }
   | { id: 'other'; label: 'Other'; kind: 'other' };
 
-const ALL_EDITORS: Editor[] = [
+const ALL_EDITORS: EditorChoice[] = [
   ...PROTOCOL_EDITORS.map((e) => ({ ...e, kind: 'protocol' as const })),
   ...APP_EDITORS.map((e) => ({ ...e, kind: 'app' as const })),
   { id: 'other', label: 'Other', kind: 'other' },
 ];
 
 const PREF_KEY = 'dbt-ui:preferred-editor';
-// For "other" picked app
 const OTHER_APP_KEY = 'dbt-ui:other-app-name';
 
-function getPreferredEditor(): Editor {
+function getPreferredEditor(): EditorChoice {
   const saved = localStorage.getItem(PREF_KEY);
   return ALL_EDITORS.find((e) => e.id === saved) ?? ALL_EDITORS[0];
 }
 
-async function openInEditor(editor: Editor, projectPath: string, otherAppName?: string) {
+async function openInEditor(editor: EditorChoice, projectPath: string, otherAppName?: string) {
   if (editor.kind === 'protocol') {
     window.open(`${editor.protocol}${projectPath}`, '_self');
   } else if (editor.kind === 'app') {
@@ -60,19 +59,41 @@ export default function ProjectHome() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
   const navigate = useNavigate();
+  const qc = useQueryClient();
 
   const { data: project, isLoading, error } = useQuery({
     queryKey: ['project', id],
     queryFn: () => api.projects.get(id),
   });
 
-  const [preferredEditor, setPreferredEditor] = useState<Editor>(getPreferredEditor);
+  const { data: graph } = useQuery({
+    queryKey: ['graph', id],
+    queryFn: () => api.models.graph(id),
+    enabled: !!id,
+  });
+
+  const { data: recentRunsPage } = useQuery({
+    queryKey: ['run-history', id, 'recent'],
+    queryFn: () => api.runHistory.list(id, { limit: 5 }),
+    enabled: !!id,
+  });
+
+  useProjectEvents(id, useCallback((event) => {
+    if (event.type === 'statuses_changed' || event.type === 'graph_changed') {
+      qc.invalidateQueries({ queryKey: ['graph', id] });
+    }
+    if (event.type === 'run_started' || event.type === 'run_history_changed') {
+      qc.invalidateQueries({ queryKey: ['run-history', id, 'recent'] });
+    }
+  }, [id, qc]));
+
+  const [preferredEditor, setPreferredEditor] = useState<EditorChoice>(getPreferredEditor);
   const [otherAppName, setOtherAppName] = useState<string>(
     () => localStorage.getItem(OTHER_APP_KEY) ?? ''
   );
   const [editorPickerOpen, setEditorPickerOpen] = useState(false);
   const [appPickerOpen, setAppPickerOpen] = useState(false);
-  const pickerRef = useRef<HTMLDivElement>(null);
+  const editorPickerRef = useRef<HTMLDivElement>(null);
 
   type InitStatus = 'idle' | 'running' | 'success' | 'error';
   const [initStatus, setInitStatus] = useState<InitStatus>('idle');
@@ -86,7 +107,7 @@ export default function ProjectHome() {
     },
   });
 
-  useProjectEvents(id, (event) => {
+  useProjectEvents(id, useCallback((event) => {
     if (event.type === 'init_pipeline_started') {
       setInitStatus('running');
       setInitError('');
@@ -100,13 +121,33 @@ export default function ProjectHome() {
         setInitError(data.failed_step ? `Failed at step: ${data.failed_step}` : 'Setup failed');
       }
     }
-  });
+  }, []));
 
-  // Close dropdown on outside click
+  // Quick-run state
+  const [activeRun, setActiveRun] = useState<RunKind | null>(null);
+
+  const handleQuickRun = async (kind: RunKind) => {
+    if (activeRun) return;
+    setActiveRun(kind);
+    try {
+      if (kind === 'seed') api.runs.seed(id, '', 'only').catch(() => {});
+      else api.runs[kind](id, '', 'only').catch(() => {});
+    } finally {
+      setActiveRun(null);
+    }
+  };
+
+  useProjectEvents(id, useCallback((event) => {
+    if (event.type === 'run_finished' || event.type === 'run_error') {
+      setActiveRun(null);
+    }
+  }, []));
+
+  // Close editor picker on outside click
   useEffect(() => {
     if (!editorPickerOpen) return;
     const dismiss = (e: MouseEvent) => {
-      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+      if (editorPickerRef.current && !editorPickerRef.current.contains(e.target as Node)) {
         setEditorPickerOpen(false);
       }
     };
@@ -128,7 +169,7 @@ export default function ProjectHome() {
     openInEditor(preferredEditor, project.path, otherAppName || undefined);
   };
 
-  const handleSelectEditor = (editor: Editor) => {
+  const handleSelectEditor = (editor: EditorChoice) => {
     if (editor.kind === 'other') {
       setEditorPickerOpen(false);
       setAppPickerOpen(true);
@@ -143,7 +184,7 @@ export default function ProjectHome() {
   const handleAppPicked = (appName: string) => {
     setOtherAppName(appName);
     localStorage.setItem(OTHER_APP_KEY, appName);
-    const otherEditor: Editor = { id: 'other', label: 'Other', kind: 'other' };
+    const otherEditor: EditorChoice = { id: 'other', label: 'Other', kind: 'other' };
     setPreferredEditor(otherEditor);
     localStorage.setItem(PREF_KEY, 'other');
     setAppPickerOpen(false);
@@ -154,193 +195,119 @@ export default function ProjectHome() {
     <div className="flex h-full overflow-hidden">
       <NavRail projectId={id} current="home" />
       <div className="flex-1 overflow-auto">
-      <div className="p-6 pb-12 max-w-4xl mx-auto w-full">
-      {/* Header tile */}
-      <div className="bg-surface-panel border border-gray-800 rounded-xl px-6 py-5 mb-6 w-full">
-        <div className="flex items-start justify-between">
-          <div className="flex flex-col gap-1 min-w-0">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl">{platformIcon}</span>
-              <h1 className="text-xl font-bold text-gray-100">{project.name}</h1>
-            </div>
-            <p className="text-xs text-gray-500 font-mono mt-1 truncate">{project.path}</p>
-          </div>
-          <div className="flex items-center gap-6 shrink-0 ml-8">
-            <div className="text-right">
-              <dt className="text-[10px] text-gray-600 uppercase tracking-wider">Platform</dt>
-              <dd className="text-sm text-gray-200 font-medium capitalize mt-0.5">{project.platform}</dd>
-            </div>
-            {project.profile && (
-              <div className="text-right">
-                <dt className="text-[10px] text-gray-600 uppercase tracking-wider">Profile</dt>
-                <dd className="text-sm text-gray-200 font-medium mt-0.5">{project.profile}</dd>
+        <div className="p-6 pb-12 max-w-4xl mx-auto w-full">
+
+          {/* Header tile */}
+          <div className="bg-surface-panel border border-gray-800 rounded-xl mb-6 w-full flex">
+            {/* Left: project info */}
+            <div className="flex-1 px-6 py-5 flex flex-col justify-center gap-1 min-w-0">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">{platformIcon}</span>
+                <h1 className="text-xl font-bold text-gray-100">{project.name}</h1>
               </div>
-            )}
-            <div className="flex items-center gap-2">
+              <p className="text-xs text-gray-500 font-mono mt-1 truncate">{project.path}</p>
+              <div className="flex items-center gap-6 mt-2">
+                <div>
+                  <dt className="text-[10px] text-gray-600 uppercase tracking-wider">Platform</dt>
+                  <dd className="text-sm text-gray-200 font-medium capitalize mt-0.5">{project.platform}</dd>
+                </div>
+                {project.profile && (
+                  <div>
+                    <dt className="text-[10px] text-gray-600 uppercase tracking-wider">Profile</dt>
+                    <dd className="text-sm text-gray-200 font-medium mt-0.5">{project.profile}</dd>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Right: stacked action buttons — full height of header */}
+            <div className="relative border-l border-gray-800 flex flex-col shrink-0 w-56" ref={editorPickerRef}>
+              {/* Top half: Initialize */}
               <button
                 onClick={() => initMutation.mutate()}
                 disabled={initStatus === 'running'}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white font-medium transition-colors whitespace-nowrap"
+                className="flex-1 flex items-center justify-between px-4 border-b border-gray-800 text-xs font-medium text-gray-200 hover:bg-surface-elevated/60 disabled:opacity-50 transition-colors group"
               >
-                {initStatus === 'running' && (
-                  <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" />
-                  </svg>
+                <div className="flex items-center gap-2">
+                  {initStatus === 'running' ? (
+                    <svg className="w-3.5 h-3.5 animate-spin text-brand-400" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-3.5 h-3.5 text-brand-400 group-hover:text-brand-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
+                    </svg>
+                  )}
+                  <span>{initStatus === 'running' ? 'Running…' : 'Initialize'}</span>
+                </div>
+                {initStatus !== 'idle' && initStatus !== 'running' && (
+                  <InitStatusBadge status={initStatus} errorMessage={initError} />
                 )}
-                {initStatus === 'running' ? 'Running…' : 'Initialize'}
               </button>
-              {initStatus !== 'idle' && initStatus !== 'running' && (
-                <InitStatusBadge status={initStatus} errorMessage={initError} />
+
+              {/* Bottom half: Open in editor (split button) */}
+              <div className="flex-1 flex">
+                <button
+                  onClick={handleOpenEditor}
+                  className="flex-1 min-w-0 flex items-center gap-2 px-4 text-xs font-medium text-gray-200 hover:bg-surface-elevated/60 transition-colors group"
+                >
+                  <svg className="w-3.5 h-3.5 text-brand-400 group-hover:text-brand-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                  </svg>
+                  <span className="truncate">Open in {editorLabel}</span>
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setEditorPickerOpen((o) => !o); }}
+                  className="px-3 border-l border-gray-800 text-gray-600 hover:text-gray-300 hover:bg-surface-elevated/60 transition-colors"
+                  title="Choose editor"
+                >
+                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Editor picker dropdown */}
+              {editorPickerOpen && (
+                <div className="absolute bottom-0 right-0 translate-y-full min-w-[180px] bg-surface-panel border border-gray-700 rounded-lg shadow-xl py-1 z-50">
+                  {ALL_EDITORS.map((editor) => {
+                    const isActive = editor.id === preferredEditor.id;
+                    const label = editor.kind === 'other' && otherAppName ? `Other (${otherAppName})` : editor.label;
+                    return (
+                      <button
+                        key={editor.id}
+                        onClick={() => handleSelectEditor(editor)}
+                        className={`w-full text-left px-4 py-2 text-xs transition-colors
+                          ${isActive ? 'text-brand-300 bg-brand-900/30' : 'text-gray-300 hover:bg-gray-800'}`}
+                      >
+                        {label}
+                        {isActive && <span className="ml-2 text-brand-400">✓</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           </div>
+
+          {/* Stats summary */}
+          {graph && <StatsSummary graph={graph} recentRuns={recentRunsPage?.items ?? []} />}
+
+          {/* Quick-run bar */}
+          <QuickRunBar activeRun={activeRun} onRun={handleQuickRun} />
+
+          {/* Recent runs */}
+          <RecentRuns
+            runs={recentRunsPage?.items ?? []}
+            onViewAll={() => navigate(`/projects/${id}/runs`)}
+          />
+
+          {/* Project files panel */}
+          <ProjectFilesPanel project={project} />
+
         </div>
       </div>
-
-      {/* Setup section */}
-      <CollapsibleSection title="Setup" storageKey="home-section-setup">
-        <div className="grid grid-cols-2 gap-3">
-          <ActionTile
-            icon={
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
-              </svg>
-            }
-            title="Environment"
-            description="Manage environment profiles and global variables for init scripts"
-            onClick={() => navigate(`/projects/${id}/environment`)}
-          />
-
-          <ActionTile
-            icon={
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0021 18V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v12a2.25 2.25 0 002.25 2.25z" />
-              </svg>
-            }
-            title="Initialization"
-            description="Add or update initialization scripts that run during project setup"
-            onClick={() => navigate(`/projects/${id}/init`)}
-          />
-        </div>
-      </CollapsibleSection>
-
-      {/* Project section */}
-      <CollapsibleSection title="Project" storageKey="home-section-project">
-        <div className="grid grid-cols-2 gap-3">
-          <ActionTile
-            icon={
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 9.776c.112-.017.227-.026.344-.026h15.812c.117 0 .232.009.344.026m-16.5 0a2.25 2.25 0 00-1.883 2.542l.857 6a2.25 2.25 0 002.227 1.932H19.05a2.25 2.25 0 002.227-1.932l.857-6a2.25 2.25 0 00-1.883-2.542m-16.5 0V6A2.25 2.25 0 016 3.75h3.879a1.5 1.5 0 011.06.44l2.122 2.12a1.5 1.5 0 001.06.44H18A2.25 2.25 0 0120.25 9v.776" />
-              </svg>
-            }
-            title="File Explorer"
-            description="Browse, view, and edit files in your project directory"
-            onClick={() => navigate(`/projects/${id}/files`)}
-          />
-
-          <ActionTile
-            icon={
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <ellipse cx="12" cy="5" rx="9" ry="3" strokeLinecap="round" strokeLinejoin="round" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 5v4c0 1.657 4.03 3 9 3s9-1.343 9-3V5" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 9v4c0 1.657 4.03 3 9 3s9-1.343 9-3V9" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 13v4c0 1.657 4.03 3 9 3s9-1.343 9-3v-4" />
-              </svg>
-            }
-            title="SQL Workspace"
-            description="Write and run SQL queries with dbt autocomplete and compiled SQL preview"
-            onClick={() => navigate(`/projects/${id}/workspace`)}
-          />
-
-          <ActionTile
-            icon={
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zm0 9.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zm9.75-9.75A2.25 2.25 0 0115.75 3.75H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zm0 9.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z" />
-              </svg>
-            }
-            title="DAG"
-            description="Visualize your project's model graph, run builds and tests, and edit SQL"
-            onClick={() => navigate(`/projects/${id}/models`)}
-          />
-
-          <ActionTile
-            icon={
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25" />
-              </svg>
-            }
-            title="Docs"
-            description="Browse generated dbt documentation for models, sources, and tests"
-            onClick={() => navigate(`/projects/${id}/docs`)}
-          />
-
-          <ActionTile
-            icon={
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                <path strokeLinecap="round" strokeLinejoin="round"
-                  d="M12 5v7m0 0l-3-3m3 3l3-3M6 19a2 2 0 100-4 2 2 0 000 4zm12 0a2 2 0 100-4 2 2 0 000 4zM6 7a2 2 0 100-4 2 2 0 000 4z" />
-              </svg>
-            }
-            title="Source Control"
-            description="Stage, commit, push, and view your project's git history"
-            onClick={() => navigate(`/projects/${id}/git`)}
-          />
-
-          {/* Editor tile — split button */}
-          <div className="relative" ref={pickerRef}>
-            <div className="group flex bg-surface-panel border border-gray-800 hover:border-brand-700 rounded-xl overflow-hidden transition-colors">
-              <button
-                onClick={handleOpenEditor}
-                className="flex-1 flex flex-col gap-3 px-5 py-4 text-left hover:bg-surface-elevated/60 transition-colors"
-              >
-                <div className="text-brand-400 group-hover:text-brand-300 transition-colors">
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M14.25 9.75L16.5 12l-2.25 2.25m-4.5 0L7.5 12l2.25-2.25M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z" />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-sm font-semibold text-gray-100 mb-1">Open in {editorLabel}</div>
-                  <div className="text-xs text-gray-500 leading-relaxed">Open this project in your preferred editor</div>
-                </div>
-              </button>
-
-              <button
-                onClick={(e) => { e.stopPropagation(); setEditorPickerOpen((o) => !o); }}
-                className="px-3 border-l border-gray-800 text-gray-600 hover:text-gray-300 hover:bg-surface-elevated/60 transition-colors"
-                title="Choose editor"
-              >
-                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                </svg>
-              </button>
-            </div>
-
-            {editorPickerOpen && (
-              <div className="absolute bottom-full mb-1 right-0 min-w-[180px] bg-surface-panel border border-gray-700 rounded-lg shadow-xl py-1 z-50">
-                {ALL_EDITORS.map((editor) => {
-                  const isActive = editor.id === preferredEditor.id;
-                  const label = editor.kind === 'other' && otherAppName ? `Other (${otherAppName})` : editor.label;
-                  return (
-                    <button
-                      key={editor.id}
-                      onClick={() => handleSelectEditor(editor)}
-                      className={`w-full text-left px-4 py-2 text-xs transition-colors
-                        ${isActive ? 'text-brand-300 bg-brand-900/30' : 'text-gray-300 hover:bg-gray-800'}`}
-                    >
-                      {label}
-                      {isActive && <span className="ml-2 text-brand-400">✓</span>}
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-      </CollapsibleSection>
-
-      {/* Project files panel */}
-      <ProjectFilesPanel project={project} />
 
       {/* App picker modal */}
       {appPickerOpen && (
@@ -351,7 +318,173 @@ export default function ProjectHome() {
         />
       )}
     </div>
+  );
+}
+
+// ---- Stats summary ----
+
+const CMD_COLORS: Record<string, string> = {
+  run:   'text-blue-400',
+  build: 'text-purple-400',
+  test:  'text-yellow-400',
+  seed:  'text-green-400',
+};
+
+function StatsSummary({ graph, recentRuns }: { graph: GraphDto; recentRuns: RunInvocationDto[] }) {
+  const models = graph.nodes.filter((n) => n.resource_type === 'model');
+  const tests = graph.nodes.filter((n) => n.resource_type === 'test');
+  const sources = graph.nodes.filter((n) => n.resource_type === 'source');
+
+  const lastRun = recentRuns[0] ?? null;
+
+  return (
+    <div className="grid grid-cols-4 gap-3 mb-4">
+      <StatTile label="Models" value={models.length} />
+      <StatTile label="Tests" value={tests.length} />
+      <StatTile label="Sources" value={sources.length} />
+
+      {/* Last run tile */}
+      <div className="bg-surface-panel border border-gray-800 rounded-xl px-5 py-4">
+        <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Last Run</div>
+        {lastRun ? (
+          <>
+            <div className={`text-xl font-bold capitalize ${CMD_COLORS[lastRun.command] ?? 'text-gray-100'}`}>
+              {lastRun.command}
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              {lastRun.status === 'running' ? (
+                <span className="text-[10px] text-brand-400">running…</span>
+              ) : (
+                <>
+                  <span className="text-[10px] text-green-400">{lastRun.success_count} ok</span>
+                  {lastRun.error_count > 0 && (
+                    <span className="text-[10px] text-red-400">{lastRun.error_count} err</span>
+                  )}
+                </>
+              )}
+              {lastRun.started_at && (
+                <span className="text-[10px] text-gray-600 ml-auto">{formatRelativeTime(lastRun.started_at)}</span>
+              )}
+            </div>
+          </>
+        ) : (
+          <div className="text-xl font-bold text-gray-600">—</div>
+        )}
+      </div>
     </div>
+  );
+}
+
+function StatTile({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="bg-surface-panel border border-gray-800 rounded-xl px-5 py-4">
+      <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">{label}</div>
+      <div className="text-xl font-bold text-gray-100">{value}</div>
+    </div>
+  );
+}
+
+// ---- Quick-run bar ----
+
+type RunKind = 'run' | 'build' | 'test' | 'seed';
+
+const RUN_BUTTONS: { kind: RunKind; label: string; color: string }[] = [
+  { kind: 'run',   label: 'Run',   color: 'border-blue-600 text-blue-400 hover:bg-blue-900/40' },
+  { kind: 'build', label: 'Build', color: 'border-purple-600 text-purple-400 hover:bg-purple-900/40' },
+  { kind: 'test',  label: 'Test',  color: 'border-yellow-600 text-yellow-400 hover:bg-yellow-900/40' },
+  { kind: 'seed',  label: 'Seed',  color: 'border-green-600 text-green-400 hover:bg-green-900/40' },
+];
+
+function QuickRunBar({
+  activeRun,
+  onRun,
+}: {
+  activeRun: RunKind | null;
+  onRun: (kind: RunKind) => void;
+}) {
+  return (
+    <div className="mb-4 bg-surface-panel border border-gray-800 rounded-xl px-5 py-4">
+      <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-3">Quick Run</div>
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-gray-600 mr-1">Full project:</span>
+        {RUN_BUTTONS.map(({ kind, label, color }) => (
+          <button
+            key={kind}
+            onClick={() => onRun(kind)}
+            disabled={activeRun !== null}
+            className={`px-3 py-1 rounded text-xs font-semibold tracking-wide border transition-colors
+              disabled:opacity-40 disabled:cursor-not-allowed ${color}`}
+          >
+            {label}
+          </button>
+        ))}
+        {activeRun && (
+          <span className="ml-2 text-xs text-gray-500 italic">
+            Running… check the Run tab below for live output
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---- Recent runs ----
+
+const STATUS_COLORS: Record<string, string> = {
+  success: 'bg-green-900/40 text-green-400 border-green-800',
+  error:   'bg-red-900/40 text-red-400 border-red-800',
+  warn:    'bg-yellow-900/40 text-yellow-400 border-yellow-800',
+  running: 'bg-brand-900/40 text-brand-400 border-brand-800',
+};
+
+function RecentRuns({ runs, onViewAll }: { runs: RunInvocationDto[]; onViewAll: () => void }) {
+  if (runs.length === 0) return null;
+
+  return (
+    <div className="mb-4 bg-surface-panel border border-gray-800 rounded-xl overflow-hidden">
+      <div className="flex items-center justify-between px-5 py-3 border-b border-gray-800">
+        <span className="text-[10px] text-gray-600 uppercase tracking-wider">Recent Runs</span>
+        <button
+          onClick={onViewAll}
+          className="text-xs text-brand-400 hover:text-brand-300 transition-colors"
+        >
+          View all →
+        </button>
+      </div>
+      <div className="divide-y divide-gray-800/50">
+        {runs.map((run) => {
+          const statusStyle = STATUS_COLORS[run.status] ?? 'bg-gray-800 text-gray-400 border-gray-700';
+          const selector = run.selector ? run.selector : 'all models';
+          const duration = run.duration_seconds != null
+            ? run.duration_seconds < 60
+              ? `${run.duration_seconds.toFixed(1)}s`
+              : `${(run.duration_seconds / 60).toFixed(1)}m`
+            : null;
+
+          return (
+            <div key={run.id} className="flex items-center gap-4 px-5 py-3">
+              <span className={`inline-flex items-center px-2 py-0.5 rounded border text-[10px] font-medium uppercase tracking-wider shrink-0 ${statusStyle}`}>
+                {run.status}
+              </span>
+              <div className="flex-1 min-w-0">
+                <span className="text-xs text-gray-200 font-mono font-medium">dbt {run.command}</span>
+                {run.selector && (
+                  <span className="ml-1.5 text-xs text-gray-500 font-mono truncate">{selector}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 shrink-0 text-right">
+                {duration && <span className="text-xs text-gray-500">{duration}</span>}
+                {run.model_count > 0 && (
+                  <span className="text-xs text-gray-600">{run.model_count} model{run.model_count !== 1 ? 's' : ''}</span>
+                )}
+                {run.started_at && (
+                  <span className="text-xs text-gray-600">{formatRelativeTime(run.started_at)}</span>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -375,8 +508,6 @@ function YamlViewer({ content }: { content: string }) {
       ref={containerRef}
       style={{ minHeight: 100 }}
       onWheelCapture={(e) => {
-        // Monaco captures wheel events even when the editor can't scroll (vertical hidden).
-        // Re-dispatch on the nearest scrollable ancestor so the page scrolls normally.
         const target = e.currentTarget;
         let ancestor = target.parentElement;
         while (ancestor) {
@@ -389,7 +520,6 @@ function YamlViewer({ content }: { content: string }) {
           }
           ancestor = ancestor.parentElement;
         }
-        // No scrollable ancestor found — let the event propagate naturally.
       }}
     >
       <Editor
@@ -438,8 +568,7 @@ function ProjectFilesPanel({ project }: { project: Project }) {
   const content = project[active.field] as string;
 
   return (
-    <div className="mt-6 bg-surface-panel border border-gray-800 rounded-xl overflow-hidden">
-      {/* Tab bar */}
+    <div className="mt-4 bg-surface-panel border border-gray-800 rounded-xl overflow-hidden">
       <div className="flex items-center gap-1 px-4 border-b border-gray-800" style={{ height: 40 }}>
         {available.map((tab) => (
           <button
@@ -456,7 +585,6 @@ function ProjectFilesPanel({ project }: { project: Project }) {
         ))}
       </div>
 
-      {/* Content — expands to full file height, page scrolls */}
       {active.id === 'readme' ? (
         <div className="px-6 py-5 prose-readme">
           <ReactMarkdown>{content}</ReactMarkdown>
@@ -556,72 +684,15 @@ function AppPickerModal({
   );
 }
 
+// ---- Utilities ----
 
-// ---- Collapsible section ----
-
-function CollapsibleSection({
-  title,
-  storageKey,
-  children,
-}: {
-  title: string;
-  storageKey: string;
-  children: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(() => {
-    const stored = localStorage.getItem(storageKey);
-    return stored === null ? true : stored === 'true';
-  });
-
-  const toggle = () => {
-    setOpen((prev) => {
-      localStorage.setItem(storageKey, String(!prev));
-      return !prev;
-    });
-  };
-
-  return (
-    <div className="mb-4">
-      <button
-        onClick={toggle}
-        className="flex items-center gap-1.5 mb-3 text-xs font-semibold uppercase tracking-widest text-gray-500 hover:text-gray-300 transition-colors"
-      >
-        <svg
-          className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`}
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-          strokeWidth={2.5}
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
-        {title}
-      </button>
-      {open && children}
-    </div>
-  );
-}
-
-interface ActionTileProps {
-  icon: React.ReactNode;
-  title: string;
-  description: string;
-  onClick: () => void;
-}
-
-function ActionTile({ icon, title, description, onClick }: ActionTileProps) {
-  return (
-    <button
-      onClick={onClick}
-      className="group flex flex-col gap-3 bg-surface-panel border border-gray-800 hover:border-brand-700 hover:bg-surface-elevated/60 rounded-xl px-5 py-4 text-left transition-colors"
-    >
-      <div className="text-brand-400 group-hover:text-brand-300 transition-colors">
-        {icon}
-      </div>
-      <div>
-        <div className="text-sm font-semibold text-gray-100 mb-1">{title}</div>
-        <div className="text-xs text-gray-500 leading-relaxed">{description}</div>
-      </div>
-    </button>
-  );
+function formatRelativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const minutes = Math.floor(diff / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }

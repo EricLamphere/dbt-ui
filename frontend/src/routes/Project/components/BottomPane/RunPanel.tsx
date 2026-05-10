@@ -46,7 +46,7 @@ function ProjectRunButtons({ projectId, disabled }: ProjectRunButtonsProps) {
   return (
     <div className="flex items-center gap-2">
       <span className="text-xs text-gray-600 mr-1">Full project:</span>
-      {btn('Run', 'run', 'border-brand-600 text-brand-400 hover:bg-brand-900/40')}
+      {btn('Run', 'run', 'border-blue-600 text-blue-400 hover:bg-blue-900/40')}
       {btn('Build', 'build', 'border-purple-600 text-purple-400 hover:bg-purple-900/40')}
       {btn('Test', 'test', 'border-yellow-600 text-yellow-400 hover:bg-yellow-900/40')}
       {btn('Seed', 'seed', 'border-green-600 text-green-400 hover:bg-green-900/40')}

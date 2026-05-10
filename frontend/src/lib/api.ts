@@ -205,6 +205,8 @@ export interface RunInvocationDto {
   finished_at: string | null;
   duration_seconds: number | null;
   model_count: number;
+  success_count: number;
+  error_count: number;
 }
 
 export interface ModelTimingDto {
