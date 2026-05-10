@@ -57,6 +57,10 @@ class ModelStatus(Base):
     parent_model_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="idle")
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    execution_time: Mapped[float | None] = mapped_column(nullable=True)
+    invocation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("run_invocations.id", ondelete="SET NULL"), nullable=True
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -158,3 +162,27 @@ class RunInvocation(Base):
     log_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    node_results: Mapped[list["InvocationModelResult"]] = relationship(
+        back_populates="invocation", cascade="all, delete-orphan"
+    )
+
+
+class InvocationModelResult(Base):
+    __tablename__ = "invocation_model_results"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    invocation_id: Mapped[int] = mapped_column(
+        ForeignKey("run_invocations.id", ondelete="CASCADE"), index=True
+    )
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    unique_id: Mapped[str] = mapped_column(String(512))
+    name: Mapped[str] = mapped_column(String(255))
+    kind: Mapped[str] = mapped_column(String(32))  # "model" or "test"
+    status: Mapped[str] = mapped_column(String(32))
+    execution_time: Mapped[float | None] = mapped_column(nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    invocation: Mapped["RunInvocation"] = relationship(back_populates="node_results")

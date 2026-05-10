@@ -109,6 +109,67 @@ async def run_migrations() -> None:
             )
             await session.commit()
 
+        if not await _table_exists(session, "run_invocations"):
+            await session.execute(text(
+                "CREATE TABLE run_invocations ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, "
+                "command TEXT NOT NULL, "
+                "selector TEXT, "
+                "status TEXT NOT NULL DEFAULT 'pending', "
+                "log_path TEXT, "
+                "started_at DATETIME, "
+                "finished_at DATETIME)"
+            ))
+            await session.commit()
+
+        if not await _column_exists(session, "model_statuses", "execution_time"):
+            await session.execute(
+                text("ALTER TABLE model_statuses ADD COLUMN execution_time REAL")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "model_statuses", "invocation_id"):
+            await session.execute(
+                text(
+                    "ALTER TABLE model_statuses ADD COLUMN invocation_id INTEGER"
+                    " REFERENCES run_invocations(id) ON DELETE SET NULL"
+                )
+            )
+            await session.commit()
+
+        # Reset any run invocations left in running/pending state from a crashed server process
+        await session.execute(
+            text(
+                "UPDATE run_invocations SET status = 'error'"
+                " WHERE status IN ('running', 'pending')"
+            )
+        )
+        await session.commit()
+
+        # Per-invocation per-node result history (replaces overwriting model_statuses)
+        if not await _table_exists(session, "invocation_model_results"):
+            await session.execute(text(
+                "CREATE TABLE invocation_model_results ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "invocation_id INTEGER NOT NULL REFERENCES run_invocations(id) ON DELETE CASCADE, "
+                "project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, "
+                "unique_id TEXT NOT NULL, "
+                "name TEXT NOT NULL, "
+                "kind TEXT NOT NULL, "
+                "status TEXT NOT NULL, "
+                "execution_time REAL, "
+                "message TEXT)"
+            ))
+            await session.commit()
+            await session.execute(text(
+                "CREATE INDEX idx_imr_invocation ON invocation_model_results(invocation_id)"
+            ))
+            await session.execute(text(
+                "CREATE INDEX idx_imr_project_uid ON invocation_model_results(project_id, unique_id)"
+            ))
+            await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()

@@ -21,12 +21,16 @@ interface ProjectRunButtonsProps {
 }
 
 function ProjectRunButtons({ projectId, disabled }: ProjectRunButtonsProps) {
-  const run = useCallback((cmd: 'run' | 'build' | 'test') => {
-    const fn = api.runs[cmd];
-    fn(projectId, '', 'only').catch(() => {});
+  const run = useCallback((cmd: 'run' | 'build' | 'test' | 'seed') => {
+    if (cmd === 'seed') {
+      api.runs.seed(projectId, '', 'only').catch(() => {});
+    } else {
+      const fn = api.runs[cmd];
+      fn(projectId, '', 'only').catch(() => {});
+    }
   }, [projectId]);
 
-  const btn = (label: string, cmd: 'run' | 'build' | 'test', color: string) => (
+  const btn = (label: string, cmd: 'run' | 'build' | 'test' | 'seed', color: string) => (
     <button
       key={cmd}
       onClick={() => run(cmd)}
@@ -45,6 +49,7 @@ function ProjectRunButtons({ projectId, disabled }: ProjectRunButtonsProps) {
       {btn('Run', 'run', 'border-brand-600 text-brand-400 hover:bg-brand-900/40')}
       {btn('Build', 'build', 'border-purple-600 text-purple-400 hover:bg-purple-900/40')}
       {btn('Test', 'test', 'border-yellow-600 text-yellow-400 hover:bg-yellow-900/40')}
+      {btn('Seed', 'seed', 'border-green-600 text-green-400 hover:bg-green-900/40')}
     </div>
   );
 }
@@ -256,6 +261,7 @@ function RunPanelInner({ projectId, graph, onRunStart }: RunPanelProps) {
   const commandColor =
     runInfo?.command === 'run'   ? 'text-brand-400' :
     runInfo?.command === 'build' ? 'text-purple-400' :
+    runInfo?.command === 'seed'  ? 'text-green-400' :
     'text-yellow-400';
 
   if (!runInfo) {

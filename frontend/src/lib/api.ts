@@ -196,6 +196,44 @@ export interface FreshnessSnapshot {
   error_message: string | null;
 }
 
+export interface RunInvocationDto {
+  id: number;
+  command: string;
+  selector: string | null;
+  status: string;
+  started_at: string | null;
+  finished_at: string | null;
+  duration_seconds: number | null;
+  model_count: number;
+}
+
+export interface ModelTimingDto {
+  unique_id: string;
+  name: string;
+  kind: string;
+  status: string;
+  execution_time: number | null;
+  message: string | null;
+}
+
+export interface RunInvocationDetailDto extends RunInvocationDto {
+  nodes: ModelTimingDto[];
+}
+
+export interface RunHistoryPageDto {
+  items: RunInvocationDto[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export interface NodeTrendPoint {
+  invocation_id: number;
+  started_at: string | null;
+  execution_time: number | null;
+  status: string;
+}
+
 export interface ColumnLineageEntry {
   node: string;
   column: string;
@@ -463,6 +501,23 @@ export const api = {
       post(`/projects/${projectId}/test`, { model: model || null, mode, select: select ?? null, ...opts }),
     seed: (projectId: number, model: string, mode: string, opts?: RunOpts, select?: string) =>
       post(`/projects/${projectId}/seed`, { model: model || null, mode, select: select ?? null, ...opts }),
+  },
+  runHistory: {
+    list: (projectId: number, params: { limit?: number; offset?: number; command?: string; status?: string; q?: string } = {}) => {
+      const p = new URLSearchParams();
+      if (params.limit !== undefined) p.set('limit', String(params.limit));
+      if (params.offset !== undefined) p.set('offset', String(params.offset));
+      if (params.command) p.set('command', params.command);
+      if (params.status) p.set('status', params.status);
+      if (params.q) p.set('q', params.q);
+      return get<RunHistoryPageDto>(`/projects/${projectId}/run-history?${p}`);
+    },
+    detail: (projectId: number, invocationId: number) =>
+      get<RunInvocationDetailDto>(`/projects/${projectId}/run-history/${invocationId}`),
+    log: (projectId: number, invocationId: number) =>
+      get<{ lines: string[] }>(`/projects/${projectId}/run-history/${invocationId}/log`),
+    nodeTrend: (projectId: number, uniqueId: string) =>
+      get<NodeTrendPoint[]>(`/projects/${projectId}/node-trend/${encodeURIComponent(uniqueId)}`),
   },
   files: {
     list: (projectId: number, path = '') =>

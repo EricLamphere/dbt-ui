@@ -1,6 +1,6 @@
 import { Link, NavLink } from 'react-router-dom';
 
-export type CurrentPage = 'home' | 'dag' | 'init' | 'files' | 'environment' | 'docs' | 'git' | 'workspace' | 'health';
+export type CurrentPage = 'home' | 'dag' | 'init' | 'files' | 'environment' | 'docs' | 'git' | 'workspace' | 'health' | 'runs';
 
 interface Props {
   projectId: number;
@@ -85,13 +85,20 @@ const HEALTH_ICON = (
   </svg>
 );
 
+const RUNS_ICON = (
+  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+  </svg>
+);
+
 const PROJECT_ITEMS: { key: CurrentPage; label: string; icon: React.ReactNode; path: string }[] = [
   { key: 'files',     label: 'Files',          icon: FILES_ICON,     path: 'files' },
   { key: 'dag',       label: 'DAG',            icon: DAG_ICON,       path: 'models' },
   { key: 'docs',      label: 'Docs',           icon: DOCS_ICON,      path: 'docs' },
   { key: 'workspace', label: 'SQL Workspace',  icon: WORKSPACE_ICON, path: 'workspace' },
-  { key: 'git',       label: 'Source Control', icon: GIT_ICON,       path: 'git' },
+  { key: 'runs',      label: 'Run History',    icon: RUNS_ICON,      path: 'runs' },
   { key: 'health',    label: 'Health',         icon: HEALTH_ICON,    path: 'health' },
+  { key: 'git',       label: 'Source Control', icon: GIT_ICON,       path: 'git' },
 ];
 
 function NavSection({

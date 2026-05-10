@@ -11,6 +11,7 @@ import DocsPage from './routes/Project/Docs';
 import GitPage from './routes/Project/Git';
 import WorkspacePage from './routes/Project/Workspace';
 import HealthPage from './routes/Project/Health';
+import RunHistoryPage from './routes/Project/RunHistory';
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
               <Route path="git" element={<GitPage />} />
               <Route path="workspace" element={<WorkspacePage />} />
               <Route path="health" element={<HealthPage />} />
+              <Route path="runs" element={<RunHistoryPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

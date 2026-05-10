@@ -21,7 +21,7 @@ export function useProjectEvents(projectId: number | null, onEvent: SseHandler) 
       es = new EventSource(url);
 
       const types = [
-        'run_started', 'run_log', 'run_finished', 'run_error',
+        'run_started', 'run_log', 'run_finished', 'run_error', 'run_history_changed',
         'statuses_changed', 'graph_changed', 'files_changed',
         'init_pipeline_started', 'init_step', 'init_pipeline_finished',
         'compile_started', 'compile_finished',

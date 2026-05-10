@@ -67,6 +67,10 @@ Click any tile to see the model's last run message in the SidePane.
 
 When tests fail, the SidePane shows a **Test Failures** section listing each failing test with its name and failure message. The **test** run controls in the SidePane let you re-run tests in isolation.
 
+## Reviewing past runs
+
+Every invocation is recorded in **Run History** (clock icon in the left nav). From there you can browse past runs, inspect per-node execution times and trends, and view the raw dbt log. See [View run history](view-run-history.md) for details.
+
 ## Troubleshooting
 
 **Run button does nothing** — Check the Project Logs tab for errors. The dbt binary may not be found, or there may be a configuration issue.

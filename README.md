@@ -26,6 +26,7 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 - **Health check** — run `dbt debug` from the UI and see a structured pass/fail table per check (connection, profiles.yml, project.yml, etc.) with version info and raw log
 - **Schema drift** — scan all materialized models and compare warehouse column schemas against `manifest.json` declarations; shows per-model diffs (added/removed/type-mismatch columns)
 - **Column profiling** — run a column profile on any model from the SidePane to see row count, null%, distinct count, min/max, and sample values per column
+- **Run history** — paginated log of every dbt invocation with command, selector, duration, and node count; click any run to open a detail panel showing per-node execution times, status, and result messages; expand any node row to see a sparkline trend across its last 20 runs; raw dbt log available on a separate tab; filter by command or status
 
 ## Stack highlights
 - Backend: FastAPI, SQLAlchemy (async), aiosqlite, sse-starlette, watchfiles, ptyprocess
