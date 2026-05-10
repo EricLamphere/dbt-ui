@@ -50,7 +50,7 @@ function Chip({ label, dim = false }: { label: string; dim?: boolean }) {
 // Shared run options component — scope toggles, full refresh, threads
 interface VarEntry { key: string; value: string }
 
-interface RunOptionsState {
+export interface RunOptionsState {
   upstream: boolean;
   downstream: boolean;
   fullRefresh: boolean;
@@ -60,7 +60,7 @@ interface RunOptionsState {
   vars: VarEntry[];
 }
 
-type RunOptionsAction =
+export type RunOptionsAction =
   | { type: 'toggle'; field: 'upstream' | 'downstream' | 'fullRefresh' | 'debug' | 'empty' }
   | { type: 'setUpstream'; value: boolean }
   | { type: 'setDownstream'; value: boolean }
@@ -117,7 +117,7 @@ function Pill({ active, label, onClick }: { active: boolean; label: string; onCl
   );
 }
 
-function RunOptions({ state, dispatch }: { state: RunOptionsState; dispatch: (a: RunOptionsAction) => void }) {
+export function RunOptions({ state, dispatch }: { state: RunOptionsState; dispatch: (a: RunOptionsAction) => void }) {
   return (
     <div className="flex flex-col gap-2">
       {/* Row 1: scope pills */}

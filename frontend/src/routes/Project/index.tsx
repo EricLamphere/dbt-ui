@@ -1,12 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import ReactMarkdown from 'react-markdown';
 import Editor from '@monaco-editor/react';
-import { api, type GraphDto, type Project, type RunInvocationDto } from '../../lib/api';
+import { api, type GraphDto, type Project, type RunInvocationDto, type RunOpts } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 import { useTheme } from '../../lib/useTheme';
 import NavRail from './components/NavRail';
+import {
+  runOptionsInitial,
+  runOptionsReducer,
+  runOptsFromState,
+} from './components/SidePane/PropertiesTab';
+import { QuickRunBar, type RunKind } from './components/QuickRunBar';
 
 const PLATFORM_ICONS: Record<string, string> = {
   postgres: '🐘', bigquery: '☁️', snowflake: '❄️', redshift: '🔴',
@@ -137,9 +143,29 @@ export default function ProjectHome() {
     }
   };
 
+  // Custom run state
+  const [customSelector, setCustomSelector] = useState('');
+  const [customOpts, dispatchCustomOpts] = useReducer(runOptionsReducer, undefined, runOptionsInitial);
+  const [customActiveRun, setCustomActiveRun] = useState<RunKind | null>(null);
+  const [customExpanded, setCustomExpanded] = useState(false);
+
+  const handleCustomRun = async (kind: RunKind) => {
+    if (customActiveRun) return;
+    setCustomActiveRun(kind);
+    try {
+      const { _mode, ...opts } = runOptsFromState(customOpts) as RunOpts & { _mode: string };
+      const selector = customSelector.trim();
+      if (kind === 'seed') api.runs.seed(id, selector, _mode, opts).catch(() => {});
+      else api.runs[kind](id, selector, _mode, opts).catch(() => {});
+    } finally {
+      setCustomActiveRun(null);
+    }
+  };
+
   useProjectEvents(id, useCallback((event) => {
     if (event.type === 'run_finished' || event.type === 'run_error') {
       setActiveRun(null);
+      setCustomActiveRun(null);
     }
   }, []));
 
@@ -295,7 +321,18 @@ export default function ProjectHome() {
           {graph && <StatsSummary graph={graph} recentRuns={recentRunsPage?.items ?? []} />}
 
           {/* Quick-run bar */}
-          <QuickRunBar activeRun={activeRun} onRun={handleQuickRun} />
+          <QuickRunBar
+            activeRun={activeRun}
+            onRun={handleQuickRun}
+            customSelector={customSelector}
+            onCustomSelectorChange={setCustomSelector}
+            customOpts={customOpts}
+            dispatchCustomOpts={dispatchCustomOpts}
+            customActiveRun={customActiveRun}
+            onCustomRun={handleCustomRun}
+            customExpanded={customExpanded}
+            onToggleCustomExpanded={() => setCustomExpanded((v) => !v)}
+          />
 
           {/* Recent runs */}
           <RecentRuns
@@ -380,50 +417,6 @@ function StatTile({ label, value }: { label: string; value: number }) {
     <div className="bg-surface-panel border border-gray-800 rounded-xl px-5 py-4">
       <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">{label}</div>
       <div className="text-xl font-bold text-gray-100">{value}</div>
-    </div>
-  );
-}
-
-// ---- Quick-run bar ----
-
-type RunKind = 'run' | 'build' | 'test' | 'seed';
-
-const RUN_BUTTONS: { kind: RunKind; label: string; color: string }[] = [
-  { kind: 'run',   label: 'Run',   color: 'border-blue-600 text-blue-400 hover:bg-blue-900/40' },
-  { kind: 'build', label: 'Build', color: 'border-purple-600 text-purple-400 hover:bg-purple-900/40' },
-  { kind: 'test',  label: 'Test',  color: 'border-yellow-600 text-yellow-400 hover:bg-yellow-900/40' },
-  { kind: 'seed',  label: 'Seed',  color: 'border-green-600 text-green-400 hover:bg-green-900/40' },
-];
-
-function QuickRunBar({
-  activeRun,
-  onRun,
-}: {
-  activeRun: RunKind | null;
-  onRun: (kind: RunKind) => void;
-}) {
-  return (
-    <div className="mb-4 bg-surface-panel border border-gray-800 rounded-xl px-5 py-4">
-      <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-3">Quick Run</div>
-      <div className="flex items-center gap-2">
-        <span className="text-xs text-gray-600 mr-1">Full project:</span>
-        {RUN_BUTTONS.map(({ kind, label, color }) => (
-          <button
-            key={kind}
-            onClick={() => onRun(kind)}
-            disabled={activeRun !== null}
-            className={`px-3 py-1 rounded text-xs font-semibold tracking-wide border transition-colors
-              disabled:opacity-40 disabled:cursor-not-allowed ${color}`}
-          >
-            {label}
-          </button>
-        ))}
-        {activeRun && (
-          <span className="ml-2 text-xs text-gray-500 italic">
-            Running… check the Run tab below for live output
-          </span>
-        )}
-      </div>
     </div>
   );
 }
