@@ -98,6 +98,32 @@ html[data-theme="light"] {
   }
 }
 
+/* Status badge — theme-aware colors */
+.status-badge-success { background-color: rgb(6 78 59 / 0.6);   color: rgb(52 211 153);  border-color: rgb(6 78 59); }
+.status-badge-error   { background-color: rgb(127 29 29 / 0.6); color: rgb(252 165 165); border-color: rgb(127 29 29); }
+.status-badge-stale   { background-color: rgb(120 53 15 / 0.6); color: rgb(252 211 77);  border-color: rgb(120 53 15); }
+.status-badge-warn    { background-color: rgb(113 63 18 / 0.6); color: rgb(253 224 71);  border-color: rgb(113 63 18); }
+.status-badge-pending { background-color: rgb(23 37 84 / 0.6);  color: rgb(147 197 253); border-color: rgb(23 37 84); }
+.status-badge-running { background-color: rgb(23 37 84 / 0.4);  color: rgb(253 224 71);  border-color: rgb(23 37 84); }
+
+html[data-theme="light"] .status-badge-success { background-color: rgb(220 252 231); color: rgb(21 128 61);  border-color: rgb(134 239 172); }
+html[data-theme="light"] .status-badge-error   { background-color: rgb(254 226 226); color: rgb(185 28 28); border-color: rgb(252 165 165); }
+html[data-theme="light"] .status-badge-stale   { background-color: rgb(254 243 199); color: rgb(146 64 14); border-color: rgb(253 211 77);  }
+html[data-theme="light"] .status-badge-warn    { background-color: rgb(254 249 195); color: rgb(133 77 14); border-color: rgb(253 224 71);  }
+html[data-theme="light"] .status-badge-pending { background-color: rgb(219 234 254); color: rgb(29 78 216); border-color: rgb(147 197 253); }
+html[data-theme="light"] .status-badge-running { background-color: rgb(254 249 195); color: rgb(133 77 14); border-color: rgb(253 224 71);  }
+
+/* Command badge — theme-aware colors */
+.cmd-badge-run   { background-color: rgb(30 58 138 / 0.3); color: rgb(147 197 253); }
+.cmd-badge-build { background-color: rgb(76 29 149 / 0.3); color: rgb(196 181 253); }
+.cmd-badge-test  { background-color: rgb(120 53 15 / 0.3); color: rgb(252 211 77); }
+.cmd-badge-seed  { background-color: rgb(19 78 74 / 0.3); color: rgb(94 234 212); }
+
+html[data-theme="light"] .cmd-badge-run   { background-color: rgb(219 234 254); color: rgb(29 78 216); }
+html[data-theme="light"] .cmd-badge-build { background-color: rgb(237 233 254); color: rgb(109 40 217); }
+html[data-theme="light"] .cmd-badge-test  { background-color: rgb(254 243 199); color: rgb(146 64 14); }
+html[data-theme="light"] .cmd-badge-seed  { background-color: rgb(204 251 241); color: rgb(15 118 110); }
+
 /* README markdown styles */
 .prose-readme {
   color: rgb(var(--gray-300));

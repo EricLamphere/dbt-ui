@@ -1,61 +1,198 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderOpen, Plus, RefreshCw, Settings2, Database } from 'lucide-react';
 import { api, type Project } from '../lib/api';
 import NewProjectModal from './Project/components/NewProjectModal';
 import { GlobalSettingsModal } from '../components/GlobalSettingsModal';
 
-const PLATFORM_ICONS: Record<string, string> = {
-  postgres: '🐘',
-  bigquery: '☁️',
-  snowflake: '❄️',
-  redshift: '🔴',
-  duckdb: '🦆',
-  spark: '⚡',
-  databricks: '🧱',
-  athena: '🦉',
-  trino: '🔷',
-  clickhouse: '🏡',
-  unknown: '⬡',
+// ── Platform config ───────────────────────────────────────────────────────────
+
+const PLATFORM_META: Record<string, { icon: string; accent: string }> = {
+  postgres:   { icon: '🐘', accent: 'border-blue-700/60' },
+  bigquery:   { icon: '☁️', accent: 'border-sky-700/60' },
+  snowflake:  { icon: '❄️', accent: 'border-cyan-700/60' },
+  redshift:   { icon: '🔴', accent: 'border-red-700/60' },
+  duckdb:     { icon: '🦆', accent: 'border-yellow-700/60' },
+  spark:      { icon: '⚡', accent: 'border-orange-700/60' },
+  databricks: { icon: '🧱', accent: 'border-orange-800/60' },
+  athena:     { icon: '🦉', accent: 'border-purple-700/60' },
+  trino:      { icon: '🔷', accent: 'border-indigo-700/60' },
+  clickhouse: { icon: '🏡', accent: 'border-yellow-600/60' },
+  unknown:    { icon: '⬡',  accent: 'border-gray-700/60' },
 };
 
-function PlatformBadge({ platform }: { platform: string }) {
-  const icon = PLATFORM_ICONS[platform.toLowerCase()] ?? PLATFORM_ICONS.unknown;
+function platformMeta(platform: string) {
+  return PLATFORM_META[platform.toLowerCase()] ?? PLATFORM_META.unknown;
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function StatusPill({ status }: { status: string }) {
+  const map: Record<string, string> = {
+    success: 'bg-green-900/50 text-green-400 border border-green-800/50',
+    error:   'bg-red-900/50 text-red-400 border border-red-800/50',
+    warn:    'bg-yellow-900/50 text-yellow-400 border border-yellow-800/50',
+    running: 'bg-brand-900/50 text-brand-400 border border-brand-800/50',
+  };
+  const cls = map[status] ?? 'bg-zinc-800 text-zinc-400 border border-zinc-700';
   return (
-    <span className="flex items-center gap-1 text-xs text-gray-400 bg-surface-elevated px-2 py-0.5 rounded-full">
-      <span>{icon}</span>
-      <span className="capitalize">{platform}</span>
+    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${cls}`}>
+      {status}
     </span>
   );
 }
 
-interface ProjectCardProps {
-  project: Project;
-  onClick: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
+function timeAgo(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
 
-function ProjectCard({ project, onClick, onContextMenu }: ProjectCardProps) {
+const RESOURCE_COLOR: Record<string, string> = {
+  models:  'text-brand-400',
+  sources: 'text-blue-400',
+  seeds:   'text-emerald-400',
+  tests:   'text-red-400',
+};
+
+function CountChip({ label, count }: { label: string; count: number }) {
+  return (
+    <span className="flex items-center gap-1 text-[11px] text-gray-500">
+      <span className={`font-medium ${RESOURCE_COLOR[label] ?? 'text-gray-400'}`}>{count}</span>
+      {label}
+    </span>
+  );
+}
+
+// ── Project card ──────────────────────────────────────────────────────────────
+
+interface ProjectCardProps {
+  project: Project;
+  focused: boolean;
+  cardRef: (el: HTMLButtonElement | null) => void;
+  onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
+  onFocus: () => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
+}
+
+function ProjectCard({ project, focused, cardRef, onClick, onContextMenu, onFocus, onKeyDown }: ProjectCardProps) {
+  const meta = platformMeta(project.platform);
+
+  const { data: history } = useQuery({
+    queryKey: ['run-history-latest', project.id],
+    queryFn: () => api.runHistory.list(project.id, { limit: 1 }),
+    staleTime: 60_000,
+  });
+
+  const { data: graph } = useQuery({
+    queryKey: ['graph', project.id],
+    queryFn: () => api.models.graph(project.id),
+    staleTime: 5 * 60_000,
+  });
+
+  const latest = history?.items[0];
+
+  const counts = graph
+    ? {
+        models:  graph.nodes.filter((n: { resource_type: string }) => n.resource_type === 'model').length,
+        sources: graph.nodes.filter((n: { resource_type: string }) => n.resource_type === 'source').length,
+        seeds:   graph.nodes.filter((n: { resource_type: string }) => n.resource_type === 'seed').length,
+        tests:   graph.nodes.filter((n: { resource_type: string }) => n.resource_type === 'test').length,
+      }
+    : null;
+
   return (
     <button
+      ref={cardRef}
       onClick={onClick}
       onContextMenu={onContextMenu}
-      className="w-full flex items-center justify-between bg-surface-panel border border-gray-800 rounded-xl px-5 py-4 hover:border-brand-700 hover:bg-surface-elevated/60 transition-colors text-left"
+      onFocus={onFocus}
+      onKeyDown={onKeyDown}
+      className={[
+        'group flex flex-col gap-3 bg-surface-panel border rounded-xl p-4 text-left',
+        'hover:border-brand-600/70 hover:bg-surface-elevated/60 transition-all duration-150',
+        'focus:outline-none',
+        focused
+          ? 'ring-2 ring-brand-500 border-brand-600/70'
+          : `border-gray-800 ${meta.accent}`,
+      ].join(' ')}
     >
-      <div className="flex flex-col gap-1 min-w-0">
-        <div className="flex items-center gap-3">
-          <span className="font-semibold text-gray-100">{project.name}</span>
-          <PlatformBadge platform={project.platform} />
+      {/* Header */}
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-base leading-none">{meta.icon}</span>
+          <span className="font-semibold text-gray-100 truncate">{project.name}</span>
         </div>
-        <span className="text-xs text-gray-500 truncate font-mono">{project.path}</span>
+        {latest && <StatusPill status={latest.status} />}
       </div>
-      <svg className="w-4 h-4 text-gray-600 shrink-0 ml-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-      </svg>
+
+      {/* Path */}
+      <span className="text-[11px] text-gray-600 truncate font-mono leading-none">
+        {project.path}
+      </span>
+
+      {/* Footer: node type counts */}
+      <div className="flex items-center gap-2.5 mt-auto pt-2 border-t border-gray-800/60">
+        {counts ? (
+          <>
+            <CountChip label="models"  count={counts.models} />
+            <span className="text-gray-700 text-[11px]">·</span>
+            <CountChip label="sources" count={counts.sources} />
+            <span className="text-gray-700 text-[11px]">·</span>
+            <CountChip label="seeds"   count={counts.seeds} />
+            <span className="text-gray-700 text-[11px]">·</span>
+            <CountChip label="tests"   count={counts.tests} />
+          </>
+        ) : (
+          <span className="text-[11px] text-gray-700 italic">loading…</span>
+        )}
+      </div>
     </button>
   );
 }
+
+// ── Stats bar ─────────────────────────────────────────────────────────────────
+
+function StatsBar({ projects, lastRunAt }: { projects: Project[]; lastRunAt: string | null }) {
+  const platforms = Array.from(new Set(projects.map((p) => p.platform))).sort();
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-xs text-gray-500">
+      <span>
+        <span className="font-medium text-gray-300">{projects.length}</span>{' '}
+        {projects.length === 1 ? 'project' : 'projects'}
+      </span>
+      {platforms.length > 0 && (
+        <span className="flex items-center gap-2">
+          {platforms.map((p) => {
+            const m = platformMeta(p);
+            const count = projects.filter((pr) => pr.platform === p).length;
+            return (
+              <span key={p} className="flex items-center gap-1">
+                <span>{m.icon}</span>
+                <span className="capitalize">{p}</span>
+                {count > 1 && <span className="text-gray-600">×{count}</span>}
+              </span>
+            );
+          })}
+        </span>
+      )}
+      {lastRunAt && (
+        <span className="ml-auto">
+          last run <span className="text-gray-400">{timeAgo(lastRunAt)}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ── Context menu ──────────────────────────────────────────────────────────────
 
 interface CardMenuState {
   id: number;
@@ -64,13 +201,11 @@ interface CardMenuState {
   isIgnored: boolean;
 }
 
-interface ProjectCardMenuProps {
+function ProjectCardMenu({ menu, onIgnore, onClose }: {
   menu: CardMenuState;
   onIgnore: (id: number, ignored: boolean) => void;
   onClose: () => void;
-}
-
-function ProjectCardMenu({ menu, onIgnore, onClose }: ProjectCardMenuProps) {
+}) {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -81,16 +216,17 @@ function ProjectCardMenu({ menu, onIgnore, onClose }: ProjectCardMenuProps) {
     return () => document.removeEventListener('mousedown', handler);
   }, [onClose]);
 
-  // Clamp to viewport
-  const style: React.CSSProperties = {
-    position: 'fixed',
-    top: Math.min(menu.y, window.innerHeight - 80),
-    left: Math.min(menu.x, window.innerWidth - 160),
-    zIndex: 50,
-  };
-
   return (
-    <div ref={ref} style={style} className="bg-surface-panel border border-gray-700 rounded-lg shadow-xl py-1 w-36">
+    <div
+      ref={ref}
+      style={{
+        position: 'fixed',
+        top: Math.min(menu.y, window.innerHeight - 80),
+        left: Math.min(menu.x, window.innerWidth - 160),
+        zIndex: 50,
+      }}
+      className="bg-surface-panel border border-gray-700 rounded-lg shadow-xl py-1 w-36"
+    >
       <button
         onClick={() => { onIgnore(menu.id, !menu.isIgnored); onClose(); }}
         className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-surface-elevated transition-colors"
@@ -101,6 +237,41 @@ function ProjectCardMenu({ menu, onIgnore, onClose }: ProjectCardMenuProps) {
   );
 }
 
+// ── Empty state ───────────────────────────────────────────────────────────────
+
+function EmptyState({ isConfigured, projectsPath, onNew }: {
+  isConfigured: boolean;
+  projectsPath: string | undefined;
+  onNew: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
+      <div className="w-16 h-16 rounded-2xl bg-surface-elevated border border-gray-800 flex items-center justify-center">
+        <FolderOpen className="w-7 h-7 text-gray-600" />
+      </div>
+      <div className="flex flex-col gap-1">
+        <p className="text-base font-medium text-gray-400">No dbt projects found</p>
+        {projectsPath && (
+          <p className="text-xs font-mono text-gray-700">{projectsPath}</p>
+        )}
+      </div>
+      {isConfigured && (
+        <button
+          onClick={onNew}
+          className="mt-2 flex items-center gap-2 px-4 py-2 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium transition-colors"
+        >
+          <Plus className="w-4 h-4" />
+          Add your first project
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+
+const COLS = 3;
+
 export default function Home() {
   const navigate = useNavigate();
   const qc = useQueryClient();
@@ -110,6 +281,8 @@ export default function Home() {
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [ignoredOpen, setIgnoredOpen] = useState(false);
   const [cardMenu, setCardMenu] = useState<CardMenuState | null>(null);
+  const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+  const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const { data: appSettings } = useQuery({
     queryKey: ['app-settings'],
@@ -131,13 +304,29 @@ export default function Home() {
     enabled: isConfigured,
   });
 
+  // Most recent run across all projects for the stats bar
+  const { data: lastRunAt = null } = useQuery({
+    queryKey: ['run-history-all-recent', projects.map((p) => p.id).join(',')],
+    queryFn: async () => {
+      const results = await Promise.all(
+        projects.slice(0, 10).map((p) => api.runHistory.list(p.id, { limit: 1 }))
+      );
+      const items = results.flatMap((r) => r.items);
+      items.sort((a, b) => {
+        const ta = a.finished_at ? new Date(a.finished_at).getTime() : 0;
+        const tb = b.finished_at ? new Date(b.finished_at).getTime() : 0;
+        return tb - ta;
+      });
+      return items[0]?.finished_at ?? null;
+    },
+    enabled: isConfigured && projects.length > 0,
+    staleTime: 60_000,
+  });
+
   useEffect(() => {
     const handler = () => {
-      if (!isConfigured) {
-        setGlobalSettingsOpen(true);
-      } else {
-        setNewProjectOpen(true);
-      }
+      if (!isConfigured) setGlobalSettingsOpen(true);
+      else setNewProjectOpen(true);
     };
     window.addEventListener('dbt-ui:new-project', handler);
     return () => window.removeEventListener('dbt-ui:new-project', handler);
@@ -173,10 +362,25 @@ export default function Home() {
     setCardMenu({ id: project.id, x: e.clientX, y: e.clientY, isIgnored: project.ignored });
   };
 
-  return (
-    <div className="flex flex-col h-full overflow-auto p-6 gap-6 max-w-5xl mx-auto w-full">
+  // Keyboard navigation — handler lives on each card via onKeyDown + onFocus
+  const makeCardKeyDown = useCallback((idx: number): ((e: React.KeyboardEvent<HTMLButtonElement>) => void) => {
+    return (e) => {
+      const len = activeFiltered.length;
+      let next = idx;
+      if (e.key === 'ArrowRight')      { e.preventDefault(); next = Math.min(idx + 1, len - 1); }
+      else if (e.key === 'ArrowLeft')  { e.preventDefault(); next = Math.max(idx - 1, 0); }
+      else if (e.key === 'ArrowDown')  { e.preventDefault(); next = Math.min(idx + COLS, len - 1); }
+      else if (e.key === 'ArrowUp')    { e.preventDefault(); next = Math.max(idx - COLS, 0); }
+      else { return; }
+      setFocusedIdx(next);
+      cardRefs.current[next]?.focus();
+    };
+  }, [activeFiltered.length]);
 
-      {/* Configuration required banner */}
+  return (
+    <div className="flex flex-col h-full overflow-auto p-6 gap-5 max-w-6xl mx-auto w-full">
+
+      {/* Config banner */}
       {appSettings && !isConfigured && (
         <div className="flex items-center justify-between gap-4 px-4 py-3 bg-amber-950/40 border border-amber-800/60 rounded-lg">
           <div className="flex flex-col gap-0.5">
@@ -194,15 +398,57 @@ export default function Home() {
 
       {/* dbt not found banner */}
       {dbtCoreStatus && !dbtCoreStatus.installed && (
-        <div className="flex items-center justify-between gap-4 px-4 py-3 bg-red-950/40 border border-red-800/60 rounded-lg">
+        <div className="flex items-center gap-4 px-4 py-3 bg-red-950/40 border border-red-800/60 rounded-lg">
           <div className="flex flex-col gap-0.5">
             <p className="text-sm font-medium text-red-300">dbt is not installed</p>
-            <p className="text-xs text-red-500">Add <code className="font-mono">dbt-core</code> and an adapter to your global requirements file, then click Run global setup in the header.</p>
+            <p className="text-xs text-red-500">
+              Add <code className="font-mono">dbt-core</code> and an adapter to your global requirements file, then click Run global setup in the header.
+            </p>
           </div>
         </div>
       )}
 
-      {/* Toolbar */}
+      {/* Workbench header */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="w-9 h-9 rounded-lg bg-surface-elevated border border-gray-800 flex items-center justify-center shrink-0">
+            <Database className="w-4 h-4 text-brand-400" />
+          </div>
+          <div className="flex flex-col">
+            <span className="text-base font-semibold text-gray-100 leading-tight">Projects</span>
+            {dbtCoreStatus?.version && (
+              <span className="text-[11px] text-gray-600 leading-tight">dbt {dbtCoreStatus.version}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setGlobalSettingsOpen(true)}
+            title="Global settings"
+            className="p-2 rounded-lg text-gray-500 hover:text-gray-300 hover:bg-surface-elevated transition-colors"
+          >
+            <Settings2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={handleRescan}
+            disabled={!isConfigured}
+            title="Rescan projects"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-surface-elevated hover:bg-gray-700 text-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed border border-gray-800"
+          >
+            <RefreshCw className="w-3 h-3" />
+            Rescan
+          </button>
+          <button
+            onClick={() => isConfigured ? setNewProjectOpen(true) : setGlobalSettingsOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
+          >
+            <Plus className="w-3 h-3" />
+            New project
+          </button>
+        </div>
+      </div>
+
+      {/* Search + filter */}
       <div className="flex flex-wrap items-center gap-3">
         <input
           type="search"
@@ -224,61 +470,73 @@ export default function Home() {
             ))}
           </select>
         )}
-        <button
-          onClick={handleRescan}
-          disabled={!isConfigured}
-          className="px-3 py-2 text-sm rounded-lg bg-surface-elevated hover:bg-gray-700 text-gray-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-        >
-          ↻ Rescan
-        </button>
       </div>
 
-      {/* Project list */}
+      {/* Stats bar */}
+      {isConfigured && !isLoading && activeProjects.length > 0 && (
+        <StatsBar
+          projects={activeFiltered.length < activeProjects.length ? activeFiltered : activeProjects}
+          lastRunAt={lastRunAt}
+        />
+      )}
+
+      {/* Loading / error */}
       {isLoading && isConfigured && (
         <p className="text-gray-500 text-sm">Discovering projects…</p>
       )}
       {error && (
         <p className="text-red-400 text-sm">Error: {String(error)}</p>
       )}
+
+      {/* Empty state */}
       {isConfigured && !isLoading && activeFiltered.length === 0 && ignoredProjects.length === 0 && (
-        <div className="text-center py-16 text-gray-600">
-          <p className="text-lg mb-2">No dbt projects found</p>
-          <p className="text-xs font-mono text-gray-700">{appSettings?.dbt_projects_path}</p>
+        <EmptyState
+          isConfigured={isConfigured}
+          projectsPath={appSettings?.dbt_projects_path ?? undefined}
+          onNew={() => setNewProjectOpen(true)}
+        />
+      )}
+
+      {/* Project grid */}
+      {activeFiltered.length > 0 && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {activeFiltered.map((project, idx) => (
+            <ProjectCard
+              key={project.id}
+              project={project}
+              focused={focusedIdx === idx}
+              cardRef={(el) => { cardRefs.current[idx] = el; }}
+              onClick={() => navigate(`/projects/${project.id}`)}
+              onContextMenu={(e) => openCardMenu(e, project)}
+              onFocus={() => setFocusedIdx(idx)}
+              onKeyDown={makeCardKeyDown(idx)}
+            />
+          ))}
         </div>
       )}
 
-      <div className="grid gap-3">
-        {activeFiltered.map((project) => (
-          <ProjectCard
-            key={project.id}
-            project={project}
-            onClick={() => navigate(`/projects/${project.id}`)}
-            onContextMenu={(e) => openCardMenu(e, project)}
-          />
-        ))}
-      </div>
-
       {/* Ignored section */}
       {ignoredProjects.length > 0 && (
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col gap-2 mt-2">
           <button
             onClick={() => setIgnoredOpen((v) => !v)}
             className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-400 transition-colors"
           >
-            {ignoredOpen
-              ? <ChevronDown className="w-3 h-3" />
-              : <ChevronRight className="w-3 h-3" />
-            }
+            {ignoredOpen ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
             <span>Ignored ({ignoredProjects.length})</span>
           </button>
           {ignoredOpen && (
-            <div className="grid gap-2 opacity-50">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 opacity-50">
               {ignoredProjects.map((project) => (
                 <ProjectCard
                   key={project.id}
                   project={project}
+                  focused={false}
+                  cardRef={() => {}}
                   onClick={() => navigate(`/projects/${project.id}`)}
                   onContextMenu={(e) => openCardMenu(e, project)}
+                  onFocus={() => {}}
+                  onKeyDown={() => {}}
                 />
               ))}
             </div>
@@ -310,4 +568,3 @@ export default function Home() {
     </div>
   );
 }
-

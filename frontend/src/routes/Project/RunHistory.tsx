@@ -8,9 +8,9 @@ import { useProjectEvents } from '../../lib/sse';
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 function statusCls(status: string) {
-  if (status === 'success') return 'bg-emerald-900/40 text-emerald-300';
-  if (status === 'error') return 'bg-red-900/40 text-red-300';
-  if (status === 'running') return 'bg-yellow-900/40 text-yellow-300';
+  if (status === 'success') return 'status-badge-success';
+  if (status === 'error') return 'status-badge-error';
+  if (status === 'running') return 'status-badge-running';
   return 'bg-zinc-800 text-zinc-400';
 }
 
@@ -39,10 +39,10 @@ function formatTime(iso: string | null): string {
 }
 
 const CMD_COLORS: Record<string, string> = {
-  run:   'text-blue-300 bg-blue-900/30',
-  build: 'text-violet-300 bg-violet-900/30',
-  test:  'text-amber-300 bg-amber-900/30',
-  seed:  'text-teal-300 bg-teal-900/30',
+  run:   'cmd-badge-run',
+  build: 'cmd-badge-build',
+  test:  'cmd-badge-test',
+  seed:  'cmd-badge-seed',
 };
 
 function CommandBadge({ command }: { command: string }) {
@@ -111,7 +111,7 @@ function TrendRow({ projectId, node }: { projectId: number; node: ModelTimingDto
       : node.execution_time.toFixed(2);
 
   const kindBadge = node.kind === 'test'
-    ? <span className="text-[10px] px-1 py-0.5 rounded bg-amber-900/30 text-amber-400 font-mono">test</span>
+    ? <span className="text-[10px] px-1 py-0.5 rounded cmd-badge-test font-mono">test</span>
     : null;
 
   return (

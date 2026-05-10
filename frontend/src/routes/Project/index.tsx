@@ -318,7 +318,7 @@ export default function ProjectHome() {
           </div>
 
           {/* Stats summary */}
-          {graph && <StatsSummary graph={graph} recentRuns={recentRunsPage?.items ?? []} />}
+          {graph && <StatsSummary graph={graph} />}
 
           {/* Quick-run bar */}
           <QuickRunBar
@@ -360,54 +360,27 @@ export default function ProjectHome() {
 
 // ---- Stats summary ----
 
-const CMD_COLORS: Record<string, string> = {
-  run:   'text-blue-400',
-  build: 'text-purple-400',
-  test:  'text-yellow-400',
-  seed:  'text-green-400',
+
+const STAT_TILE_COLOR: Record<string, string> = {
+  Models:  'text-brand-400',
+  Sources: 'text-blue-400',
+  Seeds:   'text-emerald-400',
+  Tests:   'text-red-400',
 };
 
-function StatsSummary({ graph, recentRuns }: { graph: GraphDto; recentRuns: RunInvocationDto[] }) {
-  const models = graph.nodes.filter((n) => n.resource_type === 'model');
-  const tests = graph.nodes.filter((n) => n.resource_type === 'test');
-  const sources = graph.nodes.filter((n) => n.resource_type === 'source');
-
-  const lastRun = recentRuns[0] ?? null;
+function StatsSummary({ graph }: { graph: GraphDto }) {
+  const counts = {
+    Models:  graph.nodes.filter((n) => n.resource_type === 'model').length,
+    Sources: graph.nodes.filter((n) => n.resource_type === 'source').length,
+    Seeds:   graph.nodes.filter((n) => n.resource_type === 'seed').length,
+    Tests:   graph.nodes.filter((n) => n.resource_type === 'test').length,
+  };
 
   return (
     <div className="grid grid-cols-4 gap-3 mb-4">
-      <StatTile label="Models" value={models.length} />
-      <StatTile label="Tests" value={tests.length} />
-      <StatTile label="Sources" value={sources.length} />
-
-      {/* Last run tile */}
-      <div className="bg-surface-panel border border-gray-800 rounded-xl px-5 py-4">
-        <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">Last Run</div>
-        {lastRun ? (
-          <>
-            <div className={`text-xl font-bold capitalize ${CMD_COLORS[lastRun.command] ?? 'text-gray-100'}`}>
-              {lastRun.command}
-            </div>
-            <div className="flex items-center gap-2 mt-1">
-              {lastRun.status === 'running' ? (
-                <span className="text-[10px] text-brand-400">running…</span>
-              ) : (
-                <>
-                  <span className="text-[10px] text-green-400">{lastRun.success_count} ok</span>
-                  {lastRun.error_count > 0 && (
-                    <span className="text-[10px] text-red-400">{lastRun.error_count} err</span>
-                  )}
-                </>
-              )}
-              {lastRun.started_at && (
-                <span className="text-[10px] text-gray-600 ml-auto">{formatRelativeTime(lastRun.started_at)}</span>
-              )}
-            </div>
-          </>
-        ) : (
-          <div className="text-xl font-bold text-gray-600">—</div>
-        )}
-      </div>
+      {(['Models', 'Sources', 'Seeds', 'Tests'] as const).map((label) => (
+        <StatTile key={label} label={label} value={counts[label]} />
+      ))}
     </div>
   );
 }
@@ -416,7 +389,7 @@ function StatTile({ label, value }: { label: string; value: number }) {
   return (
     <div className="bg-surface-panel border border-gray-800 rounded-xl px-5 py-4">
       <div className="text-[10px] text-gray-600 uppercase tracking-wider mb-1">{label}</div>
-      <div className="text-xl font-bold text-gray-100">{value}</div>
+      <div className={`text-xl font-bold ${STAT_TILE_COLOR[label] ?? 'text-gray-100'}`}>{value}</div>
     </div>
   );
 }
@@ -424,10 +397,10 @@ function StatTile({ label, value }: { label: string; value: number }) {
 // ---- Recent runs ----
 
 const STATUS_COLORS: Record<string, string> = {
-  success: 'bg-green-900/40 text-green-400 border-green-800',
-  error:   'bg-red-900/40 text-red-400 border-red-800',
-  warn:    'bg-yellow-900/40 text-yellow-400 border-yellow-800',
-  running: 'bg-brand-900/40 text-brand-400 border-brand-800',
+  success: 'status-badge-success border',
+  error:   'status-badge-error border',
+  warn:    'status-badge-warn border',
+  running: 'status-badge-running border',
 };
 
 function RecentRuns({ runs, onViewAll }: { runs: RunInvocationDto[]; onViewAll: () => void }) {

@@ -2,12 +2,12 @@ type Status = 'idle' | 'pending' | 'running' | 'success' | 'error' | 'stale' | '
 
 const CLASSES: Record<Status, string> = {
   idle: 'bg-gray-700 text-gray-400',
-  pending: 'bg-blue-900/60 text-blue-300',
+  pending: 'status-badge-pending',
   running: 'bg-blue-600 text-white animate-pulse',
-  success: 'bg-emerald-900/60 text-emerald-400',
-  error: 'bg-red-900/60 text-red-400',
-  stale: 'bg-amber-900/60 text-amber-400',
-  warn: 'bg-yellow-900/60 text-yellow-400',
+  success: 'status-badge-success',
+  error: 'status-badge-error',
+  stale: 'status-badge-stale',
+  warn: 'status-badge-warn',
 };
 
 const ICONS: Record<Status, string> = {
