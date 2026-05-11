@@ -103,6 +103,18 @@ async def run_migrations() -> None:
         )
         await session.commit()
 
+        if not await _column_exists(session, "projects", "pinned"):
+            await session.execute(
+                text("ALTER TABLE projects ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "projects", "last_opened_at"):
+            await session.execute(
+                text("ALTER TABLE projects ADD COLUMN last_opened_at DATETIME")
+            )
+            await session.commit()
+
         if not await _column_exists(session, "init_steps", "captured_vars"):
             await session.execute(
                 text("ALTER TABLE init_steps ADD COLUMN captured_vars TEXT NOT NULL DEFAULT ''")

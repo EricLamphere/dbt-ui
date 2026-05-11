@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, FolderOpen, Plus, RefreshCw, Settings2, Database } from 'lucide-react';
+import { ChevronDown, ChevronRight, FolderOpen, Pin, Plus, RefreshCw, Settings2, Database } from 'lucide-react';
 import { api, type Project } from '../lib/api';
 import NewProjectModal from './Project/components/NewProjectModal';
 import { GlobalSettingsModal } from '../components/GlobalSettingsModal';
@@ -25,6 +25,16 @@ const PLATFORM_META: Record<string, { icon: string; accent: string }> = {
 function platformMeta(platform: string) {
   return PLATFORM_META[platform.toLowerCase()] ?? PLATFORM_META.unknown;
 }
+
+// ── Sort ──────────────────────────────────────────────────────────────────────
+
+type SortKey = 'name' | 'last_opened' | 'models';
+const SORT_LABELS: Record<SortKey, string> = {
+  name: 'Name',
+  last_opened: 'Last opened',
+  models: 'Model count',
+};
+const SORT_STORAGE_KEY = 'dbt-ui:home-sort';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -74,6 +84,7 @@ function CountChip({ label, count }: { label: string; count: number }) {
 interface ProjectCardProps {
   project: Project;
   focused: boolean;
+  shortcutKey?: number;
   cardRef: (el: HTMLButtonElement | null) => void;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
@@ -81,7 +92,7 @@ interface ProjectCardProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
 }
 
-function ProjectCard({ project, focused, cardRef, onClick, onContextMenu, onFocus, onKeyDown }: ProjectCardProps) {
+function ProjectCard({ project, focused, shortcutKey, cardRef, onClick, onContextMenu, onFocus, onKeyDown }: ProjectCardProps) {
   const meta = platformMeta(project.platform);
 
   const { data: history } = useQuery({
@@ -128,8 +139,18 @@ function ProjectCard({ project, focused, cardRef, onClick, onContextMenu, onFocu
         <div className="flex items-center gap-2 min-w-0">
           <span className="text-base leading-none">{meta.icon}</span>
           <span className="font-semibold text-gray-100 truncate">{project.name}</span>
+          {project.pinned && (
+            <Pin className="w-3 h-3 text-brand-400 shrink-0 fill-brand-400" />
+          )}
         </div>
-        {latest && <StatusPill status={latest.status} />}
+        <div className="flex items-center gap-1.5 shrink-0">
+          {shortcutKey !== undefined && (
+            <span className="text-[10px] font-mono text-gray-600 bg-gray-800 border border-gray-700 rounded px-1 py-0.5 leading-none">
+              {shortcutKey}
+            </span>
+          )}
+          {latest && <StatusPill status={latest.status} />}
+        </div>
       </div>
 
       {/* Path */}
@@ -137,7 +158,7 @@ function ProjectCard({ project, focused, cardRef, onClick, onContextMenu, onFocu
         {project.path}
       </span>
 
-      {/* Footer: node type counts */}
+      {/* Footer: node type counts + last opened */}
       <div className="flex items-center gap-2.5 mt-auto pt-2 border-t border-gray-800/60">
         {counts ? (
           <>
@@ -151,6 +172,11 @@ function ProjectCard({ project, focused, cardRef, onClick, onContextMenu, onFocu
           </>
         ) : (
           <span className="text-[11px] text-gray-700 italic">loading…</span>
+        )}
+        {project.last_opened_at && (
+          <span className="ml-auto text-[11px] text-gray-600">
+            {timeAgo(project.last_opened_at)}
+          </span>
         )}
       </div>
     </button>
@@ -199,11 +225,13 @@ interface CardMenuState {
   x: number;
   y: number;
   isIgnored: boolean;
+  isPinned: boolean;
 }
 
-function ProjectCardMenu({ menu, onIgnore, onClose }: {
+function ProjectCardMenu({ menu, onIgnore, onPin, onClose }: {
   menu: CardMenuState;
   onIgnore: (id: number, ignored: boolean) => void;
+  onPin: (id: number, pinned: boolean) => void;
   onClose: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -221,12 +249,18 @@ function ProjectCardMenu({ menu, onIgnore, onClose }: {
       ref={ref}
       style={{
         position: 'fixed',
-        top: Math.min(menu.y, window.innerHeight - 80),
+        top: Math.min(menu.y, window.innerHeight - 100),
         left: Math.min(menu.x, window.innerWidth - 160),
         zIndex: 50,
       }}
       className="bg-surface-panel border border-gray-700 rounded-lg shadow-xl py-1 w-36"
     >
+      <button
+        onClick={() => { onPin(menu.id, !menu.isPinned); onClose(); }}
+        className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-surface-elevated transition-colors"
+      >
+        {menu.isPinned ? 'Unpin' : 'Pin to top'}
+      </button>
       <button
         onClick={() => { onIgnore(menu.id, !menu.isIgnored); onClose(); }}
         className="w-full text-left px-3 py-1.5 text-xs text-gray-300 hover:bg-surface-elevated transition-colors"
@@ -268,15 +302,74 @@ function EmptyState({ isConfigured, projectsPath, onNew }: {
   );
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
+// ── Sort helpers ──────────────────────────────────────────────────────────────
+
+function sortProjects(projects: Project[], key: SortKey, modelCounts: Map<number, number>): Project[] {
+  return [...projects].sort((a, b) => {
+    if (key === 'name') return a.name.localeCompare(b.name);
+    if (key === 'last_opened') {
+      const ta = a.last_opened_at ? new Date(a.last_opened_at).getTime() : 0;
+      const tb = b.last_opened_at ? new Date(b.last_opened_at).getTime() : 0;
+      return tb - ta;
+    }
+    if (key === 'models') {
+      return (modelCounts.get(b.id) ?? 0) - (modelCounts.get(a.id) ?? 0);
+    }
+    return 0;
+  });
+}
+
+// ── Project grid ──────────────────────────────────────────────────────────────
 
 const COLS = 3;
+
+interface ProjectGridProps {
+  projects: Project[];
+  focusedIdx: number | null;
+  cardRefs: React.MutableRefObject<(HTMLButtonElement | null)[]>;
+  idxOffset: number;
+  showShortcuts: boolean;
+  onNavigate: (project: Project) => void;
+  onContextMenu: (e: React.MouseEvent, project: Project) => void;
+  onFocus: (idx: number) => void;
+  onKeyDown: (idx: number) => (e: React.KeyboardEvent<HTMLButtonElement>) => void;
+}
+
+function ProjectGrid({ projects, focusedIdx, cardRefs, idxOffset, showShortcuts, onNavigate, onContextMenu, onFocus, onKeyDown }: ProjectGridProps) {
+  return (
+    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {projects.map((project, i) => {
+        const idx = idxOffset + i;
+        const shortcutNum = idx + 1;
+        return (
+          <ProjectCard
+            key={project.id}
+            project={project}
+            focused={focusedIdx === idx}
+            shortcutKey={showShortcuts && shortcutNum <= 9 ? shortcutNum : undefined}
+            cardRef={(el) => { cardRefs.current[idx] = el; }}
+            onClick={() => onNavigate(project)}
+            onContextMenu={(e) => onContextMenu(e, project)}
+            onFocus={() => onFocus(idx)}
+            onKeyDown={onKeyDown(idx)}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Home() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [search, setSearch] = useState('');
   const [platformFilter, setPlatformFilter] = useState('');
+  const [sort, setSort] = useState<SortKey>(() => {
+    const saved = localStorage.getItem(SORT_STORAGE_KEY);
+    return (saved as SortKey) || 'last_opened';
+  });
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [globalSettingsOpen, setGlobalSettingsOpen] = useState(false);
   const [ignoredOpen, setIgnoredOpen] = useState(false);
@@ -323,6 +416,15 @@ export default function Home() {
     staleTime: 60_000,
   });
 
+  // Model counts for sort-by-models (pulled from cached graph queries)
+  const modelCounts = new Map<number, number>(
+    projects.map((p) => {
+      const graph = qc.getQueryData<{ nodes: { resource_type: string }[] }>(['graph', p.id]);
+      const count = graph?.nodes.filter((n) => n.resource_type === 'model').length ?? 0;
+      return [p.id, count];
+    })
+  );
+
   useEffect(() => {
     const handler = () => {
       if (!isConfigured) setGlobalSettingsOpen(true);
@@ -341,7 +443,26 @@ export default function Home() {
     return matchName && matchPlatform;
   });
 
+  const pinnedProjects = sortProjects(
+    activeFiltered.filter((p) => p.pinned),
+    sort,
+    modelCounts,
+  );
+  const unpinnedProjects = sortProjects(
+    activeFiltered.filter((p) => !p.pinned),
+    sort,
+    modelCounts,
+  );
+
+  // Flat ordered list for keyboard navigation (pinned first)
+  const allVisible = [...pinnedProjects, ...unpinnedProjects];
+
   const platforms = Array.from(new Set(activeProjects.map((p) => p.platform))).sort();
+
+  const handleSortChange = (key: SortKey) => {
+    setSort(key);
+    localStorage.setItem(SORT_STORAGE_KEY, key);
+  };
 
   const handleRescan = async () => {
     await api.projects.rescan();
@@ -357,25 +478,51 @@ export default function Home() {
     }
   }, [qc]);
 
+  const handlePin = useCallback(async (id: number, pinned: boolean) => {
+    try {
+      await api.projects.pin(id, pinned);
+      qc.invalidateQueries({ queryKey: ['projects'] });
+    } catch (e) {
+      alert(String(e));
+    }
+  }, [qc]);
+
   const openCardMenu = (e: React.MouseEvent, project: Project) => {
     e.preventDefault();
-    setCardMenu({ id: project.id, x: e.clientX, y: e.clientY, isIgnored: project.ignored });
+    setCardMenu({ id: project.id, x: e.clientX, y: e.clientY, isIgnored: project.ignored, isPinned: project.pinned });
   };
 
-  // Keyboard navigation — handler lives on each card via onKeyDown + onFocus
+  // Number key shortcuts: 1–9 navigate directly to that card
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const n = parseInt(e.key, 10);
+      if (n >= 1 && n <= 9) {
+        const project = allVisible[n - 1];
+        if (project) navigate(`/projects/${project.id}`);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [allVisible, navigate]);
+
+  // Arrow key navigation + Enter to open
   const makeCardKeyDown = useCallback((idx: number): ((e: React.KeyboardEvent<HTMLButtonElement>) => void) => {
     return (e) => {
-      const len = activeFiltered.length;
+      const len = allVisible.length;
       let next = idx;
       if (e.key === 'ArrowRight')      { e.preventDefault(); next = Math.min(idx + 1, len - 1); }
       else if (e.key === 'ArrowLeft')  { e.preventDefault(); next = Math.max(idx - 1, 0); }
       else if (e.key === 'ArrowDown')  { e.preventDefault(); next = Math.min(idx + COLS, len - 1); }
       else if (e.key === 'ArrowUp')    { e.preventDefault(); next = Math.max(idx - COLS, 0); }
+      else if (e.key === 'Enter')      { e.preventDefault(); const p = allVisible[idx]; if (p) navigate(`/projects/${p.id}`); return; }
       else { return; }
       setFocusedIdx(next);
       cardRefs.current[next]?.focus();
     };
-  }, [activeFiltered.length]);
+  }, [allVisible, navigate]);
+
+  const showShortcuts = allVisible.length > 1;
 
   return (
     <div className="flex flex-col h-full overflow-auto p-6 gap-5 max-w-6xl mx-auto w-full">
@@ -448,7 +595,7 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Search + filter */}
+      {/* Search + filter + sort */}
       <div className="flex flex-wrap items-center gap-3">
         <input
           type="search"
@@ -470,6 +617,16 @@ export default function Home() {
             ))}
           </select>
         )}
+        <select
+          value={sort}
+          onChange={(e) => handleSortChange(e.target.value as SortKey)}
+          disabled={!isConfigured}
+          className="bg-surface-elevated border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-300 focus:outline-none focus:ring-2 focus:ring-brand-500 disabled:opacity-40"
+        >
+          {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
+            <option key={k} value={k}>{SORT_LABELS[k]}</option>
+          ))}
+        </select>
       </div>
 
       {/* Stats bar */}
@@ -497,21 +654,44 @@ export default function Home() {
         />
       )}
 
-      {/* Project grid */}
-      {activeFiltered.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {activeFiltered.map((project, idx) => (
-            <ProjectCard
-              key={project.id}
-              project={project}
-              focused={focusedIdx === idx}
-              cardRef={(el) => { cardRefs.current[idx] = el; }}
-              onClick={() => navigate(`/projects/${project.id}`)}
-              onContextMenu={(e) => openCardMenu(e, project)}
-              onFocus={() => setFocusedIdx(idx)}
-              onKeyDown={makeCardKeyDown(idx)}
-            />
-          ))}
+      {/* Pinned section */}
+      {pinnedProjects.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-1.5 px-1">
+            <Pin className="w-3 h-3 text-gray-600 fill-gray-600" />
+            <span className="text-xs text-gray-600 font-medium">Pinned</span>
+          </div>
+          <ProjectGrid
+            projects={pinnedProjects}
+            focusedIdx={focusedIdx}
+            cardRefs={cardRefs}
+            idxOffset={0}
+            showShortcuts={showShortcuts}
+            onNavigate={(p) => navigate(`/projects/${p.id}`)}
+            onContextMenu={openCardMenu}
+            onFocus={setFocusedIdx}
+            onKeyDown={makeCardKeyDown}
+          />
+        </div>
+      )}
+
+      {/* Main grid */}
+      {unpinnedProjects.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {pinnedProjects.length > 0 && (
+            <span className="text-xs text-gray-600 font-medium px-1">All projects</span>
+          )}
+          <ProjectGrid
+            projects={unpinnedProjects}
+            focusedIdx={focusedIdx}
+            cardRefs={cardRefs}
+            idxOffset={pinnedProjects.length}
+            showShortcuts={showShortcuts}
+            onNavigate={(p) => navigate(`/projects/${p.id}`)}
+            onContextMenu={openCardMenu}
+            onFocus={setFocusedIdx}
+            onKeyDown={makeCardKeyDown}
+          />
         </div>
       )}
 
@@ -548,6 +728,7 @@ export default function Home() {
         <ProjectCardMenu
           menu={cardMenu}
           onIgnore={handleIgnore}
+          onPin={handlePin}
           onClose={() => setCardMenu(null)}
         />
       )}

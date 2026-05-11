@@ -1,4 +1,5 @@
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -45,6 +46,8 @@ class ProjectOut(BaseModel):
     vscode_cmd: str | None
     init_script_path: str = "init"
     ignored: bool = False
+    pinned: bool = False
+    last_opened_at: datetime | None = None
     readme: str | None = None
     dbt_project_yml: str | None = None
     profiles_yml: str | None = None
@@ -61,6 +64,8 @@ class ProjectOut(BaseModel):
             vscode_cmd=row.vscode_cmd,
             init_script_path=row.init_script_path,
             ignored=row.ignored,
+            pinned=row.pinned,
+            last_opened_at=row.last_opened_at,
             readme=_read_readme(row.path) if include_files else None,
             dbt_project_yml=_read_file_text(root / "dbt_project.yml") if include_files else None,
             profiles_yml=_read_file_text(root / "profiles.yml") if include_files else None,
@@ -125,6 +130,9 @@ async def get_project(
     row = await session.get(Project, project_id)
     if row is None:
         raise HTTPException(status_code=404, detail="project not found")
+    row.last_opened_at = datetime.now(timezone.utc)
+    await session.commit()
+    await session.refresh(row)
     return ProjectOut.from_row(row, include_files=True)
 
 
@@ -156,6 +164,25 @@ async def patch_project_settings(
     if not normalized or ".." in Path(normalized).parts:
         raise HTTPException(status_code=400, detail="invalid init_script_path")
     row.init_script_path = normalized
+    await session.commit()
+    await session.refresh(row)
+    return ProjectOut.from_row(row)
+
+
+class ProjectPinDto(BaseModel):
+    pinned: bool
+
+
+@router.patch("/{project_id}/pin", response_model=ProjectOut)
+async def patch_project_pin(
+    project_id: int,
+    dto: ProjectPinDto,
+    session: AsyncSession = Depends(get_session),
+) -> ProjectOut:
+    row = await session.get(Project, project_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    row.pinned = dto.pinned
     await session.commit()
     await session.refresh(row)
     return ProjectOut.from_row(row)
