@@ -11,7 +11,7 @@ function statusCls(status: string) {
   if (status === 'success') return 'status-badge-success';
   if (status === 'error') return 'status-badge-error';
   if (status === 'running') return 'status-badge-running';
-  return 'bg-zinc-800 text-zinc-400';
+  return 'bg-surface-elevated text-gray-400';
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -46,7 +46,7 @@ const CMD_COLORS: Record<string, string> = {
 };
 
 function CommandBadge({ command }: { command: string }) {
-  const cls = CMD_COLORS[command] ?? 'text-zinc-300 bg-zinc-800';
+  const cls = CMD_COLORS[command] ?? 'text-gray-300 bg-surface-elevated';
   return (
     <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-mono font-medium ${cls}`}>
       {command}
@@ -58,7 +58,7 @@ function CommandBadge({ command }: { command: string }) {
 
 function Sparkline({ points }: { points: NodeTrendPoint[] }) {
   if (points.length < 2) {
-    return <span className="text-zinc-600 text-xs">not enough data</span>;
+    return <span className="text-gray-500 text-xs">not enough data</span>;
   }
   const times = points.map((p) => p.execution_time ?? 0);
   const max = Math.max(...times, 0.001);
@@ -120,9 +120,9 @@ function TrendRow({ projectId, node }: { projectId: number; node: ModelTimingDto
         className="border-b border-gray-800/60 hover:bg-surface-elevated cursor-pointer transition-colors"
         onClick={() => setOpen((o) => !o)}
       >
-        <td className="px-4 py-2 font-mono text-zinc-300 flex items-center gap-1.5">
+        <td className="px-4 py-2 font-mono text-gray-300 flex items-center gap-1.5">
           <svg
-            className={`w-3 h-3 shrink-0 text-zinc-600 transition-transform ${open ? 'rotate-90' : ''}`}
+            className={`w-3 h-3 shrink-0 text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`}
             fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
@@ -130,28 +130,28 @@ function TrendRow({ projectId, node }: { projectId: number; node: ModelTimingDto
           {node.name}
           {kindBadge && <span className="ml-1">{kindBadge}</span>}
         </td>
-        <td className={`px-4 py-2 text-right tabular-nums font-mono ${node.execution_time !== null && node.execution_time >= 10 ? 'text-amber-400' : 'text-zinc-300'}`}>
+        <td className={`px-4 py-2 text-right tabular-nums font-mono ${node.execution_time !== null && node.execution_time >= 10 ? 'text-amber-500' : 'text-gray-300'}`}>
           {timeDisplay}
         </td>
         <td className="px-4 py-2"><StatusBadge status={node.status} /></td>
-        <td className="px-4 py-2 text-zinc-500 max-w-[220px] truncate">{node.message ?? ''}</td>
+        <td className="px-4 py-2 text-gray-500 max-w-[220px] truncate">{node.message ?? ''}</td>
       </tr>
       {open && (
         <tr className="border-b border-gray-800/40 bg-surface-app/50">
           <td colSpan={4} className="px-6 py-3">
             <div className="flex items-center gap-4">
-              <span className="text-xs text-zinc-500 shrink-0">Last {trend?.length ?? 0} runs:</span>
+              <span className="text-xs text-gray-500 shrink-0">Last {trend?.length ?? 0} runs:</span>
               {trend && trend.length > 0 ? (
                 <>
                   <Sparkline points={trend} />
-                  <div className="flex flex-col text-[10px] text-zinc-500 gap-0.5">
-                    <span>max: <span className="text-zinc-300">{Math.max(...trend.map(p => p.execution_time ?? 0)).toFixed(2)}s</span></span>
-                    <span>avg: <span className="text-zinc-300">{(trend.reduce((s, p) => s + (p.execution_time ?? 0), 0) / trend.length).toFixed(2)}s</span></span>
-                    <span>min: <span className="text-zinc-300">{Math.min(...trend.filter(p => p.execution_time !== null).map(p => p.execution_time!)).toFixed(2)}s</span></span>
+                  <div className="flex flex-col text-[10px] text-gray-500 gap-0.5">
+                    <span>max: <span className="text-gray-300">{Math.max(...trend.map(p => p.execution_time ?? 0)).toFixed(2)}s</span></span>
+                    <span>avg: <span className="text-gray-300">{(trend.reduce((s, p) => s + (p.execution_time ?? 0), 0) / trend.length).toFixed(2)}s</span></span>
+                    <span>min: <span className="text-gray-300">{Math.min(...trend.filter(p => p.execution_time !== null).map(p => p.execution_time!)).toFixed(2)}s</span></span>
                   </div>
                 </>
               ) : (
-                <span className="text-xs text-zinc-600">Loading…</span>
+                <span className="text-xs text-gray-600">Loading…</span>
               )}
             </div>
           </td>
@@ -211,17 +211,17 @@ function DetailPanel({ projectId, invocation }: DetailPanelProps) {
       <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-800">
         <div className="flex items-center gap-2 min-w-0">
           <CommandBadge command={invocation.command} />
-          <span className="text-xs text-zinc-400 truncate">{invocation.selector ?? 'all models'}</span>
+          <span className="text-xs text-gray-400 truncate">{invocation.selector ?? 'all models'}</span>
           <StatusBadge status={invocation.status} />
         </div>
       </div>
 
       {/* Meta row */}
-      <div className="shrink-0 flex gap-5 px-4 py-2 border-b border-gray-800 text-xs text-zinc-500">
-        <span>Started: <span className="text-zinc-300">{formatTime(invocation.started_at)}</span></span>
-        <span>Duration: <span className="text-zinc-300">{formatDuration(invocation.duration_seconds)}</span></span>
-        <span>Models: <span className="text-zinc-300">{modelCount}</span></span>
-        {testCount > 0 && <span>Tests: <span className="text-zinc-300">{testCount}</span></span>}
+      <div className="shrink-0 flex gap-5 px-4 py-2 border-b border-gray-800 text-xs text-gray-500">
+        <span>Started: <span className="text-gray-300">{formatTime(invocation.started_at)}</span></span>
+        <span>Duration: <span className="text-gray-300">{formatDuration(invocation.duration_seconds)}</span></span>
+        <span>Models: <span className="text-gray-300">{modelCount}</span></span>
+        {testCount > 0 && <span>Tests: <span className="text-gray-300">{testCount}</span></span>}
       </div>
 
       {/* Tab bar */}
@@ -233,7 +233,7 @@ function DetailPanel({ projectId, invocation }: DetailPanelProps) {
             className={`px-4 py-2 text-xs font-medium transition-colors border-b-2 ${
               tab === t
                 ? 'border-brand-500 text-brand-300'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                : 'border-transparent text-gray-500 hover:text-gray-300'
             }`}
           >
             {t === 'nodes' ? 'Nodes' : 'Log'}
@@ -251,12 +251,12 @@ function DetailPanel({ projectId, invocation }: DetailPanelProps) {
               placeholder="Search nodes…"
               value={nodeFilter}
               onChange={(e) => setNodeFilter(e.target.value)}
-              className="flex-1 min-w-0 bg-zinc-900 border border-gray-700 rounded px-2.5 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-brand-600"
+              className="flex-1 min-w-0 form-input border rounded px-2.5 py-1 text-xs"
             />
             <select
               value={kindFilter}
               onChange={(e) => setKindFilter(e.target.value as 'all' | 'model' | 'test')}
-              className="bg-zinc-900 border border-gray-700 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-brand-600"
+              className="form-select border rounded px-2 py-1 text-xs"
             >
               <option value="all">All kinds</option>
               <option value="model">Models</option>
@@ -265,7 +265,7 @@ function DetailPanel({ projectId, invocation }: DetailPanelProps) {
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="bg-zinc-900 border border-gray-700 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-brand-600"
+              className="form-select border rounded px-2 py-1 text-xs"
             >
               <option value="all">All statuses</option>
               {allStatuses.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -274,13 +274,13 @@ function DetailPanel({ projectId, invocation }: DetailPanelProps) {
 
           <div className="flex-1 overflow-auto">
             {isLoading ? (
-              <div className="flex items-center justify-center h-32 text-zinc-500 text-sm">Loading…</div>
+              <div className="flex items-center justify-center h-32 text-gray-500 text-sm">Loading…</div>
             ) : filteredNodes.length === 0 ? (
-              <div className="flex items-center justify-center h-32 text-zinc-500 text-sm">No nodes match filters.</div>
+              <div className="flex items-center justify-center h-32 text-gray-500 text-sm">No nodes match filters.</div>
             ) : (
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="text-left text-[10px] uppercase tracking-wider text-zinc-600 border-b border-gray-800">
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-800">
                     <th className="px-4 py-2 font-medium">Node</th>
                     <th className="px-4 py-2 font-medium text-right">Time (s)</th>
                     <th className="px-4 py-2 font-medium">Status</th>
@@ -296,7 +296,7 @@ function DetailPanel({ projectId, invocation }: DetailPanelProps) {
             )}
           </div>
           {!isLoading && filteredNodes.length > 0 && (
-            <p className="shrink-0 px-4 py-1.5 text-[10px] text-zinc-600 border-t border-gray-800">
+            <p className="shrink-0 px-4 py-1.5 text-[10px] text-gray-500 border-t border-gray-800">
               Click a row to view the trend for that node across its last {20} runs. ⚠ = slower than 10s.
             </p>
           )}
@@ -305,11 +305,11 @@ function DetailPanel({ projectId, invocation }: DetailPanelProps) {
 
       {/* Log tab */}
       {tab === 'log' && (
-        <div className="flex-1 overflow-auto bg-zinc-950 font-mono text-xs text-zinc-300 p-4">
+        <div className="flex-1 overflow-auto bg-surface-app font-mono text-xs text-gray-300 p-4">
           {logLoading ? (
-            <span className="text-zinc-500">Loading…</span>
+            <span className="text-gray-500">Loading…</span>
           ) : !logData || logData.lines.length === 0 ? (
-            <span className="text-zinc-600">No log captured for this invocation.</span>
+            <span className="text-gray-500">No log captured for this invocation.</span>
           ) : (
             logData.lines.map((line, i) => (
               <div key={i} className={`whitespace-pre leading-5 ${line.includes('ERROR') || line.includes('FAILED') ? 'text-red-400' : line.includes('OK') || line.includes('PASS') ? 'text-emerald-400' : line.includes('WARN') ? 'text-amber-400' : ''}`}>
@@ -497,7 +497,7 @@ export default function RunHistoryPage() {
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
               <h1 className="text-base font-semibold text-gray-100">Run History</h1>
-              {total > 0 && <span className="text-xs text-zinc-500">{total} total</span>}
+              {total > 0 && <span className="text-xs text-gray-500">{total} total</span>}
             </div>
 
             {/* Filter bar */}
@@ -511,16 +511,16 @@ export default function RunHistoryPage() {
                   placeholder="Search by selector…"
                   value={draftQ}
                   onChange={(e) => setDraftQ(e.target.value)}
-                  className="flex-1 min-w-0 bg-zinc-900 border border-gray-700 rounded px-2.5 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-brand-600"
+                  className="flex-1 min-w-0 form-input border rounded px-2.5 py-1 text-xs"
                 />
-                <button type="submit" className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-xs transition-colors">
+                <button type="submit" className="px-2.5 py-1 form-btn border rounded text-xs transition-colors">
                   Search
                 </button>
               </form>
               <select
                 value={filters.command}
                 onChange={(e) => setFilter('command', e.target.value)}
-                className="bg-zinc-900 border border-gray-700 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-brand-600"
+                className="form-select border rounded px-2 py-1 text-xs"
               >
                 <option value="">All commands</option>
                 <option value="run">run</option>
@@ -531,7 +531,7 @@ export default function RunHistoryPage() {
               <select
                 value={filters.status}
                 onChange={(e) => setFilter('status', e.target.value)}
-                className="bg-zinc-900 border border-gray-700 rounded px-2 py-1 text-xs text-zinc-300 focus:outline-none focus:border-brand-600"
+                className="form-select border rounded px-2 py-1 text-xs"
               >
                 <option value="">All statuses</option>
                 <option value="success">success</option>
@@ -544,9 +544,9 @@ export default function RunHistoryPage() {
           {/* List */}
           <div className="flex-1 overflow-auto">
             {isLoading ? (
-              <div className="flex items-center justify-center h-32 text-zinc-500 text-sm">Loading…</div>
+              <div className="flex items-center justify-center h-32 text-gray-500 text-sm">Loading…</div>
             ) : invocations.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-40 gap-2 text-zinc-500">
+              <div className="flex flex-col items-center justify-center h-40 gap-2 text-gray-500">
                 <svg className="w-8 h-8 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
@@ -555,7 +555,7 @@ export default function RunHistoryPage() {
             ) : (
               <table className="w-full text-xs">
                 <thead className="sticky top-0 bg-surface-panel z-10">
-                  <tr className="border-b border-gray-800 text-left text-[10px] uppercase tracking-wider text-zinc-600">
+                  <tr className="border-b border-gray-800 text-left text-[10px] uppercase tracking-wider text-gray-500">
                     <th className="px-4 py-2 font-medium">Started</th>
                     <th className="px-4 py-2 font-medium">Cmd</th>
                     <th className="px-4 py-2 font-medium">Selector</th>
@@ -573,21 +573,21 @@ export default function RunHistoryPage() {
                         onClick={() => { if (isActive) clearSelected(); else selectInvocation(inv); }}
                         className={`border-b border-gray-800/60 cursor-pointer transition-colors ${isActive ? 'bg-brand-900/20' : 'hover:bg-surface-elevated'}`}
                       >
-                        <td className="px-4 py-2.5 text-zinc-400 whitespace-nowrap font-mono">{formatTime(inv.started_at)}</td>
+                        <td className="px-4 py-2.5 text-gray-400 whitespace-nowrap font-mono">{formatTime(inv.started_at)}</td>
                         <td className="px-4 py-2.5"><CommandBadge command={inv.command} /></td>
-                        <td className="px-4 py-2.5 text-zinc-400 max-w-[140px] truncate font-mono">
-                          {inv.selector ?? <span className="text-zinc-600 italic">all</span>}
+                        <td className="px-4 py-2.5 text-gray-400 max-w-[140px] truncate font-mono">
+                          {inv.selector ?? <span className="text-gray-600 italic">all</span>}
                         </td>
-                        <td className="px-4 py-2.5 text-right text-zinc-300 tabular-nums">{formatDuration(inv.duration_seconds)}</td>
+                        <td className="px-4 py-2.5 text-right text-gray-300 tabular-nums">{formatDuration(inv.duration_seconds)}</td>
                         <td className="px-4 py-2.5 text-right tabular-nums whitespace-nowrap">
                           {inv.status === 'running' ? (
-                            <span className="text-zinc-500">—</span>
+                            <span className="text-gray-500">—</span>
                           ) : inv.model_count === 0 ? (
-                            <span className="text-zinc-600">—</span>
+                            <span className="text-gray-500">—</span>
                           ) : (
                             <span className="inline-flex items-center gap-2">
-                              <span className="text-emerald-400">{inv.success_count} ok</span>
-                              {inv.error_count > 0 && <span className="text-red-400">{inv.error_count} err</span>}
+                              <span className="result-ok">{inv.success_count} ok</span>
+                              {inv.error_count > 0 && <span className="result-err">{inv.error_count} err</span>}
                             </span>
                           )}
                         </td>
@@ -602,20 +602,20 @@ export default function RunHistoryPage() {
 
           {/* Pagination */}
           {totalPages > 1 && (
-            <div className="shrink-0 flex items-center justify-between px-4 py-2 border-t border-gray-800 text-xs text-zinc-500">
+            <div className="shrink-0 flex items-center justify-between px-4 py-2 border-t border-gray-800 text-xs text-gray-500">
               <span>Page {page + 1} of {totalPages}</span>
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => { setPage((p) => Math.max(0, p - 1)); clearSelected(); }}
                   disabled={page === 0}
-                  className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-colors text-zinc-300"
+                  className="px-2.5 py-1 form-btn disabled:opacity-40 disabled:cursor-not-allowed rounded transition-colors"
                 >
                   ← Prev
                 </button>
                 <button
                   onClick={() => { setPage((p) => Math.min(totalPages - 1, p + 1)); clearSelected(); }}
                   disabled={page >= totalPages - 1}
-                  className="px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-colors text-zinc-300"
+                  className="px-2.5 py-1 form-btn disabled:opacity-40 disabled:cursor-not-allowed rounded transition-colors"
                 >
                   Next →
                 </button>
@@ -670,7 +670,7 @@ export default function RunHistoryPage() {
               {selected
                 ? <DetailPanel projectId={id} invocation={selected} />
                 : (
-                  <div className="flex items-center justify-center h-full text-zinc-600 text-sm px-6 text-center">
+                  <div className="flex items-center justify-center h-full text-gray-500 text-sm px-6 text-center">
                     Select a run to see node timings and logs.
                   </div>
                 )

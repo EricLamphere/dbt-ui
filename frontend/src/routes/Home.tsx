@@ -30,10 +30,10 @@ function platformMeta(platform: string) {
 
 function StatusPill({ status }: { status: string }) {
   const map: Record<string, string> = {
-    success: 'bg-green-900/50 text-green-400 border border-green-800/50',
-    error:   'bg-red-900/50 text-red-400 border border-red-800/50',
-    warn:    'bg-yellow-900/50 text-yellow-400 border border-yellow-800/50',
-    running: 'bg-brand-900/50 text-brand-400 border border-brand-800/50',
+    success: 'status-badge-success border',
+    error:   'status-badge-error border',
+    warn:    'status-badge-warn border',
+    running: 'status-badge-running border',
   };
   const cls = map[status] ?? 'bg-zinc-800 text-zinc-400 border border-zinc-700';
   return (

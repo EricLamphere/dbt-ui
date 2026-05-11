@@ -58,21 +58,21 @@ function formatThreshold(count: number | null, period: string | null): string {
 
 function statusColor(status: string): string {
   switch (status) {
-    case 'pass': return 'text-emerald-400';
-    case 'warn': return 'text-amber-400';
+    case 'pass': return 'status-text-pass';
+    case 'warn': return 'status-text-warn';
     case 'error':
-    case 'runtime error': return 'text-red-400';
+    case 'runtime error': return 'status-text-error';
     default: return 'text-gray-500';
   }
 }
 
 function statusBadge(status: string): string {
   switch (status) {
-    case 'pass': return 'bg-emerald-900/40 border-emerald-700/50 text-emerald-300';
-    case 'warn': return 'bg-amber-900/40 border-amber-700/50 text-amber-300';
+    case 'pass': return 'status-badge-success border';
+    case 'warn': return 'status-badge-warn border';
     case 'error':
-    case 'runtime error': return 'bg-red-900/40 border-red-700/50 text-red-300';
-    default: return 'bg-gray-800 border-gray-700 text-gray-500';
+    case 'runtime error': return 'status-badge-error border';
+    default: return 'bg-surface-elevated border border-gray-700 text-gray-500';
   }
 }
 
@@ -185,7 +185,7 @@ function SourceTableRow({ result, widths }: SourceTableRowProps) {
       </span>
       <div className="flex-1" />
       {result.error ? (
-        <span className="text-[10px] text-red-400 truncate max-w-48 px-2" title={result.error}>
+        <span className="text-[10px] status-text-error truncate max-w-48 px-2" title={result.error}>
           {result.error}
         </span>
       ) : null}
@@ -301,13 +301,13 @@ export default function FreshnessPanel({ projectId }: FreshnessPanelProps) {
             {!isRunning && snapshot && snapshot.status !== 'running' && (
               <span className="text-xs text-gray-400 flex items-center gap-2">
                 {errorCount > 0 && (
-                  <span className="text-red-400">{errorCount} error{errorCount !== 1 ? 's' : ''}</span>
+                  <span className="status-text-error">{errorCount} error{errorCount !== 1 ? 's' : ''}</span>
                 )}
                 {warnCount > 0 && (
-                  <span className="text-amber-400">{warnCount} warn{warnCount !== 1 ? 's' : ''}</span>
+                  <span className="status-text-warn">{warnCount} warn{warnCount !== 1 ? 's' : ''}</span>
                 )}
                 {passCount > 0 && (
-                  <span className="text-emerald-400">{passCount} pass</span>
+                  <span className="status-text-pass">{passCount} pass</span>
                 )}
                 {results.length === 0 && (
                   <span className="text-gray-600">No sources found</span>
@@ -395,7 +395,7 @@ export default function FreshnessPanel({ projectId }: FreshnessPanelProps) {
         {/* Error state */}
         {!isRunning && snapshot?.status === 'error' && (
           <div className="px-5 py-4">
-            <p className="text-xs text-red-400">Freshness check failed: {snapshot.error_message}</p>
+            <p className="text-xs status-text-error">Freshness check failed: {snapshot.error_message}</p>
           </div>
         )}
 
