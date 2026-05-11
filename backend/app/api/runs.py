@@ -278,17 +278,29 @@ async def _run_dbt_and_persist(
                 lf.write(line + "\n")
     except Exception:
         run_error = True
-        raise
     finally:
-        await _persist_results_after_run(project, invocation_id)
-        async with SessionLocal() as session:
-            inv_row = await session.get(RunInvocation, invocation_id)
-            if inv_row is not None:
-                results = load_run_results(Path(project.path) / "target" / "run_results.json")
-                has_error = any(r.status == "error" for r in results)
-                inv_row.status = "error" if (run_error or has_error) else "success"
-                inv_row.finished_at = datetime.now(timezone.utc)
-                await session.commit()
+        cancelled = runner.pop_cancel_flag(project.id)
+        try:
+            await _persist_results_after_run(project, invocation_id)
+        except Exception:
+            log.exception("persist_results_failed", project_id=project.id, invocation_id=invocation_id)
+        try:
+            async with SessionLocal() as session:
+                inv_row = await session.get(RunInvocation, invocation_id)
+                if inv_row is not None:
+                    if cancelled:
+                        inv_row.status = "cancelled"
+                    else:
+                        results = load_run_results(Path(project.path) / "target" / "run_results.json")
+                        if results is None:
+                            inv_row.status = "error"
+                        else:
+                            has_error = run_error or any(r.status == "error" for r in results)
+                            inv_row.status = "error" if has_error else "success"
+                    inv_row.finished_at = datetime.now(timezone.utc)
+                    await session.commit()
+        except Exception:
+            log.exception("invocation_status_update_failed", project_id=project.id, invocation_id=invocation_id)
         await bus.publish(Event(
             topic=f"project:{project.id}",
             type="run_history_changed",
@@ -496,6 +508,18 @@ async def get_invocation_log(
         return {"lines": text.splitlines()}
     except OSError:
         return {"lines": []}
+
+
+@router.post("/{project_id}/runs/cancel")
+async def post_cancel_run(
+    project_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    killed = runner.cancel(project_id)
+    return {"cancelled": killed}
 
 
 @router.get("/{project_id}/node-trend/{unique_id:path}", response_model=list[NodeTrendPoint])

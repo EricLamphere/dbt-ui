@@ -524,6 +524,8 @@ export const api = {
       get<{ lines: string[] }>(`/projects/${projectId}/run-history/${invocationId}/log`),
     nodeTrend: (projectId: number, uniqueId: string) =>
       get<NodeTrendPoint[]>(`/projects/${projectId}/node-trend/${encodeURIComponent(uniqueId)}`),
+    cancel: (projectId: number) =>
+      post<{ cancelled: boolean }>(`/projects/${projectId}/runs/cancel`, {}),
   },
   files: {
     list: (projectId: number, path = '') =>

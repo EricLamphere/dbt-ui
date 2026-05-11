@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import NavRail from './components/NavRail';
 import { api, ModelTimingDto, NodeTrendPoint, RunInvocationDetailDto, RunInvocationDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
@@ -11,6 +11,7 @@ function statusCls(status: string) {
   if (status === 'success') return 'status-badge-success';
   if (status === 'error') return 'status-badge-error';
   if (status === 'running') return 'status-badge-running';
+  if (status === 'cancelled') return 'bg-amber-900/40 text-amber-400';
   return 'bg-surface-elevated text-gray-400';
 }
 
@@ -354,12 +355,33 @@ function readPaneWidth(): number {
 
 const PAGE_SIZE = 50;
 
+function StopButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      title="Stop run"
+      className="p-1 rounded text-gray-500 hover:text-red-400 hover:bg-red-900/20 transition-colors"
+    >
+      <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="16" height="16" rx="2" />
+      </svg>
+    </button>
+  );
+}
+
 export default function RunHistoryPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
   const qc = useQueryClient();
 
   const sessionKey = `run-history:${id}`;
+
+  const cancelMutation = useMutation({
+    mutationFn: () => api.runHistory.cancel(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['run-history', id], exact: false });
+    },
+  });
 
   const [selectedId, setSelectedId] = useState<number | null>(() => {
     try { const v = sessionStorage.getItem(`${sessionKey}:selected`); return v ? Number(v) : null; } catch { return null; }
@@ -562,6 +584,7 @@ export default function RunHistoryPage() {
                     <th className="px-4 py-2 font-medium text-right">Duration</th>
                     <th className="px-4 py-2 font-medium text-right">Results</th>
                     <th className="px-4 py-2 font-medium">Status</th>
+                    <th className="px-2 py-2 font-medium w-8" />
                   </tr>
                 </thead>
                 <tbody>
@@ -592,6 +615,11 @@ export default function RunHistoryPage() {
                           )}
                         </td>
                         <td className="px-4 py-2.5"><StatusBadge status={inv.status} /></td>
+                        <td className="px-2 py-2">
+                          {inv.status === 'running' && (
+                            <StopButton onClick={() => cancelMutation.mutate()} />
+                          )}
+                        </td>
                       </tr>
                     );
                   })}

@@ -28,6 +28,8 @@ class DbtRunner:
 
     def __init__(self) -> None:
         self._locks: dict[int, asyncio.Lock] = {}
+        self._procs: dict[int, asyncio.subprocess.Process] = {}
+        self._cancelled: set[int] = set()
 
     def _lock_for(self, project_id: int) -> asyncio.Lock:
         lock = self._locks.get(project_id)
@@ -35,6 +37,25 @@ class DbtRunner:
             lock = asyncio.Lock()
             self._locks[project_id] = lock
         return lock
+
+    def cancel(self, project_id: int) -> bool:
+        """Terminate the running dbt process for a project. Returns True if one was running."""
+        proc = self._procs.get(project_id)
+        if proc is None:
+            return False
+        self._cancelled.add(project_id)
+        try:
+            proc.terminate()
+        except ProcessLookupError:
+            pass
+        return True
+
+    def pop_cancel_flag(self, project_id: int) -> bool:
+        """Returns True and clears the flag if this project was cancelled, False otherwise."""
+        if project_id in self._cancelled:
+            self._cancelled.discard(project_id)
+            return True
+        return False
 
     def build_args(self, req: RunRequest) -> list[str]:
         args = [str(venv_dbt()), req.command]
@@ -112,17 +133,21 @@ class DbtRunner:
                 yield ("stderr", "dbt executable not found on PATH\n")
                 return
 
+            self._procs[req.project_id] = proc
             assert proc.stdout is not None
-            while True:
-                raw = await proc.stdout.readline()
-                if not raw:
-                    break
-                line = raw.decode(errors="replace").rstrip("\n")
-                await bus.publish(
-                    Event(topic=topic, type="run_log", data={"line": line})
-                )
-                append_project_log(str(req.project_path), line, pid)
-                yield ("stdout", line)
+            try:
+                while True:
+                    raw = await proc.stdout.readline()
+                    if not raw:
+                        break
+                    line = raw.decode(errors="replace").rstrip("\n")
+                    await bus.publish(
+                        Event(topic=topic, type="run_log", data={"line": line})
+                    )
+                    append_project_log(str(req.project_path), line, pid)
+                    yield ("stdout", line)
+            finally:
+                self._procs.pop(req.project_id, None)
             return_code = await proc.wait()
             finished_at = datetime.now(timezone.utc).isoformat()
             await bus.publish(
