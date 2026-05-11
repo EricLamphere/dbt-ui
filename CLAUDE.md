@@ -100,7 +100,7 @@ All 11 in `backend/app/db/models.py`:
 - `run_invocations` — historical run records
 - `env_profiles` — named environment profiles per project
 - `profile_env_vars` — key/value vars belonging to a profile
-- `project_env_vars` — project-level env vars (not profile-scoped); includes `dbt_target` for active target; `REQUIREMENTS_PATH` for per-project requirements; `WORKSPACE_PATH` for SQL workspace dir (default `workspace`)
+- `project_env_vars` — project-level env vars (not profile-scoped); includes `dbt_target` for active target; `REQUIREMENTS_PATH` for per-project requirements; `WORKSPACE_PATH` for SQL workspace dir (default `dbtui/workspace`)
 - `app_settings` — global app config (key/value); keys: `dbt_projects_path`, `global_requirements_path`, `data_dir`, `log_level`
 - `global_profiles` — named env var sets shared across all projects
 - `global_profile_vars` — key/value vars belonging to a global profile
@@ -213,7 +213,7 @@ finally:
 **Init Pipeline** — runs pip install + dbt deps + custom shell scripts in sequence
 - Entry: `POST /api/projects/{id}/open`
 - Built-in base steps (in order): `base: pip install`, `base: dbt deps`
-- Scripts in `{project_path}/{init_script_path}/*.sh` (default `init/`; managed by `dbt/init_scripts.py`)
+- Scripts in `{project_path}/{init_script_path}/*.sh` (default `dbtui/init/`; managed by `dbt/init_scripts.py`)
 - Per-project `init_script_path` column in `projects` table
 - Linked external scripts tracked with absolute `script_path` in `init_steps` table
 - `_sync_steps_from_disk()` only deletes owned (init-dir) scripts; preserves linked ones

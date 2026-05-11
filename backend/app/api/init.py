@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import get_session
 from app.db.models import GlobalProfile, InitStep, Project, ProjectEnvVar
-from app.dbt.init_scripts import BASE_STEPS, list_scripts, save_script, delete_script
+from app.dbt.init_scripts import BASE_STEPS, INIT_DIR_NAME, list_scripts, save_script, delete_script
 from app.dbt.venv import venv_dbt, venv_pip, venv_python
 from app.dbt.interactive import manager as init_manager
 from app.events.bus import Event, bus
@@ -121,7 +121,7 @@ async def _sync_steps_from_disk(
         else:
             next_order()
 
-    scripts = list_scripts(Path(project.path), project.init_script_path)
+    scripts = list_scripts(Path(project.path), project.init_script_path or INIT_DIR_NAME)
     script_names = {f"custom: {s.name}" for s in scripts}
     for s in scripts:
         display = f"custom: {s.name}"
@@ -143,7 +143,7 @@ async def _sync_steps_from_disk(
         if row.is_base and row.name not in known_base_names:
             await session.delete(row)
 
-    init_dir_abs = str(Path(project.path) / project.init_script_path)
+    init_dir_abs = str(Path(project.path) / (project.init_script_path or INIT_DIR_NAME))
     for row in existing:
         if not row.is_base and row.name not in script_names:
             # Only delete if the script lived inside the init dir (not a linked external script)
@@ -178,7 +178,7 @@ async def post_step(
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
-    script = save_script(Path(project.path), dto.name, dto.content, project.init_script_path)
+    script = save_script(Path(project.path), dto.name, dto.content, project.init_script_path or INIT_DIR_NAME)
 
     display = f"custom: {dto.name}"
     result = await session.execute(
@@ -225,7 +225,7 @@ async def delete_step(
     if row and not row.is_base:
         await session.delete(row)
         await session.commit()
-    delete_script(Path(project.path), name, project.init_script_path)
+    delete_script(Path(project.path), name, project.init_script_path or INIT_DIR_NAME)
     return {"ok": True}
 
 
@@ -314,7 +314,7 @@ async def get_step_content(
     if row and row.script_path:
         script_path = Path(row.script_path)
     else:
-        script_path = Path(project.path) / project.init_script_path / f"{name}.sh"
+        script_path = Path(project.path) / (project.init_script_path or INIT_DIR_NAME) / f"{name}.sh"
 
     if not script_path.exists():
         raise HTTPException(status_code=404, detail="script not found")
@@ -345,7 +345,7 @@ async def put_step_content(
     if row and row.script_path:
         script_path = Path(row.script_path)
     else:
-        script_path = Path(project.path) / project.init_script_path / f"{name}.sh"
+        script_path = Path(project.path) / (project.init_script_path or INIT_DIR_NAME) / f"{name}.sh"
 
     if not script_path.exists():
         raise HTTPException(status_code=404, detail="script not found")

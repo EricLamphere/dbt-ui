@@ -110,10 +110,11 @@ interface ProjectSettingRowProps {
   label: string;
   value: string;
   placeholder?: string;
+  kind?: 'default' | 'example';
   onSave: (val: string) => Promise<void>;
 }
 
-function ProjectSettingRow({ label, value, placeholder, onSave }: ProjectSettingRowProps) {
+function ProjectSettingRow({ label, value, placeholder, kind = 'example', onSave }: ProjectSettingRowProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
@@ -149,8 +150,8 @@ function ProjectSettingRow({ label, value, placeholder, onSave }: ProjectSetting
               if (e.key === 'Enter') handleSave();
               if (e.key === 'Escape') setEditing(false);
             }}
-            placeholder={placeholder}
-            className="flex-1 bg-surface-elevated border border-brand-500 rounded px-2 py-0.5 text-gray-100 font-mono focus:outline-none"
+            placeholder={placeholder ? (kind === 'default' ? `default: ${placeholder}` : placeholder) : undefined}
+            className="flex-1 bg-surface-elevated border border-brand-500 rounded px-2 py-0.5 text-gray-100 font-mono focus:outline-none placeholder:text-gray-600 placeholder:italic"
           />
           <button
             onClick={handleSave}
@@ -166,7 +167,7 @@ function ProjectSettingRow({ label, value, placeholder, onSave }: ProjectSetting
           className="flex-1 font-mono text-gray-300 truncate cursor-pointer hover:text-gray-100"
           onClick={handleClick}
         >
-          {value || <span className="text-gray-600 italic">{placeholder ? `e.g. ${placeholder}` : 'click to set'}</span>}
+          {value || <span className="text-gray-600 italic">{placeholder ? (kind === 'default' ? `default: ${placeholder}` : `e.g. ${placeholder}`) : 'click to set'}</span>}
         </span>
       )}
     </div>
@@ -186,7 +187,7 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
 
   const handleSaveInitScriptPath = async (val: string) => {
     const normalized = val.trim().replace(/\/+$/, '');
-    await api.projects.updateSettings(projectId, { init_script_path: normalized || 'init' });
+    await api.projects.updateSettings(projectId, { init_script_path: normalized });
     qc.invalidateQueries({ queryKey: ['project', projectId] });
   };
 
@@ -222,7 +223,8 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
             <ProjectSettingRow
               label="INIT_SCRIPT_PATH"
               value={project.init_script_path ?? ''}
-              placeholder="init"
+              placeholder="dbtui/init"
+              kind="default"
               onSave={handleSaveInitScriptPath}
             />
             <ProjectSettingRow
@@ -234,7 +236,8 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
             <ProjectSettingRow
               label="WORKSPACE_PATH"
               value={workspacePath}
-              placeholder="workspace"
+              placeholder="dbtui/workspace"
+              kind="default"
               onSave={handleSaveWorkspacePath}
             />
           </>

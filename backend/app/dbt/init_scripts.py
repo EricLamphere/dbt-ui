@@ -2,7 +2,7 @@ import stat
 from dataclasses import dataclass
 from pathlib import Path
 
-INIT_DIR_NAME = "init"
+INIT_DIR_NAME = "dbtui/init"
 
 BASE_STEPS: tuple[tuple[str, str], ...] = (
     ("base: pip install", "pip install -r requirements.txt"),

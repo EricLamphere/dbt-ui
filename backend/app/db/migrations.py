@@ -115,6 +115,12 @@ async def run_migrations() -> None:
             )
             await session.commit()
 
+        # Migrate old default 'init' to '' (empty = use runtime default 'dbtui/init')
+        await session.execute(
+            text("UPDATE projects SET init_script_path = '' WHERE init_script_path = 'init'")
+        )
+        await session.commit()
+
         if not await _column_exists(session, "init_steps", "captured_vars"):
             await session.execute(
                 text("ALTER TABLE init_steps ADD COLUMN captured_vars TEXT NOT NULL DEFAULT ''")

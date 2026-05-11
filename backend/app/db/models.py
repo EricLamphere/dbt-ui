@@ -17,7 +17,7 @@ class Project(Base):
     platform: Mapped[str] = mapped_column(String(64), default="unknown")
     profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
     vscode_cmd: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    init_script_path: Mapped[str] = mapped_column(String(255), default="init")
+    init_script_path: Mapped[str] = mapped_column(String(255), default="")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

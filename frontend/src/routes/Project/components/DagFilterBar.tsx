@@ -91,6 +91,9 @@ interface DagFilterBarProps {
   closeDropdownsSignal?: number;
   coverageOverlay?: boolean;
   onToggleCoverage?: () => void;
+  columnLineageLoaded: boolean;
+  columnLineageLoading: boolean;
+  onLoadColumnLineage: () => void;
 }
 
 export default function DagFilterBar({
@@ -104,6 +107,9 @@ export default function DagFilterBar({
   closeDropdownsSignal = 0,
   coverageOverlay,
   onToggleCoverage,
+  columnLineageLoaded,
+  columnLineageLoading,
+  onLoadColumnLineage,
 }: DagFilterBarProps) {
   const available = useMemo(
     () => (graph ? getAvailableFilters(graph) : { resourceTypes: [], materializations: [], tags: [], statuses: [] }),
@@ -198,6 +204,13 @@ export default function DagFilterBar({
       )}
 
       {/* Action buttons */}
+      <button
+        onClick={onLoadColumnLineage}
+        disabled={columnLineageLoading}
+        className="px-3 py-1.5 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 disabled:opacity-50 transition-colors shrink-0"
+      >
+        {columnLineageLoading ? 'Column lineage loading…' : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
+      </button>
       <button
         onClick={onRefresh}
         disabled={compiling}

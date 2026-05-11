@@ -51,7 +51,7 @@ async def _resolve_workspace_path(session: AsyncSession, project: Project) -> Pa
         )
     )
     row = result.scalar_one_or_none()
-    rel = (row.value.strip() if row and row.value.strip() else None) or "workspace"
+    rel = (row.value.strip() if row and row.value.strip() else None) or "dbtui/workspace"
     ws_path = Path(project.path) / rel
     ws_path.mkdir(parents=True, exist_ok=True)
     return ws_path
@@ -114,7 +114,7 @@ async def get_workspace_path(
         )
     )
     row = result.scalar_one_or_none()
-    rel = (row.value.strip() if row and row.value.strip() else None) or "workspace"
+    rel = (row.value.strip() if row and row.value.strip() else None) or "dbtui/workspace"
     ws_path = Path(project.path) / rel
     ws_path.mkdir(parents=True, exist_ok=True)
 

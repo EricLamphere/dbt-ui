@@ -170,11 +170,13 @@ export default function ModelsPage() {
     staleTime: 0,
   });
 
+  const [columnLineageEnabled, setColumnLineageEnabled] = useState(false);
   const { data: columnLineage, isFetching: columnLineageLoading } = useQuery({
     queryKey: ['column-lineage', id],
     queryFn: () => api.models.columnLineage(id),
     refetchInterval: false,
     staleTime: Infinity,
+    enabled: columnLineageEnabled,
   });
 
   // Pre-select model from ?model=<unique_id> query param (takes priority),
@@ -233,12 +235,10 @@ export default function ModelsPage() {
         } catch {}
       }
       qc.invalidateQueries({ queryKey: ['models', id] });
-      qc.invalidateQueries({ queryKey: ['column-lineage', id] });
     }
     if (event.type === 'compile_started') setCompiling(true);
     if (event.type === 'compile_finished') {
       setCompiling(false);
-      qc.invalidateQueries({ queryKey: ['column-lineage', id] });
     }
     if (event.type === 'test_failed') {
       const d = event.data as { test_uid: string; model_uid: string | null };
@@ -555,6 +555,12 @@ export default function ModelsPage() {
             closeDropdownsSignal={closeDropdownsSignal}
             coverageOverlay={coverageOverlay}
             onToggleCoverage={handleToggleCoverage}
+            columnLineageLoaded={!!columnLineage}
+            columnLineageLoading={columnLineageLoading}
+            onLoadColumnLineage={() => {
+              setColumnLineageEnabled(true);
+              qc.invalidateQueries({ queryKey: ['column-lineage', id] });
+            }}
           />
 
           {/* React Flow */}
@@ -575,12 +581,6 @@ export default function ModelsPage() {
               <FitViewOnFirstLoad trigger={layoutNodes} />
               <Panel position="top-center">
                 <div className="flex items-center gap-2">
-                  {columnLineageLoading && (
-                    <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-zinc-800/90 border border-zinc-700 text-xs text-zinc-400 shadow-lg">
-                      <span className="w-1.5 h-1.5 rounded-full bg-brand-400 animate-pulse" />
-                      Column lineage loading…
-                    </div>
-                  )}
                   {activeColumnSels.size > 0 && (
                     <button
                       onClick={() => setLineageMode((m) => m === 'direct' ? 'full' : 'direct')}

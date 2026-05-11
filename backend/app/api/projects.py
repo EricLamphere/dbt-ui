@@ -44,7 +44,7 @@ class ProjectOut(BaseModel):
     platform: str
     profile: str | None
     vscode_cmd: str | None
-    init_script_path: str = "init"
+    init_script_path: str = ""
     ignored: bool = False
     pinned: bool = False
     last_opened_at: datetime | None = None
@@ -161,7 +161,7 @@ async def patch_project_settings(
     if row is None:
         raise HTTPException(status_code=404, detail="project not found")
     normalized = dto.init_script_path.strip().rstrip("/")
-    if not normalized or ".." in Path(normalized).parts:
+    if normalized and ".." in Path(normalized).parts:
         raise HTTPException(status_code=400, detail="invalid init_script_path")
     row.init_script_path = normalized
     await session.commit()

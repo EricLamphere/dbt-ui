@@ -39,9 +39,9 @@ All settings must appear in one of two places in the Environment page (`frontend
 
 | Setting | Backing store | Default | Example |
 |---|---|---|---|
-| `INIT_SCRIPT_PATH` | `projects.init_script_path` | `init` | `init` |
+| `INIT_SCRIPT_PATH` | `projects.init_script_path` | `dbtui/init` | `dbtui/init` |
 | `REQUIREMENTS_PATH` | `ProjectEnvVar` | (empty) | `/path/to/requirements.txt` |
-| `WORKSPACE_PATH` | `ProjectEnvVar` | `workspace` | `analysis/scratch` |
+| `WORKSPACE_PATH` | `ProjectEnvVar` | `dbtui/workspace` | `analysis/scratch` |
 
 ## Current Global Settings
 
