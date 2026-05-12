@@ -390,7 +390,6 @@ async def show_model(
         extra=("--limit", str(limit), "--output", "json") + target_args,
         env=env,
     )
-    append_project_log(project.path, f">>> dbt show --select {model_name} --limit {limit}", project_id)
     returncode, stdout_bytes, stderr_bytes = await runner.run(req)
     stdout = stdout_bytes.decode(errors="replace")
     stderr = stderr_bytes.decode(errors="replace")
