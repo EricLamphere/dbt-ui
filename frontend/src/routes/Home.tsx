@@ -506,6 +506,24 @@ export default function Home() {
     return () => window.removeEventListener('keydown', handler);
   }, [allVisible, navigate]);
 
+  // Arrow key navigation: bootstrap focus onto the grid when no card is currently focused
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (allVisible.length === 0) return;
+      const isArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight';
+      if (!isArrow) return;
+      const activeEl = document.activeElement;
+      if (cardRefs.current.some((el) => el === activeEl)) return; // card already focused — its onKeyDown handles it
+      if (activeEl instanceof HTMLSelectElement) return;
+      e.preventDefault();
+      const startIdx = e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? allVisible.length - 1 : 0;
+      setFocusedIdx(startIdx);
+      cardRefs.current[startIdx]?.focus();
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [allVisible]);
+
   // Arrow key navigation + Enter to open
   const makeCardKeyDown = useCallback((idx: number): ((e: React.KeyboardEvent<HTMLButtonElement>) => void) => {
     return (e) => {
