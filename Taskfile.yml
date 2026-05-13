@@ -22,11 +22,19 @@ tasks:
     cmds:
       - npm run dev
 
+  open:
+    desc: Open the app in your browser
+    cmds:
+      - sleep 1
+      - open http://localhost:5173 || xdg-open http://localhost:5173 2>/dev/null || true
+    
+
   start:
     desc: Start backend and frontend dev servers in parallel (foreground, logs to terminal)
     deps:
       - task: dev:backend
       - task: dev:frontend
+      - task: open
 
   kill:ports:
     desc: Kill any processes using the backend (8001) and frontend (5173) ports
