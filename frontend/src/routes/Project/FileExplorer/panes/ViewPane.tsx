@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import type * as MonacoEditor from 'monaco-editor';
-import { ChevronLeft, ChevronRight, RotateCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, RotateCw, WrapText, Save, Trash2 } from 'lucide-react';
 import { format as sqlFormat } from 'sql-formatter';
 import { api, type FileContentDto, type GraphDto, type ModelNode } from '../../../../lib/api';
 import { useTheme } from '../../../../lib/useTheme';
@@ -322,25 +322,27 @@ export function ViewPane({
             {canFormat && (
               <button
                 onClick={handleFormat}
-                className="px-2 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
+                className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
                 title="Format file"
               >
+                <WrapText className="w-3.5 h-3.5" />
                 Format
               </button>
             )}
             <button
               onClick={onSave}
               disabled={saving || !isDirty}
-              className="px-3 py-1 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-300 disabled:opacity-40 transition-colors"
             >
+              <Save className="w-3.5 h-3.5" />
               {saving ? 'Saving…' : 'Save'}
             </button>
             <button
               onClick={onDelete}
-              className="px-2 py-1 text-xs rounded bg-surface-elevated hover:bg-red-900/60 text-gray-500 hover:text-red-400 transition-colors"
+              className="flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-surface-elevated hover:bg-red-900/40 text-gray-400 hover:text-red-400 transition-colors"
               title="Delete file"
             >
-              🗑
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
         )}
