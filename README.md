@@ -54,16 +54,9 @@ task install PYTHON=python3.12
 
 ```bash
 task start       # foreground — logs stream to terminal
-task start:bg    # headless — daemonizes both servers, opens browser automatically
 ```
 
 Open [http://localhost:5173](http://localhost:5173).
-
-To stop a headless session:
-
-```bash
-task stop
-```
 
 ### 3. Configure your projects path
 

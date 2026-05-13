@@ -28,26 +28,6 @@ tasks:
       - task: dev:backend
       - task: dev:frontend
 
-  start:bg:
-    desc: Start backend and frontend as background daemons, then open browser
-    cmds:
-      - mkdir -p "{{.ROOT_DIR}}/data/logs"
-      - |
-        cd "{{.ROOT_DIR}}/backend" && \
-        DBT_UI_DATA_DIR="{{.ROOT_DIR}}/data" \
-        DBT_UI_FRONTEND_DIST="{{.ROOT_DIR}}/frontend/dist" \
-        .venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8001 \
-          > "{{.ROOT_DIR}}/data/logs/backend.log" 2>&1 &
-        echo $! > "{{.ROOT_DIR}}/data/backend.pid"
-      - |
-        cd "{{.ROOT_DIR}}/frontend" && \
-        npm run dev -- --host 127.0.0.1 \
-          > "{{.ROOT_DIR}}/data/logs/frontend.log" 2>&1 &
-        echo $! > "{{.ROOT_DIR}}/data/frontend.pid"
-      - sleep 2
-      - open http://localhost:5173 || xdg-open http://localhost:5173 2>/dev/null || true
-      - echo "dbt-ui running. Logs in data/logs/. Run 'task stop' to shut down."
-
   kill:ports:
     desc: Kill any processes using the backend (8001) and frontend (5173) ports
     cmds:
@@ -61,21 +41,6 @@ tasks:
             echo "No process on port $port"
           fi
         done
-
-  stop:
-    desc: Stop background dbt-ui daemons started by task start:bg
-    cmds:
-      - |
-        for port in 8001 5173; do
-          pids=$(lsof -ti tcp:$port 2>/dev/null) || true
-          if [ -n "$pids" ]; then
-            echo "$pids" | xargs kill -9 2>/dev/null || true
-            echo "Stopped processes on port $port"
-          else
-            echo "Nothing running on port $port"
-          fi
-        done
-        rm -f "{{.ROOT_DIR}}/data/backend.pid" "{{.ROOT_DIR}}/data/frontend.pid"
 
   # ---- Install ----
 

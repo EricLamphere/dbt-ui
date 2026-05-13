@@ -706,8 +706,6 @@ Per-project env vars (stored in `project_env_vars`, injected into every dbt subp
 ```bash
 task install          # create venv, pip install, npm install
 task start            # backend (:8001) + Vite dev server (:5173) in parallel (foreground, logs to terminal)
-task start:bg         # same but daemonized; opens browser automatically; logs to data/logs/
-task stop             # kill background daemons started by task start:bg
 ```
 
 The Vite dev server proxies all `/api` requests to `localhost:8001`. Open [http://localhost:5173](http://localhost:5173).

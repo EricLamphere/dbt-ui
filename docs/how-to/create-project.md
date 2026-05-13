@@ -4,7 +4,7 @@ This guide walks through creating a new dbt project from scratch using dbt-ui's 
 
 ## Prerequisites
 
-- dbt-ui is running (`task start` or `task start:bg`)
+- dbt-ui is running (`task start`)
 - `DBT_UI_PROJECTS_PATH` is configured (see the Global Settings modal on the Home page if you see an amber banner)
 - You have a dbt adapter installed, or dbt-ui will install it for you
 
