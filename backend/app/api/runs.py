@@ -522,6 +522,22 @@ async def post_cancel_run(
     return {"cancelled": killed}
 
 
+@router.post("/{project_id}/run-history/{invocation_id}/rerun", response_model=RunResponseDto)
+async def post_rerun_invocation(
+    project_id: int,
+    invocation_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> RunResponseDto:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    inv = await session.get(RunInvocation, invocation_id)
+    if inv is None or inv.project_id != project_id:
+        raise HTTPException(status_code=404, detail="invocation not found")
+    dto = RunRequestDto(select=inv.selector)
+    return await _launch(project, inv.command, dto)
+
+
 @router.get("/{project_id}/node-trend/{unique_id:path}", response_model=list[NodeTrendPoint])
 async def get_node_trend(
     project_id: int,

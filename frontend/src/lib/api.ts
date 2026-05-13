@@ -526,6 +526,8 @@ export const api = {
       get<NodeTrendPoint[]>(`/projects/${projectId}/node-trend/${encodeURIComponent(uniqueId)}`),
     cancel: (projectId: number) =>
       post<{ cancelled: boolean }>(`/projects/${projectId}/runs/cancel`, {}),
+    rerun: (projectId: number, invocationId: number) =>
+      post(`/projects/${projectId}/run-history/${invocationId}/rerun`, {}),
   },
   files: {
     list: (projectId: number, path = '') =>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { RotateCw } from 'lucide-react';
 import NavRail from './components/NavRail';
 import { api, ModelTimingDto, NodeTrendPoint, RunInvocationDetailDto, RunInvocationDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
@@ -169,9 +170,10 @@ type DetailTab = 'nodes' | 'log';
 interface DetailPanelProps {
   projectId: number;
   invocation: RunInvocationDto;
+  onRerun: (invocationId: number) => void;
 }
 
-function DetailPanel({ projectId, invocation }: DetailPanelProps) {
+function DetailPanel({ projectId, invocation, onRerun }: DetailPanelProps) {
   const [tab, setTab] = useState<DetailTab>('nodes');
   const [nodeFilter, setNodeFilter] = useState('');
   const [kindFilter, setKindFilter] = useState<'all' | 'model' | 'test'>('all');
@@ -215,6 +217,7 @@ function DetailPanel({ projectId, invocation }: DetailPanelProps) {
           <span className="text-xs text-gray-400 truncate">{invocation.selector ?? 'all models'}</span>
           <StatusBadge status={invocation.status} />
         </div>
+        <RerunButton size="md" onClick={(e) => { e.stopPropagation(); onRerun(invocation.id); }} />
       </div>
 
       {/* Meta row */}
@@ -369,6 +372,18 @@ function StopButton({ onClick }: { onClick: () => void }) {
   );
 }
 
+function RerunButton({ onClick, size = 'sm' }: { onClick: (e: React.MouseEvent) => void; size?: 'sm' | 'md' }) {
+  const cls = size === 'md'
+    ? 'flex items-center gap-1.5 px-2.5 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors'
+    : 'p-1 rounded text-gray-500 hover:text-brand-400 hover:bg-brand-900/20 transition-colors';
+  return (
+    <button onClick={onClick} title="Rerun" className={cls}>
+      <RotateCw className="w-3.5 h-3.5" />
+      {size === 'md' && 'Rerun'}
+    </button>
+  );
+}
+
 export default function RunHistoryPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
@@ -378,6 +393,13 @@ export default function RunHistoryPage() {
 
   const cancelMutation = useMutation({
     mutationFn: () => api.runHistory.cancel(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['run-history', id], exact: false });
+    },
+  });
+
+  const rerunMutation = useMutation({
+    mutationFn: (invocationId: number) => api.runHistory.rerun(id, invocationId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['run-history', id], exact: false });
     },
@@ -616,8 +638,10 @@ export default function RunHistoryPage() {
                         </td>
                         <td className="px-4 py-2.5"><StatusBadge status={inv.status} /></td>
                         <td className="px-2 py-2">
-                          {inv.status === 'running' && (
+                          {inv.status === 'running' ? (
                             <StopButton onClick={() => cancelMutation.mutate()} />
+                          ) : (
+                            <RerunButton onClick={(e) => { e.stopPropagation(); rerunMutation.mutate(inv.id); }} />
                           )}
                         </td>
                       </tr>
@@ -696,7 +720,7 @@ export default function RunHistoryPage() {
           >
             <div style={{ width: paneWidth }} className="flex flex-col h-full">
               {selected
-                ? <DetailPanel projectId={id} invocation={selected} />
+                ? <DetailPanel projectId={id} invocation={selected} onRerun={(invId) => rerunMutation.mutate(invId)} />
                 : (
                   <div className="flex items-center justify-center h-full text-gray-500 text-sm px-6 text-center">
                     Select a run to see node timings and logs.
