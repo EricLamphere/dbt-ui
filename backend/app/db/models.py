@@ -23,6 +23,7 @@ class Project(Base):
     )
     ignored: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    pin_order: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     last_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     init_steps: Mapped[list["InitStep"]] = relationship(

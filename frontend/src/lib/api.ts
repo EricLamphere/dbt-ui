@@ -64,6 +64,7 @@ export interface Project {
   init_script_path: string;
   ignored: boolean;
   pinned: boolean;
+  pin_order: number | null;
   last_opened_at: string | null;
   readme: string | null;
   dbt_project_yml: string | null;
@@ -471,6 +472,8 @@ export const api = {
       patch<Project>(`/projects/${id}/ignore`, { ignored }),
     pin: (id: number, pinned: boolean) =>
       patch<Project>(`/projects/${id}/pin`, { pinned }),
+    reorderPins: (projectIds: number[]) =>
+      put<void>('/projects/pin-order', { project_ids: projectIds }),
     debug: (id: number) => post<DebugResult>(`/projects/${id}/debug`),
     debugLast: (id: number) => get<DebugResult | null>(`/projects/${id}/debug/last`),
   },

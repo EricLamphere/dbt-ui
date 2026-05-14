@@ -2,6 +2,23 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, FolderOpen, Pin, Plus, RefreshCw, Settings2, Database } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  DragEndEvent,
+  DragOverlay,
+  DragStartEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  arrayMove,
+  rectSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { api, type Project } from '../lib/api';
 import NewProjectModal from './Project/components/NewProjectModal';
 import { GlobalSettingsModal } from '../components/GlobalSettingsModal';
@@ -90,9 +107,12 @@ interface ProjectCardProps {
   onContextMenu: (e: React.MouseEvent) => void;
   onFocus: () => void;
   onKeyDown: (e: React.KeyboardEvent<HTMLButtonElement>) => void;
+  dragStyle?: React.CSSProperties;
+  dragHandleProps?: React.HTMLAttributes<HTMLButtonElement>;
+  extraClassName?: string;
 }
 
-function ProjectCard({ project, focused, shortcutKey, cardRef, onClick, onContextMenu, onFocus, onKeyDown }: ProjectCardProps) {
+function ProjectCard({ project, focused, shortcutKey, cardRef, onClick, onContextMenu, onFocus, onKeyDown, dragStyle, dragHandleProps, extraClassName }: ProjectCardProps) {
   const meta = platformMeta(project.platform);
 
   const { data: history } = useQuery({
@@ -121,6 +141,8 @@ function ProjectCard({ project, focused, shortcutKey, cardRef, onClick, onContex
   return (
     <button
       ref={cardRef}
+      style={dragStyle}
+      {...(dragHandleProps ?? {})}
       onClick={onClick}
       onContextMenu={onContextMenu}
       onFocus={onFocus}
@@ -132,7 +154,8 @@ function ProjectCard({ project, focused, shortcutKey, cardRef, onClick, onContex
         focused
           ? 'ring-2 ring-brand-500 border-brand-600/70'
           : `border-gray-800 ${meta.accent}`,
-      ].join(' ')}
+        extraClassName ?? '',
+      ].filter(Boolean).join(' ')}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
@@ -215,6 +238,54 @@ function StatsBar({ projects, lastRunAt }: { projects: Project[]; lastRunAt: str
         </span>
       )}
     </div>
+  );
+}
+
+// ── Sortable pinned card ──────────────────────────────────────────────────────
+
+function SortablePinnedCard({
+  project,
+  focused,
+  shortcutKey,
+  cardRefs,
+  idx,
+  isDragging,
+  onNavigate,
+  onContextMenu,
+  onFocus,
+  onKeyDown,
+}: {
+  project: Project;
+  focused: boolean;
+  shortcutKey?: number;
+  cardRefs: React.MutableRefObject<(HTMLButtonElement | null)[]>;
+  idx: number;
+  isDragging: boolean;
+  onNavigate: (project: Project) => void;
+  onContextMenu: (e: React.MouseEvent, project: Project) => void;
+  onFocus: (idx: number) => void;
+  onKeyDown: (idx: number) => (e: React.KeyboardEvent<HTMLButtonElement>) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging: isThisCardDragging } = useSortable({ id: project.id });
+
+  return (
+    <ProjectCard
+      project={project}
+      focused={focused}
+      shortcutKey={shortcutKey}
+      cardRef={(el) => { setNodeRef(el); cardRefs.current[idx] = el; }}
+      dragStyle={{
+        transform: CSS.Translate.toString(transform) ?? undefined,
+        transition: transition ?? undefined,
+        opacity: isThisCardDragging ? 0.4 : 1,
+      }}
+      dragHandleProps={{ ...attributes, ...listeners } as React.HTMLAttributes<HTMLButtonElement>}
+      extraClassName={isDragging ? 'cursor-grabbing' : 'cursor-grab'}
+      onClick={() => onNavigate(project)}
+      onContextMenu={(e) => onContextMenu(e, project)}
+      onFocus={() => onFocus(idx)}
+      onKeyDown={onKeyDown(idx)}
+    />
   );
 }
 
@@ -443,10 +514,8 @@ export default function Home() {
     return matchName && matchPlatform;
   });
 
-  const pinnedProjects = sortProjects(
-    activeFiltered.filter((p) => p.pinned),
-    sort,
-    modelCounts,
+  const pinnedProjects = [...activeFiltered.filter((p) => p.pinned)].sort(
+    (a, b) => (a.pin_order ?? 999) - (b.pin_order ?? 999),
   );
   const unpinnedProjects = sortProjects(
     activeFiltered.filter((p) => !p.pinned),
@@ -486,6 +555,37 @@ export default function Home() {
       alert(String(e));
     }
   }, [qc]);
+
+  const [activeDragId, setActiveDragId] = useState<number | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+  );
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    setActiveDragId(event.active.id as number);
+  }, []);
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    setActiveDragId(null);
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+
+    const oldIndex = pinnedProjects.findIndex((p) => p.id === active.id);
+    const newIndex = pinnedProjects.findIndex((p) => p.id === over.id);
+    const reordered = arrayMove(pinnedProjects, oldIndex, newIndex);
+
+    // Optimistic update
+    qc.setQueryData<Project[]>(['projects'], (old) => {
+      if (!old) return old;
+      return old.map((p) => {
+        const idx = reordered.findIndex((r) => r.id === p.id);
+        return idx !== -1 ? { ...p, pin_order: idx } : p;
+      });
+    });
+
+    api.projects.reorderPins(reordered.map((p) => p.id));
+  }, [pinnedProjects, qc]);
 
   const openCardMenu = (e: React.MouseEvent, project: Project) => {
     e.preventDefault();
@@ -679,17 +779,53 @@ export default function Home() {
             <Pin className="w-3 h-3 text-gray-600 fill-gray-600" />
             <span className="text-xs text-gray-600 font-medium">Pinned</span>
           </div>
-          <ProjectGrid
-            projects={pinnedProjects}
-            focusedIdx={focusedIdx}
-            cardRefs={cardRefs}
-            idxOffset={0}
-            showShortcuts={showShortcuts}
-            onNavigate={(p) => navigate(`/projects/${p.id}`)}
-            onContextMenu={openCardMenu}
-            onFocus={setFocusedIdx}
-            onKeyDown={makeCardKeyDown}
-          />
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragStart={handleDragStart}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext items={pinnedProjects.map((p) => p.id)} strategy={rectSortingStrategy}>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {pinnedProjects.map((project, i) => (
+                  <SortablePinnedCard
+                    key={project.id}
+                    project={project}
+                    focused={focusedIdx === i}
+                    shortcutKey={showShortcuts && i + 1 <= 9 ? i + 1 : undefined}
+                    cardRefs={cardRefs}
+                    idx={i}
+                    isDragging={activeDragId !== null}
+                    onNavigate={(p) => navigate(`/projects/${p.id}`)}
+                    onContextMenu={openCardMenu}
+                    onFocus={setFocusedIdx}
+                    onKeyDown={makeCardKeyDown}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+            <DragOverlay>
+              {activeDragId !== null && (() => {
+                const pinnedIdx = pinnedProjects.findIndex((p) => p.id === activeDragId);
+                if (pinnedIdx === -1) return null;
+                const project = pinnedProjects[pinnedIdx];
+                const w = cardRefs.current[pinnedIdx]?.getBoundingClientRect().width;
+                return (
+                  <ProjectCard
+                    project={project}
+                    focused={false}
+                    cardRef={() => {}}
+                    dragStyle={{ width: w, opacity: 0.9 }}
+                    extraClassName="rotate-1 cursor-grabbing"
+                    onClick={() => {}}
+                    onContextMenu={() => {}}
+                    onFocus={() => {}}
+                    onKeyDown={() => {}}
+                  />
+                );
+              })()}
+            </DragOverlay>
+          </DndContext>
         </div>
       )}
 

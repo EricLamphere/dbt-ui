@@ -5,7 +5,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from app.db.engine import get_session
 from app.db.models import Project
@@ -47,6 +47,7 @@ class ProjectOut(BaseModel):
     init_script_path: str = ""
     ignored: bool = False
     pinned: bool = False
+    pin_order: int | None = None
     last_opened_at: datetime | None = None
     readme: str | None = None
     dbt_project_yml: str | None = None
@@ -65,6 +66,7 @@ class ProjectOut(BaseModel):
             init_script_path=row.init_script_path,
             ignored=row.ignored,
             pinned=row.pinned,
+            pin_order=row.pin_order,
             last_opened_at=row.last_opened_at,
             readme=_read_readme(row.path) if include_files else None,
             dbt_project_yml=_read_file_text(root / "dbt_project.yml") if include_files else None,
@@ -121,6 +123,23 @@ async def open_in_app(dto: OpenInAppDto) -> dict[str, bool]:
         raise HTTPException(status_code=400, detail="invalid app name")
     subprocess.Popen(["open", "-a", app_name, str(target)])
     return {"ok": True}
+
+
+class PinOrderDto(BaseModel):
+    project_ids: list[int]
+
+
+@router.put("/pin-order")
+async def put_pin_order(
+    dto: PinOrderDto,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    for idx, project_id in enumerate(dto.project_ids):
+        row = await session.get(Project, project_id)
+        if row is not None:
+            row.pin_order = idx
+    await session.commit()
+    return {}
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -183,6 +202,14 @@ async def patch_project_pin(
     if row is None:
         raise HTTPException(status_code=404, detail="project not found")
     row.pinned = dto.pinned
+    if dto.pinned:
+        result = await session.execute(
+            select(func.max(Project.pin_order)).where(Project.pinned == True)  # noqa: E712
+        )
+        max_order = result.scalar_one_or_none()
+        row.pin_order = (max_order + 1) if max_order is not None else 0
+    else:
+        row.pin_order = None
     await session.commit()
     await session.refresh(row)
     return ProjectOut.from_row(row)

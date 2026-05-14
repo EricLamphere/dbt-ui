@@ -206,6 +206,12 @@ async def run_migrations() -> None:
             )
             await session.commit()
 
+        if not await _column_exists(session, "projects", "pin_order"):
+            await session.execute(
+                text("ALTER TABLE projects ADD COLUMN pin_order INTEGER")
+            )
+            await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()
