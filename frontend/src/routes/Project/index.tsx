@@ -11,6 +11,7 @@ import {
   runOptionsInitial,
   runOptionsReducer,
   runOptsFromState,
+  type RunOptionsState,
 } from './components/SidePane/PropertiesTab';
 import { QuickRunBar, type RunKind } from './components/QuickRunBar';
 
@@ -143,11 +144,22 @@ export default function ProjectHome() {
     }
   };
 
-  // Custom run state
-  const [customSelector, setCustomSelector] = useState('');
-  const [customOpts, dispatchCustomOpts] = useReducer(runOptionsReducer, undefined, runOptionsInitial);
+  // Custom run state — persisted in sessionStorage per project
+  const CUSTOM_RUN_KEY = `custom-run:${id}`;
+  const [customSelector, setCustomSelector] = useState<string>(() => {
+    try { return JSON.parse(sessionStorage.getItem(CUSTOM_RUN_KEY) ?? '{}').selector ?? ''; } catch { return ''; }
+  });
+  const [customOpts, dispatchCustomOpts] = useReducer(runOptionsReducer, undefined, (): RunOptionsState => {
+    try { return JSON.parse(sessionStorage.getItem(CUSTOM_RUN_KEY) ?? '{}').opts ?? runOptionsInitial(); } catch { return runOptionsInitial(); }
+  });
   const [customActiveRun, setCustomActiveRun] = useState<RunKind | null>(null);
-  const [customExpanded, setCustomExpanded] = useState(false);
+  const [customExpanded, setCustomExpanded] = useState<boolean>(() => {
+    try { return JSON.parse(sessionStorage.getItem(CUSTOM_RUN_KEY) ?? '{}').expanded ?? false; } catch { return false; }
+  });
+
+  useEffect(() => {
+    try { sessionStorage.setItem(CUSTOM_RUN_KEY, JSON.stringify({ selector: customSelector, opts: customOpts, expanded: customExpanded })); } catch {}
+  }, [customSelector, customOpts, customExpanded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCustomRun = async (kind: RunKind) => {
     if (customActiveRun) return;
