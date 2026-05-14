@@ -160,6 +160,9 @@ class RunInvocation(Base):
     )
     command: Mapped[str] = mapped_column(String(64))  # run, build, test, deps, init, etc.
     selector: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    cli_command: Mapped[str | None] = mapped_column(Text, nullable=True)
+    profile: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target: Mapped[str | None] = mapped_column(String(255), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="pending")
     log_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -188,6 +188,24 @@ async def run_migrations() -> None:
             ))
             await session.commit()
 
+        if not await _column_exists(session, "run_invocations", "cli_command"):
+            await session.execute(
+                text("ALTER TABLE run_invocations ADD COLUMN cli_command TEXT")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "run_invocations", "profile"):
+            await session.execute(
+                text("ALTER TABLE run_invocations ADD COLUMN profile TEXT")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "run_invocations", "target"):
+            await session.execute(
+                text("ALTER TABLE run_invocations ADD COLUMN target TEXT")
+            )
+            await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()

@@ -202,6 +202,9 @@ export interface RunInvocationDto {
   id: number;
   command: string;
   selector: string | null;
+  cli_command: string | null;
+  profile: string | null;
+  target: string | null;
   status: string;
   started_at: string | null;
   finished_at: string | null;

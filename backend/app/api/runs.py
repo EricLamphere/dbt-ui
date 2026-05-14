@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select as sa_select
 
 from app.db.engine import SessionLocal, get_session
-from app.db.models import InvocationModelResult, ModelStatus, Project, ProjectEnvVar, RunInvocation
+from app.db.models import GlobalProfile, InvocationModelResult, ModelStatus, Project, ProjectEnvVar, RunInvocation
 from app.dbt.manifest import load_manifest
 from app.dbt.run_results import load_run_results
 from app.api.init import load_project_env
@@ -48,6 +48,9 @@ class RunInvocationDto(BaseModel):
     id: int
     command: str
     selector: str | None
+    cli_command: str | None
+    profile: str | None
+    target: str | None
     status: str
     started_at: datetime | None
     finished_at: datetime | None
@@ -217,6 +220,24 @@ async def _load_active_target(project_id: int) -> str | None:
         return row.value if row else None
 
 
+async def _load_active_profile_name(project_id: int) -> str | None:
+    async with SessionLocal() as session:
+        id_row = await session.execute(
+            sa_select(ProjectEnvVar).where(
+                ProjectEnvVar.project_id == project_id,
+                ProjectEnvVar.key == "active_global_profile_id",
+            )
+        )
+        id_var = id_row.scalar_one_or_none()
+        if id_var is None:
+            return None
+        try:
+            gp = await session.get(GlobalProfile, int(id_var.value))
+            return gp.name if gp else None
+        except (ValueError, TypeError):
+            return None
+
+
 async def _run_dbt_and_persist(
     project: Project,
     command: str,
@@ -230,6 +251,7 @@ async def _run_dbt_and_persist(
     import json
     env = await load_project_env(project.id)
     target = await _load_active_target(project.id)
+    profile_name = await _load_active_profile_name(project.id)
     extra: tuple[str, ...] = ("--target", target) if target else ()
     if full_refresh:
         extra += ("--full-refresh",)
@@ -242,12 +264,19 @@ async def _run_dbt_and_persist(
     if vars:
         extra += ("--vars", json.dumps(vars))
 
+    selector_part = f" --select {select}" if select else ""
+    extra_part = (" " + " ".join(extra)) if extra else ""
+    cli_command = f"dbt {command}{selector_part}{extra_part}"
+
     invocation_id: int | None = None
     async with SessionLocal() as session:
         inv = RunInvocation(
             project_id=project.id,
             command=command,
             selector=select,
+            cli_command=cli_command,
+            profile=profile_name,
+            target=target,
             status="running",
             started_at=datetime.now(timezone.utc),
         )
@@ -382,6 +411,9 @@ def _invocation_to_dto(
         id=inv.id,
         command=inv.command,
         selector=inv.selector,
+        cli_command=inv.cli_command,
+        profile=inv.profile,
+        target=inv.target,
         status=inv.status,
         started_at=inv.started_at,
         finished_at=inv.finished_at,

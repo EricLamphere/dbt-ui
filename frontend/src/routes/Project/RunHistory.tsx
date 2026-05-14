@@ -5,6 +5,7 @@ import { RotateCw } from 'lucide-react';
 import NavRail from './components/NavRail';
 import { api, ModelTimingDto, NodeTrendPoint, RunInvocationDetailDto, RunInvocationDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
+import { FailedRowsPanel, type FailedRowsCache } from './components/SidePane';
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -34,7 +35,9 @@ function formatDuration(seconds: number | null): string {
 
 function formatTime(iso: string | null): string {
   if (!iso) return '—';
-  return new Date(iso).toLocaleString(undefined, {
+  // Treat bare ISO strings (no Z or UTC offset) as UTC — SQLite returns naive datetimes
+  const normalized = iso.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z';
+  return new Date(normalized).toLocaleString(undefined, {
     month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
@@ -165,19 +168,22 @@ function TrendRow({ projectId, node }: { projectId: number; node: ModelTimingDto
 
 // ── DetailPanel ──────────────────────────────────────────────────────────────
 
-type DetailTab = 'nodes' | 'log';
+type DetailTab = 'nodes' | 'log' | 'failed_rows';
 
 interface DetailPanelProps {
   projectId: number;
   invocation: RunInvocationDto;
   onRerun: (invocationId: number) => void;
+  failedRowsCache: FailedRowsCache;
+  onFailedRowsCached: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
 }
 
-function DetailPanel({ projectId, invocation, onRerun }: DetailPanelProps) {
+function DetailPanel({ projectId, invocation, onRerun, failedRowsCache, onFailedRowsCached }: DetailPanelProps) {
   const [tab, setTab] = useState<DetailTab>('nodes');
   const [nodeFilter, setNodeFilter] = useState('');
   const [kindFilter, setKindFilter] = useState<'all' | 'model' | 'test'>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [selectedFailedTestUid, setSelectedFailedTestUid] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<RunInvocationDetailDto>({
     queryKey: ['run-invocation', projectId, invocation.id],
@@ -207,6 +213,28 @@ function DetailPanel({ projectId, invocation, onRerun }: DetailPanelProps) {
 
   const modelCount = data?.nodes.filter((n) => n.kind === 'model').length ?? 0;
   const testCount = data?.nodes.filter((n) => n.kind === 'test').length ?? 0;
+  const failedTests = useMemo(
+    () => (data?.nodes ?? []).filter((n) => n.kind === 'test' && (n.status === 'error' || n.status === 'fail')),
+    [data?.nodes],
+  );
+
+  // Default-select the first failed test when detail data loads
+  useEffect(() => {
+    if (failedTests.length > 0 && selectedFailedTestUid === null) {
+      setSelectedFailedTestUid(failedTests[0].unique_id);
+    }
+  }, [failedTests.length]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const activeFailedTest = failedTests.find((n) => n.unique_id === selectedFailedTestUid) ?? failedTests[0] ?? null;
+
+  const TAB_LABELS: Record<DetailTab, string> = {
+    nodes: 'Nodes',
+    log: 'Log',
+    failed_rows: 'Failed Rows',
+  };
+  const visibleTabs: DetailTab[] = failedTests.length > 0
+    ? ['nodes', 'log', 'failed_rows']
+    : ['nodes', 'log'];
 
   return (
     <div className="flex flex-col h-full border-l border-gray-800 bg-surface-panel min-w-0">
@@ -230,7 +258,7 @@ function DetailPanel({ projectId, invocation, onRerun }: DetailPanelProps) {
 
       {/* Tab bar */}
       <div className="shrink-0 flex border-b border-gray-800">
-        {(['nodes', 'log'] as DetailTab[]).map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -240,7 +268,7 @@ function DetailPanel({ projectId, invocation, onRerun }: DetailPanelProps) {
                 : 'border-transparent text-gray-500 hover:text-gray-300'
             }`}
           >
-            {t === 'nodes' ? 'Nodes' : 'Log'}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
@@ -310,6 +338,12 @@ function DetailPanel({ projectId, invocation, onRerun }: DetailPanelProps) {
       {/* Log tab */}
       {tab === 'log' && (
         <div className="flex-1 overflow-auto bg-surface-app font-mono text-xs text-gray-300 p-4">
+          {invocation.cli_command && (
+            <div className="mb-3 pb-3 border-b border-gray-800">
+              <span className="text-gray-500">$ </span>
+              <span className="text-brand-300">{invocation.cli_command}</span>
+            </div>
+          )}
           {logLoading ? (
             <span className="text-gray-500">Loading…</span>
           ) : !logData || logData.lines.length === 0 ? (
@@ -321,6 +355,40 @@ function DetailPanel({ projectId, invocation, onRerun }: DetailPanelProps) {
               </div>
             ))
           )}
+        </div>
+      )}
+
+      {/* Failed Rows tab */}
+      {tab === 'failed_rows' && (
+        <div className="flex flex-col flex-1 min-h-0">
+          {failedTests.length > 1 && (
+            <div className="shrink-0 px-4 py-2 border-b border-gray-800 bg-surface-app">
+              <select
+                value={selectedFailedTestUid ?? ''}
+                onChange={(e) => setSelectedFailedTestUid(e.target.value)}
+                className="w-full form-select border rounded px-2 py-1 text-xs font-mono"
+              >
+                {failedTests.map((n) => (
+                  <option key={n.unique_id} value={n.unique_id}>{n.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            {activeFailedTest ? (
+              <FailedRowsPanel
+                key={activeFailedTest.unique_id}
+                projectId={projectId}
+                model={activeFailedTest}
+                failedRowsCache={failedRowsCache}
+                onFailedRowsCached={onFailedRowsCached}
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500 text-sm">
+                No failed tests in this invocation.
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -390,6 +458,22 @@ export default function RunHistoryPage() {
   const qc = useQueryClient();
 
   const sessionKey = `run-history:${id}`;
+
+  const [failedRowsCache, setFailedRowsCache] = useState<FailedRowsCache>(() => {
+    try {
+      const raw = sessionStorage.getItem(`failed-rows-cache-${id}`);
+      return raw ? new Map(JSON.parse(raw) as [string, { columns: string[]; rows: unknown[][] }][]) : new Map();
+    } catch { return new Map(); }
+  });
+
+  function handleFailedRowsCached(uid: string, data: { columns: string[]; rows: unknown[][] }) {
+    setFailedRowsCache((prev) => {
+      const next = new Map(prev);
+      next.set(uid, data);
+      try { sessionStorage.setItem(`failed-rows-cache-${id}`, JSON.stringify(Array.from(next.entries()))); } catch {}
+      return next;
+    });
+  }
 
   const cancelMutation = useMutation({
     mutationFn: () => api.runHistory.cancel(id),
@@ -601,6 +685,8 @@ export default function RunHistoryPage() {
                 <thead className="sticky top-0 bg-surface-panel z-10">
                   <tr className="border-b border-gray-800 text-left text-[10px] uppercase tracking-wider text-gray-500">
                     <th className="px-4 py-2 font-medium">Started</th>
+                    <th className="px-4 py-2 font-medium">Profile</th>
+                    <th className="px-4 py-2 font-medium">Target</th>
                     <th className="px-4 py-2 font-medium">Cmd</th>
                     <th className="px-4 py-2 font-medium">Selector</th>
                     <th className="px-4 py-2 font-medium text-right">Duration</th>
@@ -619,6 +705,12 @@ export default function RunHistoryPage() {
                         className={`border-b border-gray-800/60 cursor-pointer transition-colors ${isActive ? 'bg-brand-900/20' : 'hover:bg-surface-elevated'}`}
                       >
                         <td className="px-4 py-2.5 text-gray-400 whitespace-nowrap font-mono">{formatTime(inv.started_at)}</td>
+                        <td className="px-4 py-2.5 text-gray-400 max-w-[120px] truncate">
+                          {inv.profile ?? <span className="text-gray-600">—</span>}
+                        </td>
+                        <td className="px-4 py-2.5 text-gray-400 font-mono">
+                          {inv.target ?? <span className="text-gray-600">—</span>}
+                        </td>
                         <td className="px-4 py-2.5"><CommandBadge command={inv.command} /></td>
                         <td className="px-4 py-2.5 text-gray-400 max-w-[140px] truncate font-mono">
                           {inv.selector ?? <span className="text-gray-600 italic">all</span>}
@@ -720,7 +812,7 @@ export default function RunHistoryPage() {
           >
             <div style={{ width: paneWidth }} className="flex flex-col h-full">
               {selected
-                ? <DetailPanel projectId={id} invocation={selected} onRerun={(invId) => rerunMutation.mutate(invId)} />
+                ? <DetailPanel projectId={id} invocation={selected} onRerun={(invId) => rerunMutation.mutate(invId)} failedRowsCache={failedRowsCache} onFailedRowsCached={handleFailedRowsCached} />
                 : (
                   <div className="flex items-center justify-center h-full text-gray-500 text-sm px-6 text-center">
                     Select a run to see node timings and logs.

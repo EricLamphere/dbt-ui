@@ -148,12 +148,12 @@ const _failedRowsInflight = new Set<string>();
 
 interface FailedRowsPanelProps {
   projectId: number;
-  model: ModelNode;
+  model: { unique_id: string };
   failedRowsCache?: FailedRowsCache;
   onFailedRowsCached?: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
 }
 
-function FailedRowsPanel({ projectId, model, failedRowsCache, onFailedRowsCached }: FailedRowsPanelProps) {
+export function FailedRowsPanel({ projectId, model, failedRowsCache, onFailedRowsCached }: FailedRowsPanelProps) {
   const key = `${projectId}:${model.unique_id}`;
   const cached = failedRowsCache?.get(model.unique_id) ?? null;
   const [loading, setLoading] = useState(false);
