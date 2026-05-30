@@ -5,7 +5,9 @@ import { RotateCw } from 'lucide-react';
 import NavRail from './components/NavRail';
 import { api, ModelTimingDto, NodeTrendPoint, RunInvocationDetailDto, RunInvocationDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
-import { FailedRowsPanel, type FailedRowsCache } from './components/SidePane';
+import { DataTable } from '../../components/DataTable';
+
+export type FailedRowsCache = Map<string, { columns: string[]; rows: unknown[][] }>;
 
 // ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -166,6 +168,109 @@ function TrendRow({ projectId, node }: { projectId: number; node: ModelTimingDto
   );
 }
 
+// ── FailedTestRow — expandable row in the Failed Rows tab ────────────────────
+
+const _failedRowsInflight = new Set<string>();
+
+interface FailedTestRowProps {
+  projectId: number;
+  node: ModelTimingDto;
+  failedRowsCache: FailedRowsCache;
+  onFailedRowsCached: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
+}
+
+function FailedTestRow({ projectId, node, failedRowsCache, onFailedRowsCached }: FailedTestRowProps) {
+  const [open, setOpen] = useState(false);
+  const key = `${projectId}:${node.unique_id}`;
+  const cached = failedRowsCache.get(node.unique_id) ?? null;
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchRows = async () => {
+    if (_failedRowsInflight.has(key)) return;
+    _failedRowsInflight.add(key);
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.models.show(projectId, node.unique_id, 100);
+      onFailedRowsCached(node.unique_id, result);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      _failedRowsInflight.delete(key);
+      setLoading(false);
+    }
+  };
+
+  function handleToggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && !cached && !_failedRowsInflight.has(key)) {
+      fetchRows();
+    }
+  }
+
+  return (
+    <div className="border-b border-gray-800/60 last:border-0">
+      <button
+        className="w-full flex items-center gap-2 px-4 py-2.5 text-left hover:bg-surface-elevated transition-colors"
+        onClick={handleToggle}
+      >
+        <svg
+          className={`w-3 h-3 shrink-0 text-gray-500 transition-transform ${open ? 'rotate-90' : ''}`}
+          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+        </svg>
+        <svg className="w-3.5 h-3.5 shrink-0 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+        </svg>
+        <span className="flex-1 font-mono text-xs text-gray-300 truncate">{node.name}</span>
+        {cached && (
+          <span className="text-[10px] text-gray-500 shrink-0">{cached.rows.length} row{cached.rows.length !== 1 ? 's' : ''}</span>
+        )}
+        {loading && <RotateCw className="w-3 h-3 shrink-0 text-gray-500 animate-spin" />}
+      </button>
+      {open && (
+        <div className="px-4 pb-3">
+          {loading && <p className="text-xs text-gray-500 py-2">Running dbt show…</p>}
+          {error && !loading && (
+            <div className="flex items-center justify-between py-2">
+              <p className="text-xs text-red-400">{error}</p>
+              <button
+                onClick={fetchRows}
+                className="flex items-center gap-1 px-2 py-1 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
+              >
+                <RotateCw className="w-3 h-3" /> Retry
+              </button>
+            </div>
+          )}
+          {!loading && !error && cached && cached.rows.length === 0 && (
+            <p className="text-xs text-gray-600 py-2">No failing rows returned.</p>
+          )}
+          {!loading && !error && cached && cached.rows.length > 0 && (
+            <div className="mt-1">
+              <div className="flex justify-end mb-1">
+                <button
+                  onClick={fetchRows}
+                  disabled={loading}
+                  className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-40 transition-colors"
+                >
+                  <RotateCw className="w-2.5 h-2.5" /> Refresh
+                </button>
+              </div>
+              <DataTable
+                columns={cached.columns.map((c) => ({ key: c }))}
+                rows={cached.rows}
+              />
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── DetailPanel ──────────────────────────────────────────────────────────────
 
 type DetailTab = 'nodes' | 'log' | 'failed_rows';
@@ -183,7 +288,6 @@ function DetailPanel({ projectId, invocation, onRerun, failedRowsCache, onFailed
   const [nodeFilter, setNodeFilter] = useState('');
   const [kindFilter, setKindFilter] = useState<'all' | 'model' | 'test'>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
-  const [selectedFailedTestUid, setSelectedFailedTestUid] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery<RunInvocationDetailDto>({
     queryKey: ['run-invocation', projectId, invocation.id],
@@ -218,23 +322,8 @@ function DetailPanel({ projectId, invocation, onRerun, failedRowsCache, onFailed
     [data?.nodes],
   );
 
-  // Default-select the first failed test when detail data loads
-  useEffect(() => {
-    if (failedTests.length > 0 && selectedFailedTestUid === null) {
-      setSelectedFailedTestUid(failedTests[0].unique_id);
-    }
-  }, [failedTests.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const activeFailedTest = failedTests.find((n) => n.unique_id === selectedFailedTestUid) ?? failedTests[0] ?? null;
-
-  const TAB_LABELS: Record<DetailTab, string> = {
-    nodes: 'Nodes',
-    log: 'Log',
-    failed_rows: 'Failed Rows',
-  };
-  const visibleTabs: DetailTab[] = failedTests.length > 0
-    ? ['nodes', 'log', 'failed_rows']
-    : ['nodes', 'log'];
+  const TAB_LABELS: Record<DetailTab, string> = { nodes: 'Nodes', log: 'Log', failed_rows: 'Failed Rows' };
+  const visibleTabs: DetailTab[] = failedTests.length > 0 ? ['nodes', 'log', 'failed_rows'] : ['nodes', 'log'];
 
   return (
     <div className="flex flex-col h-full border-l border-gray-800 bg-surface-panel min-w-0">
@@ -335,6 +424,21 @@ function DetailPanel({ projectId, invocation, onRerun, failedRowsCache, onFailed
         </>
       )}
 
+      {/* Failed Rows tab */}
+      {tab === 'failed_rows' && (
+        <div className="flex-1 overflow-auto">
+          {failedTests.map((n) => (
+            <FailedTestRow
+              key={n.unique_id}
+              projectId={projectId}
+              node={n}
+              failedRowsCache={failedRowsCache}
+              onFailedRowsCached={onFailedRowsCached}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Log tab */}
       {tab === 'log' && (
         <div className="flex-1 overflow-auto bg-surface-app font-mono text-xs text-gray-300 p-4">
@@ -355,40 +459,6 @@ function DetailPanel({ projectId, invocation, onRerun, failedRowsCache, onFailed
               </div>
             ))
           )}
-        </div>
-      )}
-
-      {/* Failed Rows tab */}
-      {tab === 'failed_rows' && (
-        <div className="flex flex-col flex-1 min-h-0">
-          {failedTests.length > 1 && (
-            <div className="shrink-0 px-4 py-2 border-b border-gray-800 bg-surface-app">
-              <select
-                value={selectedFailedTestUid ?? ''}
-                onChange={(e) => setSelectedFailedTestUid(e.target.value)}
-                className="w-full form-select border rounded px-2 py-1 text-xs font-mono"
-              >
-                {failedTests.map((n) => (
-                  <option key={n.unique_id} value={n.unique_id}>{n.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-          <div className="flex-1 min-h-0 overflow-hidden">
-            {activeFailedTest ? (
-              <FailedRowsPanel
-                key={activeFailedTest.unique_id}
-                projectId={projectId}
-                model={activeFailedTest}
-                failedRowsCache={failedRowsCache}
-                onFailedRowsCached={onFailedRowsCached}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-500 text-sm">
-                No failed tests in this invocation.
-              </div>
-            )}
-          </div>
         </div>
       )}
     </div>

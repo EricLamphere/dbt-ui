@@ -185,6 +185,7 @@ export function ViewPane({
 
   const completionDisposableRef = useRef<MonacoEditor.IDisposable | null>(null);
   useEffect(() => () => { completionDisposableRef.current?.dispose(); }, []);
+  const editorKeyListenersRef = useRef<{ down: (e: KeyboardEvent) => void; up: (e: KeyboardEvent) => void } | null>(null);
 
   const [activeTab, setActiveTab] = useState<ViewTab>('code');
   const [compiledSql, setCompiledSql] = useState<string | null>(null);
@@ -365,7 +366,7 @@ export function ViewPane({
           <Editor
             key={openFile.path}
             language={openFile.language}
-            value={edited ?? openFile.content}
+            defaultValue={edited ?? openFile.content}
             onChange={(v) => onEdit(v ?? '')}
             theme={monacoTheme}
             onMount={(editor, monacoInstance: Monaco) => {
@@ -703,12 +704,17 @@ export function ViewPane({
               }
 
               // Track Cmd/Ctrl state on window so releases outside the editor are caught
+              if (editorKeyListenersRef.current) {
+                window.removeEventListener('keydown', editorKeyListenersRef.current.down);
+                window.removeEventListener('keyup', editorKeyListenersRef.current.up);
+              }
               const handleWindowKeyDown = (e: KeyboardEvent) => {
                 if (e.key === 'Meta' || e.key === 'Control') applyDecorations();
               };
               const handleWindowKeyUp = (e: KeyboardEvent) => {
                 if (e.key === 'Meta' || e.key === 'Control') clearDecorations();
               };
+              editorKeyListenersRef.current = { down: handleWindowKeyDown, up: handleWindowKeyUp };
               window.addEventListener('keydown', handleWindowKeyDown);
               window.addEventListener('keyup', handleWindowKeyUp);
 
@@ -732,6 +738,7 @@ export function ViewPane({
               return () => {
                 window.removeEventListener('keydown', handleWindowKeyDown);
                 window.removeEventListener('keyup', handleWindowKeyUp);
+                editorKeyListenersRef.current = null;
                 onMouseDown.dispose();
                 cursorDisposable.dispose();
                 decorations.clear();

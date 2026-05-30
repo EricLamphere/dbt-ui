@@ -20,12 +20,13 @@ Cached in-process by manifest path + mtime.
 """
 
 import json
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-log = logging.getLogger(__name__)
+from app.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -85,7 +86,7 @@ def build_column_lineage(
     try:
         data: dict[str, Any] = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        log.warning("column_lineage_manifest_read_failed path=%s error=%s", manifest_path, exc)
+        log.warning("column_lineage_manifest_read_failed", path=str(manifest_path), error=str(exc))
         return {}
 
     adapter_type: str | None = (data.get("metadata") or {}).get("adapter_type")
@@ -243,11 +244,13 @@ def _trace_column(
 
         if not refs and parent_short_names:
             log.debug(
-                "column_lineage_no_refs col=%s expected_parents=%s found_source_names=%s",
-                col_name, parent_short_names, found_source_names,
+                "column_lineage_no_refs",
+                col=col_name,
+                expected_parents=parent_short_names,
+                found_source_names=found_source_names,
             )
         return refs
 
     except Exception as exc:
-        log.debug("column_lineage_parse_failed col=%s error=%s", col_name, exc)
+        log.debug("column_lineage_parse_failed", col=col_name, error=str(exc))
         return []

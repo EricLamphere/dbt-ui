@@ -239,7 +239,6 @@ export function BottomPane({ projectId, graph, projectPath }: BottomPaneProps) {
                 <SingleTerminal
                   instanceId={t.id}
                   projectPath={projectPath}
-                  active={isTerminalActive && activeTermId === t.id}
                 />
               ) : (
                 <div className="flex-1 flex items-center justify-center text-xs text-gray-600">Loading project…</div>

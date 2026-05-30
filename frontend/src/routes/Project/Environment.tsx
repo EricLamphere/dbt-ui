@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Plus, Trash2, Check, X } from 'lucide-react';
@@ -263,6 +263,7 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
 
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
+  const newKeyRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
@@ -292,6 +293,7 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
       setNewKey('');
       setNewValue('');
       qc.invalidateQueries({ queryKey: ['env-vars', projectId] });
+      newKeyRef.current?.focus();
     } catch (e) {
       alert(String(e));
     } finally {
@@ -427,6 +429,7 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
       </div>
       <div className="flex items-center gap-2">
         <input
+          ref={newKeyRef}
           placeholder="KEY"
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}

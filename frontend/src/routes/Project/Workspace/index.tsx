@@ -116,6 +116,7 @@ export default function WorkspacePage() {
   const editorRef = useRef<Parameters<NonNullable<Parameters<typeof Editor>[0]['onMount']>>[0] | null>(null);
   const handleRunRef = useRef<() => void>(() => {});
   const handleSaveRef = useRef<() => void>(() => {});
+  const editorKeyListenersRef = useRef<{ down: (e: KeyboardEvent) => void; up: (e: KeyboardEvent) => void } | null>(null);
 
   // Compiled SQL state
   const [compiledSql, setCompiledSql] = useState<string | null>(null);
@@ -733,12 +734,17 @@ export default function WorkspacePage() {
       }));
     }
 
+    if (editorKeyListenersRef.current) {
+      window.removeEventListener('keydown', editorKeyListenersRef.current.down);
+      window.removeEventListener('keyup', editorKeyListenersRef.current.up);
+    }
     const handleWindowKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Meta' || e.key === 'Control') applyDecorations();
     };
     const handleWindowKeyUp = (e: KeyboardEvent) => {
       if (e.key === 'Meta' || e.key === 'Control') decorations.clear();
     };
+    editorKeyListenersRef.current = { down: handleWindowKeyDown, up: handleWindowKeyUp };
     window.addEventListener('keydown', handleWindowKeyDown);
     window.addEventListener('keyup', handleWindowKeyUp);
 
@@ -760,6 +766,7 @@ export default function WorkspacePage() {
     return () => {
       window.removeEventListener('keydown', handleWindowKeyDown);
       window.removeEventListener('keyup', handleWindowKeyUp);
+      editorKeyListenersRef.current = null;
       onMouseDown.dispose();
       decorations.clear();
     };
@@ -998,7 +1005,7 @@ export default function WorkspacePage() {
             <Editor
               key={openPath}
               language="sql"
-              value={editorContent}
+              defaultValue={editorContent}
               onChange={handleEditorChange}
               theme={monacoTheme}
               onMount={handleEditorMount}

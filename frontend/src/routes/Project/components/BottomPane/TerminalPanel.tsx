@@ -13,7 +13,6 @@ export interface TerminalInstance {
 interface SingleTerminalProps {
   instanceId: string;
   projectPath: string;
-  active: boolean;
 }
 
 const TERM_THEME_DARK = {
@@ -69,7 +68,7 @@ function getTermTheme() {
 }
 
 // A single persistent terminal instance. Stays mounted even when not active (display:none).
-export function SingleTerminal({ instanceId: _instanceId, projectPath, active }: SingleTerminalProps) {
+export function SingleTerminal({ instanceId: _instanceId, projectPath }: SingleTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -107,10 +106,19 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
       api.terminal.resize(sid, cols, rows).catch(() => {});
     };
 
+    let fitTimer: ReturnType<typeof setTimeout> | null = null;
     const doFitAndResize = () => {
-      fit.fit();
-      const sid = sessionIdRef.current;
-      if (sid && term.cols && term.rows) resizeIfChanged(sid);
+      if (fitTimer) clearTimeout(fitTimer);
+      fitTimer = setTimeout(() => {
+        fitTimer = null;
+        if (container.clientWidth === 0 || container.clientHeight === 0) return;
+        const proposed = fit.proposeDimensions();
+        if (!proposed || proposed.rows < 2) return;
+        if (proposed.cols === term.cols && proposed.rows === term.rows) return;
+        fit.fit();
+        const sid = sessionIdRef.current;
+        if (sid && term.cols && term.rows) resizeIfChanged(sid);
+      }, 100);
     };
 
     const ro = new ResizeObserver(() => doFitAndResize());
@@ -122,12 +130,17 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
         sessionIdRef.current = session_id;
         lastSizeRef.current = { cols: term.cols, rows: term.rows };
         setSessionId(session_id);
-        requestAnimationFrame(() => { fit.fit(); });
+        requestAnimationFrame(() => {
+          const proposed = fit.proposeDimensions();
+          if (!proposed || (proposed.cols === term.cols && proposed.rows === term.rows)) return;
+          fit.fit();
+        });
       })
       .catch((e) => { term.writeln(`\x1b[31mFailed to start terminal: ${e}\x1b[0m`); });
 
     return () => {
       ro.disconnect();
+      if (fitTimer) clearTimeout(fitTimer);
       const sid = sessionIdRef.current;
       if (sid) api.terminal.stop(sid).catch(() => {});
       term.dispose();
@@ -138,25 +151,9 @@ export function SingleTerminal({ instanceId: _instanceId, projectPath, active }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectPath]);
 
-  // Re-fit whenever this terminal becomes the visible one.
-  // Only send resize to the PTY if dimensions actually changed — sending SIGWINCH
-  // unconditionally causes zsh to redraw the prompt, producing spurious blank lines.
-  useEffect(() => {
-    if (!active) return;
-    const t = setTimeout(() => {
-      fitRef.current?.fit();
-      const sid = sessionIdRef.current;
-      const term = termRef.current;
-      if (!sid || !term) return;
-      const { cols, rows } = term;
-      const last = lastSizeRef.current;
-      if (!last || last.cols !== cols || last.rows !== rows) {
-        lastSizeRef.current = { cols, rows };
-        api.terminal.resize(sid, cols, rows).catch(() => {});
-      }
-    }, 30);
-    return () => clearTimeout(t);
-  }, [active]);
+  // The ResizeObserver on the container handles re-fitting when the terminal becomes
+  // visible (display:none → visible fires it with real dimensions). No separate
+  // active-change effect needed — it was the source of spurious SIGWINCH on tab switch.
 
   // Wire keyboard input — filter out xterm focus-in/out sequences (\x1b[I / \x1b[O)
   // before forwarding to the PTY so zsh doesn't redraw the prompt on click.

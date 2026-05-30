@@ -30,6 +30,7 @@ const TYPE_ICON: Record<string, string> = {
   seed: '⊡',
   snapshot: '◈',
   test: '⬤',
+  exposure: '◉',
 };
 
 interface Props extends NodeProps {

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { api, type GlobalProfileDto } from '../lib/api';
@@ -416,6 +416,7 @@ function GlobalProfileCard({ profile, expanded, onToggle, onDelete }: GlobalProf
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
   const [savingVar, setSavingVar] = useState(false);
+  const newKeyRef = useRef<HTMLInputElement>(null);
   const [editingKey, setEditingKey] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
 
@@ -428,6 +429,7 @@ function GlobalProfileCard({ profile, expanded, onToggle, onDelete }: GlobalProf
       setNewKey('');
       setNewValue('');
       qc.invalidateQueries({ queryKey: ['global-profiles'] });
+      newKeyRef.current?.focus();
     } catch (e) {
       alert(String(e));
     } finally {
@@ -511,6 +513,7 @@ function GlobalProfileCard({ profile, expanded, onToggle, onDelete }: GlobalProf
 
           <div className="flex items-center gap-2 mt-1">
             <input
+              ref={newKeyRef}
               placeholder="KEY"
               value={newKey}
               onChange={(e) => setNewKey(e.target.value)}

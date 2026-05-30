@@ -21,7 +21,7 @@ export function emptyFilter(): FilterState {
 export function defaultFilter(): FilterState {
   return {
     selector: '',
-    resourceTypes: new Set(['model']),
+    resourceTypes: new Set(['model', 'seed', 'exposure']),
     materializations: new Set(),
     tags: new Set(),
     statuses: new Set(),
@@ -150,8 +150,8 @@ function parseToken(raw: string): ParsedToken {
     return { upstream, downstream, kind: 'resource_type', value: s.slice(14).toLowerCase() };
   }
 
-  // Bare type shorthand: model, seed, snapshot, test, source, analysis
-  const bareTypes = new Set(['model', 'seed', 'snapshot', 'test', 'source', 'analysis']);
+  // Bare type shorthand: model, seed, snapshot, test, source, exposure, analysis
+  const bareTypes = new Set(['model', 'seed', 'snapshot', 'test', 'source', 'exposure', 'analysis']);
   if (bareTypes.has(s.toLowerCase())) {
     return { upstream, downstream, kind: 'resource_type', value: s.toLowerCase() };
   }

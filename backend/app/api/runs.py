@@ -15,6 +15,7 @@ from app.db.models import GlobalProfile, InvocationModelResult, ModelStatus, Pro
 from app.dbt.manifest import load_manifest
 from app.dbt.run_results import load_run_results
 from app.api.init import load_project_env
+from app.api.env import _read_profiles_yml
 from app.dbt.runner import RunRequest, runner
 from app.dbt.select import SelectMode, build_selector
 from app.events.bus import Event, bus
@@ -253,6 +254,11 @@ async def _run_dbt_and_persist(
     target = await _load_active_target(project.id)
     profile_name = await _load_active_profile_name(project.id)
     extra: tuple[str, ...] = ("--target", target) if target else ()
+    if target is None:
+        profiles = _read_profiles_yml(Path(project.path))
+        profile_key = project.profile or project.name
+        profile_data = profiles.get(profile_key, {})
+        target = profile_data.get("target") or None
     if full_refresh:
         extra += ("--full-refresh",)
     if threads is not None:

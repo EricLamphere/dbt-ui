@@ -19,7 +19,7 @@ class ColumnInfo:
 class ModelNode:
     unique_id: str
     name: str
-    resource_type: str  # model, seed, source, snapshot, test
+    resource_type: str  # model, seed, source, snapshot, test, exposure
     schema_: str | None
     database: str | None
     materialized: str | None
@@ -80,7 +80,7 @@ class Manifest:
 
 def _extract_node(unique_id: str, raw: dict[str, Any]) -> ModelNode | None:
     resource_type = raw.get("resource_type")
-    if resource_type not in {"model", "seed", "snapshot", "test", "source"}:
+    if resource_type not in {"model", "seed", "snapshot", "test", "source", "exposure"}:
         return None
     config = raw.get("config") or {}
     raw_columns: dict[str, Any] = raw.get("columns") or {}
@@ -135,6 +135,12 @@ def load_manifest(manifest_path: Path) -> Manifest | None:
     raw_sources: dict[str, Any] = data.get("sources") or {}
     for unique_id, raw in raw_sources.items():
         node = _extract_node(unique_id, {**raw, "resource_type": "source"})
+        if node is not None:
+            nodes.append(node)
+
+    raw_exposures: dict[str, Any] = data.get("exposures") or {}
+    for unique_id, raw in raw_exposures.items():
+        node = _extract_node(unique_id, {**raw, "resource_type": "exposure"})
         if node is not None:
             nodes.append(node)
 
