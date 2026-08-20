@@ -624,13 +624,6 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
 
 async def _run_init_steps_locked(project_id: int, project_path: str, steps: list[InitStep]) -> None:
     topic = f"project:{project_id}"
-    await bus.publish(
-        Event(
-            topic=topic,
-            type="init_pipeline_started",
-            data={"steps": [s.name for s in steps]},
-        )
-    )
     append_project_log(project_path, "=== Init pipeline started ===", project_id)
     await _set_project_init_status(
         project_id,
@@ -638,21 +631,28 @@ async def _run_init_steps_locked(project_id: int, project_path: str, steps: list
         last_init_started_at=datetime.now(timezone.utc),
         last_init_failed_step=None,
     )
+    await bus.publish(
+        Event(
+            topic=topic,
+            type="init_pipeline_started",
+            data={"steps": [s.name for s in steps]},
+        )
+    )
     env = await load_project_env(project_id)
 
     for step in steps:
+        append_project_log(project_path, f"--- Step: {step.name} ---", project_id)
+        step_started_at = datetime.now(timezone.utc)
+        started_at = step_started_at.isoformat()
+        await _set_step_status(
+            project_id, step.name, last_status="running", last_started_at=step_started_at
+        )
         await bus.publish(
             Event(
                 topic=topic,
                 type="init_step",
                 data={"name": step.name, "status": "running"},
             )
-        )
-        append_project_log(project_path, f"--- Step: {step.name} ---", project_id)
-        step_started_at = datetime.now(timezone.utc)
-        started_at = step_started_at.isoformat()
-        await _set_step_status(
-            project_id, step.name, last_status="running", last_started_at=step_started_at
         )
         try:
             if step.name == "base: pip install":

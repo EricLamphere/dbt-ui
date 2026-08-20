@@ -69,9 +69,12 @@ export default function ProjectHome() {
   const navigate = useNavigate();
   const qc = useQueryClient();
 
+  // refetchOnMount: 'always' — navigating back to this page must never show a
+  // cached last_init_status from before an init run that started while away.
   const { data: project, isLoading, error } = useQuery({
     queryKey: ['project', id],
     queryFn: () => api.projects.get(id),
+    refetchOnMount: 'always',
   });
 
   const { data: graph } = useQuery({

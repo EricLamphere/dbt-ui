@@ -74,14 +74,18 @@ export default function InitScriptsPage() {
   const id = Number(projectId);
   const qc = useQueryClient();
 
+  // refetchOnMount: 'always' — navigating back to this page must never show a
+  // cached last_init_status from before an init run that started while away.
   const { data: project } = useQuery({
     queryKey: ['project', id],
     queryFn: () => api.projects.get(id),
+    refetchOnMount: 'always',
   });
 
   const { data: steps = [], isLoading } = useQuery({
     queryKey: ['init-steps', id],
     queryFn: () => api.init.steps(id),
+    refetchOnMount: 'always',
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['init-steps', id] });
@@ -247,6 +251,9 @@ export default function InitScriptsPage() {
     deleteMutation.mutate(step.name);
   };
 
+  // Persisted status (survives navigation + restarts); local SSE-driven state
+  // during an active run takes priority once it fires.
+  const displayRunning = setupRunning || project?.last_init_status === 'running';
   const effectiveLastRunAt = lastRunAt ?? project?.last_init_finished_at ?? null;
   const formattedLastRun = effectiveLastRunAt
     ? new Date(effectiveLastRunAt).toLocaleString(undefined, {
@@ -268,16 +275,16 @@ export default function InitScriptsPage() {
           </div>
           <button
             onClick={() => runSetupMutation.mutate()}
-            disabled={setupRunning || runSetupMutation.isPending}
+            disabled={displayRunning || runSetupMutation.isPending}
             className="flex items-center gap-2 px-4 py-2 text-sm rounded bg-brand-600 hover:bg-brand-500 disabled:opacity-50 text-white font-medium transition-colors"
           >
-            {setupRunning && (
+            {displayRunning && (
               <svg className="w-3.5 h-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" />
               </svg>
             )}
-            {setupRunning ? 'Running…' : 'Run Setup'}
+            {displayRunning ? 'Running…' : 'Run Setup'}
           </button>
         </div>
 
