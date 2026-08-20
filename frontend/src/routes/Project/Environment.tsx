@@ -104,7 +104,60 @@ function GlobalProfileSelector({ projectId }: { projectId: number }) {
   );
 }
 
+// ---- Resizable, persisted column widths ----
+// Widths are stored per-column in localStorage so a user's chosen width survives
+// navigation and full page reloads (mirrors the dbt-ui:* width-persistence
+// convention used by Workspace/Docs/Git panel widths).
+
+const MIN_COL_WIDTH = 80;
+const MAX_COL_WIDTH = 480;
+
+function readStoredColWidth(key: string, fallback: number): number {
+  try {
+    const v = parseInt(localStorage.getItem(key) ?? '', 10);
+    return !isNaN(v) && v >= MIN_COL_WIDTH && v <= MAX_COL_WIDTH ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredColWidth(key: string, width: number) {
+  try { localStorage.setItem(key, String(width)); } catch { /* ignore */ }
+}
+
+function ColumnResizeHandle({ onDrag }: { onDrag: (dx: number) => void }) {
+  const startX = useRef<number | null>(null);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    startX.current = e.clientX;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (startX.current === null) return;
+    const dx = e.clientX - startX.current;
+    startX.current = e.clientX;
+    onDrag(dx);
+  };
+  const onPointerUp = () => { startX.current = null; };
+
+  return (
+    <div
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+      className="absolute right-0 top-0 h-full w-2 cursor-col-resize select-none flex items-center justify-center group z-10"
+    >
+      <div className="w-px h-3.5 bg-gray-700 group-hover:bg-brand-500 transition-colors" />
+    </div>
+  );
+}
+
 // ---- Project Settings ----
+
+const SETTINGS_LABEL_COL_WIDTH_KEY = 'dbt-ui:env-settings-label-col-width';
+const DEFAULT_SETTINGS_LABEL_COL_WIDTH = 176;
 
 interface ProjectSettingRowProps {
   label: string;
@@ -112,9 +165,11 @@ interface ProjectSettingRowProps {
   placeholder?: string;
   kind?: 'default' | 'example';
   onSave: (val: string) => Promise<void>;
+  labelWidth: number;
+  onResizeLabel: (dx: number) => void;
 }
 
-function ProjectSettingRow({ label, value, placeholder, kind = 'example', onSave }: ProjectSettingRowProps) {
+function ProjectSettingRow({ label, value, placeholder, kind = 'example', onSave, labelWidth, onResizeLabel }: ProjectSettingRowProps) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
@@ -138,7 +193,10 @@ function ProjectSettingRow({ label, value, placeholder, kind = 'example', onSave
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 bg-surface-panel rounded border border-gray-800 text-xs">
-      <span className="font-mono text-brand-300 w-44 shrink-0 truncate">{label}</span>
+      <div className="relative shrink-0" style={{ width: labelWidth }}>
+        <span className="block font-mono text-brand-300 truncate pr-2">{label}</span>
+        <ColumnResizeHandle onDrag={onResizeLabel} />
+      </div>
       <span className="text-gray-600">=</span>
       {editing ? (
         <>
@@ -181,6 +239,17 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
     queryKey: ['env-vars', projectId],
     queryFn: () => api.init.getEnvVars(projectId),
   });
+
+  const [labelWidth, setLabelWidth] = useState(() =>
+    readStoredColWidth(SETTINGS_LABEL_COL_WIDTH_KEY, DEFAULT_SETTINGS_LABEL_COL_WIDTH)
+  );
+  const handleResizeLabel = (dx: number) => {
+    setLabelWidth((prev) => {
+      const next = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, prev + dx));
+      writeStoredColWidth(SETTINGS_LABEL_COL_WIDTH_KEY, next);
+      return next;
+    });
+  };
 
   const requirementsPath = envVars.find((v) => v.key === 'REQUIREMENTS_PATH')?.value ?? '';
   const workspacePath = envVars.find((v) => v.key === 'WORKSPACE_PATH')?.value ?? '';
@@ -226,12 +295,16 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
               placeholder="dbtui/init"
               kind="default"
               onSave={handleSaveInitScriptPath}
+              labelWidth={labelWidth}
+              onResizeLabel={handleResizeLabel}
             />
             <ProjectSettingRow
               label="REQUIREMENTS_PATH"
               value={requirementsPath}
               placeholder="/path/to/requirements.txt"
               onSave={handleSaveRequirementsPath}
+              labelWidth={labelWidth}
+              onResizeLabel={handleResizeLabel}
             />
             <ProjectSettingRow
               label="WORKSPACE_PATH"
@@ -239,6 +312,8 @@ function ProjectSettingsSection({ projectId, project }: { projectId: number; pro
               placeholder="dbtui/workspace"
               kind="default"
               onSave={handleSaveWorkspacePath}
+              labelWidth={labelWidth}
+              onResizeLabel={handleResizeLabel}
             />
           </>
         )}
@@ -252,6 +327,9 @@ const RESERVED_ENV_KEYS = new Set(['REQUIREMENTS_PATH', 'WORKSPACE_PATH', 'activ
 
 // ---- Environment Variables ----
 
+const ENVVAR_KEY_COL_WIDTH_KEY = 'dbt-ui:env-envvar-key-col-width';
+const DEFAULT_ENVVAR_KEY_COL_WIDTH = 160;
+
 function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
   const qc = useQueryClient();
   const { data: allEnvVars = [] } = useQuery({
@@ -260,6 +338,17 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
   });
 
   const envVars = allEnvVars.filter((v) => !RESERVED_ENV_KEYS.has(v.key));
+
+  const [keyColWidth, setKeyColWidth] = useState(() =>
+    readStoredColWidth(ENVVAR_KEY_COL_WIDTH_KEY, DEFAULT_ENVVAR_KEY_COL_WIDTH)
+  );
+  const handleKeyColResize = (dx: number) => {
+    setKeyColWidth((prev) => {
+      const next = Math.min(MAX_COL_WIDTH, Math.max(MIN_COL_WIDTH, prev + dx));
+      writeStoredColWidth(ENVVAR_KEY_COL_WIDTH_KEY, next);
+      return next;
+    });
+  };
 
   const [newKey, setNewKey] = useState('');
   const [newValue, setNewValue] = useState('');
@@ -392,7 +481,10 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
               onClick={(e) => e.stopPropagation()}
               className="w-3.5 h-3.5 rounded accent-brand-500 cursor-pointer shrink-0"
             />
-            <span className="font-mono text-brand-300 w-40 shrink-0 truncate">{v.key}</span>
+            <div className="relative shrink-0" style={{ width: keyColWidth }}>
+              <span className="block font-mono text-brand-300 truncate pr-2">{v.key}</span>
+              <ColumnResizeHandle onDrag={handleKeyColResize} />
+            </div>
             <span className="text-gray-600">=</span>
             {editingKey === v.key ? (
               <>
@@ -434,7 +526,8 @@ function EnvironmentVariablesSection({ projectId }: { projectId: number }) {
           value={newKey}
           onChange={(e) => setNewKey(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); }}
-          className="w-40 bg-surface-elevated border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-100 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500"
+          style={{ width: keyColWidth }}
+          className="shrink-0 bg-surface-elevated border border-gray-700 rounded px-2 py-1.5 text-xs text-gray-100 font-mono focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <span className="text-gray-600 text-xs">=</span>
         <input

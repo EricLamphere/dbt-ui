@@ -66,6 +66,10 @@ export interface Project {
   pinned: boolean;
   pin_order: number | null;
   last_opened_at: string | null;
+  last_init_status: string;
+  last_init_started_at: string | null;
+  last_init_finished_at: string | null;
+  last_init_failed_step: string | null;
   readme: string | null;
   dbt_project_yml: string | null;
   profiles_yml: string | null;
@@ -269,6 +273,10 @@ export interface InitStepDto {
   enabled: boolean;
   script_path: string | null;
   captured_vars: string[];
+  last_status: string;
+  last_started_at: string | null;
+  last_finished_at: string | null;
+  last_log: string;
 }
 
 export interface SqlDto {

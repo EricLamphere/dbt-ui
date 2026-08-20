@@ -25,6 +25,10 @@ class Project(Base):
     pinned: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     pin_order: Mapped[int | None] = mapped_column(Integer, nullable=True, default=None)
     last_opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_init_status: Mapped[str] = mapped_column(String(32), default="idle")
+    last_init_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_init_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_init_failed_step: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     init_steps: Mapped[list["InitStep"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", order_by="InitStep.order"
@@ -42,6 +46,10 @@ class InitStep(Base):
     is_base: Mapped[bool] = mapped_column(default=False)
     enabled: Mapped[bool] = mapped_column(default=True)
     captured_vars: Mapped[str] = mapped_column(Text, default="")
+    last_status: Mapped[str] = mapped_column(String(32), default="idle")
+    last_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_log: Mapped[str] = mapped_column(Text, default="")
 
     project: Mapped[Project] = relationship(back_populates="init_steps")
 

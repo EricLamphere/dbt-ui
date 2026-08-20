@@ -212,6 +212,69 @@ async def run_migrations() -> None:
             )
             await session.commit()
 
+        if not await _column_exists(session, "projects", "last_init_status"):
+            await session.execute(
+                text("ALTER TABLE projects ADD COLUMN last_init_status TEXT NOT NULL DEFAULT 'idle'")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "projects", "last_init_started_at"):
+            await session.execute(
+                text("ALTER TABLE projects ADD COLUMN last_init_started_at DATETIME")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "projects", "last_init_finished_at"):
+            await session.execute(
+                text("ALTER TABLE projects ADD COLUMN last_init_finished_at DATETIME")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "projects", "last_init_failed_step"):
+            await session.execute(
+                text("ALTER TABLE projects ADD COLUMN last_init_failed_step TEXT")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "init_steps", "last_status"):
+            await session.execute(
+                text("ALTER TABLE init_steps ADD COLUMN last_status TEXT NOT NULL DEFAULT 'idle'")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "init_steps", "last_started_at"):
+            await session.execute(
+                text("ALTER TABLE init_steps ADD COLUMN last_started_at DATETIME")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "init_steps", "last_finished_at"):
+            await session.execute(
+                text("ALTER TABLE init_steps ADD COLUMN last_finished_at DATETIME")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "init_steps", "last_log"):
+            await session.execute(
+                text("ALTER TABLE init_steps ADD COLUMN last_log TEXT NOT NULL DEFAULT ''")
+            )
+            await session.commit()
+
+        # Reset any init runs left in 'running' state from a previous server process
+        await session.execute(
+            text(
+                "UPDATE projects SET last_init_status = 'error',"
+                " last_init_failed_step = COALESCE(last_init_failed_step, 'interrupted by server restart')"
+                " WHERE last_init_status = 'running'"
+            )
+        )
+        await session.commit()
+
+        await session.execute(
+            text("UPDATE init_steps SET last_status = 'error' WHERE last_status = 'running'")
+        )
+        await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()

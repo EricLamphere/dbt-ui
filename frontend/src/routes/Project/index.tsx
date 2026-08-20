@@ -7,6 +7,7 @@ import { api, type GraphDto, type Project, type RunInvocationDto, type RunOpts }
 import { useProjectEvents } from '../../lib/sse';
 import { useTheme } from '../../lib/useTheme';
 import NavRail from './components/NavRail';
+import { StatusLogPopover } from './components/StatusLogPopover';
 import {
   runOptionsInitial,
   runOptionsReducer,
@@ -104,31 +105,58 @@ export default function ProjectHome() {
 
   type InitStatus = 'idle' | 'running' | 'success' | 'error';
   const [initStatus, setInitStatus] = useState<InitStatus>('idle');
-  const [initError, setInitError] = useState<string>('');
+  const [initFailedStep, setInitFailedStep] = useState<string | null>(null);
+  const [lastRunAt, setLastRunAt] = useState<string | null>(null);
+
+  // Persisted status/timestamp (survives navigation + restarts); live SSE state
+  // during an active run takes priority once it fires.
+  const displayStatus: InitStatus =
+    initStatus !== 'idle' ? initStatus : ((project?.last_init_status as InitStatus | undefined) ?? 'idle');
+  const displayFailedStep = initFailedStep ?? project?.last_init_failed_step ?? null;
+  const effectiveLastRunAt = lastRunAt ?? project?.last_init_finished_at ?? null;
+  const formattedLastRun = effectiveLastRunAt
+    ? new Date(effectiveLastRunAt).toLocaleString(undefined, {
+        month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      })
+    : null;
 
   const initMutation = useMutation({
     mutationFn: () => api.init.open(id),
     onMutate: () => {
       setInitStatus('running');
-      setInitError('');
+      setInitFailedStep(null);
+    },
+    onError: (err) => {
+      setInitStatus('error');
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.startsWith('409')) {
+        alert('Init pipeline is already running for this project.');
+      } else {
+        alert(message);
+      }
     },
   });
 
   useProjectEvents(id, useCallback((event) => {
     if (event.type === 'init_pipeline_started') {
       setInitStatus('running');
-      setInitError('');
+      setInitFailedStep(null);
     }
     if (event.type === 'init_pipeline_finished') {
       const data = event.data as { status: string; failed_step?: string };
       if (data.status === 'success') {
         setInitStatus('success');
+        setInitFailedStep(null);
       } else {
         setInitStatus('error');
-        setInitError(data.failed_step ? `Failed at step: ${data.failed_step}` : 'Setup failed');
+        setInitFailedStep(data.failed_step ?? null);
       }
+      setLastRunAt(new Date().toISOString());
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['init-steps', id] });
     }
-  }, []));
+  }, [id, qc]));
 
   // Quick-run state
   const [activeRun, setActiveRun] = useState<RunKind | null>(null);
@@ -263,24 +291,33 @@ export default function ProjectHome() {
               {/* Top half: Initialize */}
               <button
                 onClick={() => initMutation.mutate()}
-                disabled={initStatus === 'running'}
+                disabled={displayStatus === 'running'}
                 className="flex-1 flex items-center justify-between px-4 border-b border-gray-800 text-xs font-medium text-gray-200 hover:bg-surface-elevated/60 disabled:opacity-50 transition-colors group"
               >
-                <div className="flex items-center gap-2">
-                  {initStatus === 'running' ? (
-                    <svg className="w-3.5 h-3.5 animate-spin text-brand-400" viewBox="0 0 24 24" fill="none">
+                <div className="flex items-center gap-2 min-w-0">
+                  {displayStatus === 'running' ? (
+                    <svg className="w-3.5 h-3.5 animate-spin text-brand-400 shrink-0" viewBox="0 0 24 24" fill="none">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3v4a8 8 0 100 16v-4l-3 3 3 3v-4a8 8 0 01-8-8z" />
                     </svg>
                   ) : (
-                    <svg className="w-3.5 h-3.5 text-brand-400 group-hover:text-brand-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                    <svg className="w-3.5 h-3.5 text-brand-400 group-hover:text-brand-300 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M5.636 5.636a9 9 0 1012.728 0M12 3v9" />
                     </svg>
                   )}
-                  <span>{initStatus === 'running' ? 'Running…' : 'Initialize'}</span>
+                  <div className="flex flex-col items-start min-w-0">
+                    <span>{displayStatus === 'running' ? 'Running…' : 'Initialize'}</span>
+                    {formattedLastRun && displayStatus !== 'running' && (
+                      <span className="text-[10px] text-gray-600 font-normal truncate">Last run: {formattedLastRun}</span>
+                    )}
+                  </div>
                 </div>
-                {initStatus !== 'idle' && initStatus !== 'running' && (
-                  <InitStatusBadge status={initStatus} errorMessage={initError} />
+                {displayStatus !== 'idle' && displayStatus !== 'running' && (
+                  <InitStatusBadge
+                    status={displayStatus}
+                    failedStep={displayFailedStep}
+                    onViewInit={() => navigate(`/projects/${id}/init`)}
+                  />
                 )}
               </button>
 
@@ -576,32 +613,47 @@ function ProjectFilesPanel({ project }: { project: Project }) {
 
 // ---- Init status badge ----
 
-function InitStatusBadge({ status, errorMessage }: { status: 'success' | 'error'; errorMessage: string }) {
-  const [hovered, setHovered] = useState(false);
-  const tooltip = status === 'success' ? 'Complete' : `Failed\n${errorMessage}`;
+function InitStatusBadge({
+  status,
+  failedStep,
+  onViewInit,
+}: {
+  status: 'success' | 'error';
+  failedStep: string | null;
+  onViewInit: () => void;
+}) {
+  const iconEl = status === 'success' ? (
+    <svg className="w-4 h-4 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+    </svg>
+  ) : (
+    <svg className="w-4 h-4 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+    </svg>
+  );
 
-  return (
-    <div
-      className="relative shrink-0"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      {status === 'success' ? (
-        <svg className="w-4 h-4 text-green-400" viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-        </svg>
-      ) : (
-        <svg className="w-4 h-4 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-          <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-        </svg>
-      )}
-      {hovered && (
-        <div className="absolute right-6 top-1/2 -translate-y-1/2 z-50 min-w-max max-w-xs bg-gray-900 border border-gray-700 rounded px-2.5 py-1.5 shadow-xl pointer-events-none">
-          <pre className="text-xs text-gray-200 whitespace-pre-wrap font-sans leading-relaxed">{tooltip}</pre>
-        </div>
-      )}
+  // Lightweight summary only — full scrollable logs live on the Initialization page.
+  const panel = status === 'success' ? (
+    <p className="text-xs text-green-400 font-medium">Complete</p>
+  ) : (
+    <div className="flex flex-col gap-1.5">
+      <p className="text-xs text-red-400 font-medium">
+        {failedStep ? `Failed at step: ${failedStep}` : 'Setup failed'}
+      </p>
+      {/* span, not button — this panel is nested inside the outer "Initialize" <button> */}
+      <span
+        role="link"
+        tabIndex={0}
+        onClick={(e) => { e.stopPropagation(); onViewInit(); }}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.stopPropagation(); e.preventDefault(); onViewInit(); } }}
+        className="text-xs text-brand-400 hover:text-brand-300 text-left transition-colors cursor-pointer"
+      >
+        View Initialization →
+      </span>
     </div>
   );
+
+  return <StatusLogPopover icon={iconEl} panel={panel} align="end" />;
 }
 
 // ---- App picker modal ----

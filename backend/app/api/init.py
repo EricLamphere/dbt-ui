@@ -24,6 +24,17 @@ log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/projects", tags=["init"])
 
+# Per-project locking for the init pipeline, mirroring DbtRunner._lock_for.
+_init_locks: dict[int, asyncio.Lock] = {}
+
+
+def _init_lock_for(project_id: int) -> asyncio.Lock:
+    lock = _init_locks.get(project_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _init_locks[project_id] = lock
+    return lock
+
 
 class InitStepDto(BaseModel):
     id: int | None
@@ -33,6 +44,10 @@ class InitStepDto(BaseModel):
     enabled: bool
     script_path: str | None
     captured_vars: list[str]
+    last_status: str
+    last_started_at: str | None
+    last_finished_at: str | None
+    last_log: str
 
 
 class InitStepCreateDto(BaseModel):
@@ -54,6 +69,10 @@ def _row_to_dto(r: "InitStep") -> InitStepDto:
         enabled=r.enabled,
         script_path=r.script_path,
         captured_vars=_parse_captured_vars(r.captured_vars),
+        last_status=r.last_status,
+        last_started_at=r.last_started_at.isoformat() if r.last_started_at else None,
+        last_finished_at=r.last_finished_at.isoformat() if r.last_finished_at else None,
+        last_log=r.last_log,
     )
 
 
@@ -504,6 +523,8 @@ async def open_project(
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
+    if _init_lock_for(project_id).locked():
+        raise HTTPException(status_code=409, detail="init pipeline already running")
     rows = await _sync_steps_from_disk(session, project)
     enabled_rows = [r for r in rows if r.enabled]
     asyncio.create_task(_run_init_steps(project_id, project.path, enabled_rows))
@@ -521,6 +542,8 @@ async def run_single_step(
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
+    if _init_lock_for(project_id).locked():
+        raise HTTPException(status_code=409, detail="init pipeline already running")
     rows = await _sync_steps_from_disk(session, project)
     matching = [r for r in rows if r.name == body.step_name]
     if not matching:
@@ -568,7 +591,38 @@ async def load_project_env(project_id: int) -> dict[str, str]:
     return env
 
 
+async def _set_project_init_status(project_id: int, **fields: object) -> None:
+    from app.db.engine import SessionLocal
+    async with SessionLocal() as s:
+        project = await s.get(Project, project_id)
+        if project is None:
+            return
+        for key, value in fields.items():
+            setattr(project, key, value)
+        await s.commit()
+
+
+async def _set_step_status(project_id: int, step_name: str, **fields: object) -> None:
+    from app.db.engine import SessionLocal
+    async with SessionLocal() as s:
+        result = await s.execute(
+            select(InitStep).where(InitStep.project_id == project_id, InitStep.name == step_name)
+        )
+        row = result.scalar_one_or_none()
+        if row is None:
+            return
+        for key, value in fields.items():
+            setattr(row, key, value)
+        await s.commit()
+
+
 async def _run_init_steps(project_id: int, project_path: str, steps: list[InitStep]) -> None:
+    lock = _init_lock_for(project_id)
+    async with lock:
+        await _run_init_steps_locked(project_id, project_path, steps)
+
+
+async def _run_init_steps_locked(project_id: int, project_path: str, steps: list[InitStep]) -> None:
     topic = f"project:{project_id}"
     await bus.publish(
         Event(
@@ -578,6 +632,12 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
         )
     )
     append_project_log(project_path, "=== Init pipeline started ===", project_id)
+    await _set_project_init_status(
+        project_id,
+        last_init_status="running",
+        last_init_started_at=datetime.now(timezone.utc),
+        last_init_failed_step=None,
+    )
     env = await load_project_env(project_id)
 
     for step in steps:
@@ -589,7 +649,11 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
             )
         )
         append_project_log(project_path, f"--- Step: {step.name} ---", project_id)
-        started_at = datetime.now(timezone.utc).isoformat()
+        step_started_at = datetime.now(timezone.utc)
+        started_at = step_started_at.isoformat()
+        await _set_step_status(
+            project_id, step.name, last_status="running", last_started_at=step_started_at
+        )
         try:
             if step.name == "base: pip install":
                 global_req = await _get_global_requirements_path()
@@ -617,9 +681,8 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                 ok = return_code == 0
             elif step.name == "base: dbt docs generate":
                 from app.api.docs import _generate_docs  # noqa: PLC0415
-                ok = await _generate_docs(project_id, project_path, env=env)
+                ok, log_lines = await _generate_docs(project_id, project_path, env=env)
                 return_code = 0 if ok else 1
-                log_lines = []
             elif step.name == "base: dbt compile":
                 return_code, log_lines = await _exec_and_capture(
                     [str(venv_dbt()), "compile"], project_path, env
@@ -679,7 +742,16 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
         append_project_log(project_path, f"--- {step.name}: {status_str} ---", project_id)
         await asyncio.sleep(0)  # let pending project_log tasks publish before init_step
 
-        finished_at = datetime.now(timezone.utc).isoformat()
+        step_finished_at = datetime.now(timezone.utc)
+        finished_at = step_finished_at.isoformat()
+        step_log = "\n".join(log_lines[-200:])
+        await _set_step_status(
+            project_id,
+            step.name,
+            last_status="success" if ok else "error",
+            last_finished_at=step_finished_at,
+            last_log=step_log,
+        )
         await bus.publish(
             Event(
                 topic=topic,
@@ -688,7 +760,7 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
                     "name": step.name,
                     "status": "success" if ok else "error",
                     "return_code": return_code,
-                    "log": "\n".join(log_lines[-200:]),
+                    "log": step_log,
                     "started_at": started_at,
                     "finished_at": finished_at,
                 },
@@ -696,6 +768,12 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
         )
         if not ok:
             append_project_log(project_path, f"=== Init pipeline finished: FAILED at '{step.name}' ===", project_id)
+            await _set_project_init_status(
+                project_id,
+                last_init_status="error",
+                last_init_finished_at=datetime.now(timezone.utc),
+                last_init_failed_step=step.name,
+            )
             await asyncio.sleep(0)  # let pending project_log tasks publish before pipeline_finished
             await bus.publish(
                 Event(
@@ -706,6 +784,12 @@ async def _run_init_steps(project_id: int, project_path: str, steps: list[InitSt
             )
             return
     append_project_log(project_path, "=== Init pipeline finished: SUCCESS ===", project_id)
+    await _set_project_init_status(
+        project_id,
+        last_init_status="success",
+        last_init_finished_at=datetime.now(timezone.utc),
+        last_init_failed_step=None,
+    )
     await asyncio.sleep(0)  # let pending project_log tasks publish before pipeline_finished
     await bus.publish(
         Event(
@@ -721,12 +805,13 @@ async def _capture_script_exports(
 ) -> dict[str, str]:
     """Source the script in a subshell and return any newly exported vars.
 
-    We run: bash -c 'set -a; source SCRIPT; export -p'
-    Then parse the `export -p` output and return vars that weren't already
-    in the parent env (or whose values changed).  This is the only reliable
-    way to capture vars a shell script exports without modifying the scripts.
+    We run: bash -c 'set -a; source SCRIPT >/dev/null 2>&1; env -0'
+    `env -0` emits NUL-separated KEY=value records. Unlike `export -p`, whose
+    output is a line-based format, this stays parseable even when a value
+    contains embedded newlines (e.g. a multi-line PEM private key) — a
+    line-based parser silently drops such vars instead of capturing them.
     """
-    cmd = f"set -a; source {shlex.quote(script_path)}; export -p"
+    cmd = f"set -a; source {shlex.quote(script_path)} >/dev/null 2>&1; env -0"
     proc = await asyncio.create_subprocess_exec(
         "bash", "-c", cmd,
         cwd=cwd,
@@ -739,15 +824,12 @@ async def _capture_script_exports(
     await proc.wait()
 
     exported: dict[str, str] = {}
-    # export -p lines look like: declare -x KEY="value" or declare -x KEY
-    pattern = re.compile(r'^declare -x ([A-Za-z_][A-Za-z0-9_]*)(?:="(.*)")?$')
-    for raw_line in stdout_bytes.decode(errors="replace").splitlines():
-        m = pattern.match(raw_line.strip())
-        if not m:
+    for record in stdout_bytes.decode(errors="replace").split("\0"):
+        if not record:
             continue
-        key, value = m.group(1), m.group(2) or ""
-        # Unescape bash escape sequences in the value
-        value = value.replace('\\"', '"').replace("\\'", "'").replace("\\\\", "\\")
+        key, sep, value = record.partition("=")
+        if not sep:
+            continue
         if key not in env or env[key] != value:
             exported[key] = value
 

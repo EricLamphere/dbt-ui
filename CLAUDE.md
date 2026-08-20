@@ -94,8 +94,8 @@ frontend/src/
 ## Database Tables
 
 All 11 in `backend/app/db/models.py`:
-- `projects` — discovered dbt projects (includes `init_script_path: str` per-project init dir; `ignored: bool` to hide from list)
-- `init_steps` — ordered init pipeline steps per project (includes `script_path` for linked external scripts)
+- `projects` — discovered dbt projects (includes `init_script_path: str` per-project init dir; `ignored: bool` to hide from list; `last_init_status: str` (idle/running/success/error), `last_init_started_at`, `last_init_finished_at`, `last_init_failed_step` — persisted init pipeline status shown on the homepage and Initialization page)
+- `init_steps` — ordered init pipeline steps per project (includes `script_path` for linked external scripts; `last_status: str` (idle/running/success/error), `last_started_at`, `last_finished_at`, `last_log: str` (capped at 200 lines) — persisted per-step run status)
 - `model_statuses` — per-model run status (idle/pending/running/success/error/warn/stale)
 - `run_invocations` — historical run records
 - `env_profiles` — named environment profiles per project
@@ -219,6 +219,8 @@ finally:
 - `_sync_steps_from_disk()` only deletes owned (init-dir) scripts; preserves linked ones
 - SSE topic: `project:{id}`
 - Events: `init_pipeline_started` → `init_step` (×N) → `init_pipeline_finished`
+- Per-project `asyncio.Lock` (mirrors `DbtRunner._lock_for`) serializes pipeline runs; `POST /{id}/open` and `POST /{id}/init/run-step` return `409` if a run is already in progress for that project
+- Status/log fields on `Project` and `InitStep` (`last_init_status`, `last_status`, `last_log`, etc.) are written at each pipeline/step start and finish so status survives navigation and server restarts; a startup migration flips any row stuck in `running` to `error` after a crash
 
 **`base: pip install` step logic:**
 1. Reads `global_requirements_path` from `app_settings` (set via Global Settings UI)

@@ -5,6 +5,7 @@ import { api, type InitStepDto } from '../../lib/api';
 import NavRail from './components/NavRail';
 import { useProjectEvents } from '../../lib/sse';
 import { FilePickerModal } from './components/FilePickerModal';
+import { StatusLogPopover } from './components/StatusLogPopover';
 
 // ---- types ----
 
@@ -19,22 +20,10 @@ interface StepRunState {
 // ---- status icon ----
 
 function StatusIcon({ status, log }: { status: StepStatus; log: string }) {
-  const [hovered, setHovered] = useState(false);
-
-  const tooltip =
-    status === 'success' ? 'Complete' :
-    status === 'running' ? 'Running' :
-    status === 'error'   ? `Failed\n${log}` :
-    null;
-
   if (status === 'idle') return null;
 
-  return (
-    <div
-      className="relative shrink-0"
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
+  const iconEl = (
+    <>
       {status === 'running' && (
         <svg className="w-4 h-4 text-blue-400 animate-spin" viewBox="0 0 24 24" fill="none">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
@@ -51,13 +40,31 @@ function StatusIcon({ status, log }: { status: StepStatus; log: string }) {
           <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
         </svg>
       )}
-      {hovered && tooltip && (
-        <div className="absolute left-6 top-1/2 -translate-y-1/2 z-50 min-w-max max-w-xs bg-gray-900 border border-gray-700 rounded px-2.5 py-1.5 shadow-xl pointer-events-none">
-          <pre className="text-xs text-gray-200 whitespace-pre-wrap font-sans leading-relaxed">{tooltip}</pre>
-        </div>
-      )}
-    </div>
+    </>
   );
+
+  let panel: React.ReactNode | null = null;
+  if (status === 'running') {
+    panel = <p className="text-xs text-gray-300">Running…</p>;
+  } else if (status === 'success') {
+    panel = (
+      <div className="flex flex-col gap-1.5">
+        <p className="text-xs font-medium text-green-400">Complete</p>
+        {log && <pre className="text-[11px] font-mono text-gray-400 whitespace-pre-wrap leading-relaxed">{log}</pre>}
+      </div>
+    );
+  } else if (status === 'error') {
+    panel = (
+      <div className="flex flex-col gap-1.5">
+        <p className="text-xs font-medium text-red-400">Failed</p>
+        <pre className="text-[11px] font-mono text-gray-400 whitespace-pre-wrap leading-relaxed">
+          {log || 'No output captured.'}
+        </pre>
+      </div>
+    );
+  }
+
+  return <StatusLogPopover icon={iconEl} panel={panel} align="start" />;
 }
 
 // ---- main page ----
@@ -83,6 +90,25 @@ export default function InitScriptsPage() {
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
   const [stepStates, setStepStates] = useState<Record<string, StepRunState>>({});
 
+  // Seed stepStates from persisted step status once steps first load, so status/logs
+  // survive navigation and server restarts. SSE overwrites this live during a run.
+  const seededStepStatesRef = useRef(false);
+  useEffect(() => {
+    if (seededStepStatesRef.current || steps.length === 0) return;
+    seededStepStatesRef.current = true;
+    const seeded: Record<string, StepRunState> = {};
+    for (const s of steps) {
+      if (s.last_status && s.last_status !== 'idle') {
+        seeded[s.name] = {
+          status: s.last_status as StepStatus,
+          log: s.last_log,
+          finishedAt: s.last_finished_at,
+        };
+      }
+    }
+    setStepStates(seeded);
+  }, [steps]);
+
   const runSetupMutation = useMutation({
     mutationFn: () => api.init.open(id),
     onMutate: () => {
@@ -90,12 +116,31 @@ export default function InitScriptsPage() {
       // Clear previous run states
       setStepStates({});
     },
+    onError: (err) => {
+      setSetupRunning(false);
+      const message = err instanceof Error ? err.message : String(err);
+      if (message.startsWith('409')) {
+        alert('Init pipeline is already running for this project.');
+      } else {
+        alert(message);
+      }
+    },
   });
 
-  useProjectEvents(id, (event) => {
+  useProjectEvents(id, useCallback((event) => {
     if (event.type === 'init_pipeline_started') {
       setSetupRunning(true);
-      setStepStates({});
+      // Only clear state for the steps actually in this run (a single-step
+      // run publishes the same event with just that one step's name) — other
+      // steps' persisted status must not be wiped.
+      const runningSteps = (event.data as { steps?: string[] }).steps ?? [];
+      setStepStates((prev) => {
+        const next = { ...prev };
+        for (const name of runningSteps) {
+          delete next[name];
+        }
+        return next;
+      });
     }
     if (event.type === 'init_step') {
       const { name, status, log = '', finishedAt = null } = event.data as {
@@ -114,8 +159,10 @@ export default function InitScriptsPage() {
     if (event.type === 'init_pipeline_finished') {
       setSetupRunning(false);
       setLastRunAt(new Date().toISOString());
+      qc.invalidateQueries({ queryKey: ['project', id] });
+      qc.invalidateQueries({ queryKey: ['init-steps', id] });
     }
-  });
+  }, [id, qc]));
 
   const reorderMutation = useMutation({
     mutationFn: (names: string[]) => api.init.reorder(id, names),
@@ -200,8 +247,9 @@ export default function InitScriptsPage() {
     deleteMutation.mutate(step.name);
   };
 
-  const formattedLastRun = lastRunAt
-    ? new Date(lastRunAt).toLocaleString(undefined, {
+  const effectiveLastRunAt = lastRunAt ?? project?.last_init_finished_at ?? null;
+  const formattedLastRun = effectiveLastRunAt
+    ? new Date(effectiveLastRunAt).toLocaleString(undefined, {
         month: 'short', day: 'numeric',
         hour: '2-digit', minute: '2-digit',
       })
@@ -407,7 +455,14 @@ function StepTile({ step, projectId, runState, onToggle, onRunStep, onEdit, onDe
 
   const handleRun = async () => {
     setRunning(true);
-    try { await onRunStep(); } finally { setRunning(false); }
+    try {
+      await onRunStep();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      alert(message.startsWith('409') ? 'Init pipeline is already running for this project.' : message);
+    } finally {
+      setRunning(false);
+    }
   };
 
   return (

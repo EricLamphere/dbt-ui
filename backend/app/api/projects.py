@@ -49,6 +49,10 @@ class ProjectOut(BaseModel):
     pinned: bool = False
     pin_order: int | None = None
     last_opened_at: datetime | None = None
+    last_init_status: str = "idle"
+    last_init_started_at: datetime | None = None
+    last_init_finished_at: datetime | None = None
+    last_init_failed_step: str | None = None
     readme: str | None = None
     dbt_project_yml: str | None = None
     profiles_yml: str | None = None
@@ -68,6 +72,10 @@ class ProjectOut(BaseModel):
             pinned=row.pinned,
             pin_order=row.pin_order,
             last_opened_at=row.last_opened_at,
+            last_init_status=row.last_init_status,
+            last_init_started_at=row.last_init_started_at,
+            last_init_finished_at=row.last_init_finished_at,
+            last_init_failed_step=row.last_init_failed_step,
             readme=_read_readme(row.path) if include_files else None,
             dbt_project_yml=_read_file_text(root / "dbt_project.yml") if include_files else None,
             profiles_yml=_read_file_text(root / "profiles.yml") if include_files else None,
