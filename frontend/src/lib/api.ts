@@ -252,7 +252,15 @@ export interface ColumnLineageEntry {
 }
 
 export interface ColumnLineageDto {
-  lineage: Record<string, Record<string, ColumnLineageEntry[]>>;
+  id: number;
+  project_id: number;
+  started_at: string;
+  finished_at: string | null;
+  status: 'running' | 'done' | 'error';
+  total_models: number;
+  checked_models: number;
+  results: Record<string, Record<string, ColumnLineageEntry[]>>;
+  error_message: string | null;
 }
 
 export interface Edge {
@@ -492,7 +500,9 @@ export const api = {
   models: {
     graph: (projectId: number) => get<GraphDto>(`/projects/${projectId}/models`),
     columnLineage: (projectId: number) =>
-      get<ColumnLineageDto>(`/projects/${projectId}/column-lineage`),
+      get<ColumnLineageDto | null>(`/projects/${projectId}/column-lineage`),
+    startColumnLineage: (projectId: number) =>
+      post<ColumnLineageDto>(`/projects/${projectId}/column-lineage/start`),
     sql: (projectId: number, uniqueId: string) =>
       get<SqlDto>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/sql`),
     saveSql: (projectId: number, uniqueId: string, content: string) =>

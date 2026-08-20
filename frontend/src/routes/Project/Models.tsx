@@ -171,13 +171,18 @@ export default function ModelsPage() {
   });
 
   const [columnLineageEnabled, setColumnLineageEnabled] = useState(false);
-  const { data: columnLineage, isFetching: columnLineageLoading } = useQuery({
+  const [columnLineageProgress, setColumnLineageProgress] = useState<{ checked: number; total: number } | null>(null);
+  const { data: columnLineageSnapshot, isFetching: columnLineageFetching } = useQuery({
     queryKey: ['column-lineage', id],
     queryFn: () => api.models.columnLineage(id),
     refetchInterval: false,
     staleTime: Infinity,
     enabled: columnLineageEnabled,
   });
+  // Only treat lineage as "loaded" once a snapshot has actually finished computing —
+  // a `running` snapshot has partial/empty results and shouldn't be rendered as final.
+  const columnLineage = columnLineageSnapshot?.status === 'done' ? columnLineageSnapshot : undefined;
+  const columnLineageLoading = columnLineageFetching || columnLineageSnapshot?.status === 'running';
 
   // Pre-select model from ?model=<unique_id> query param (takes priority),
   // or from sessionStorage. Initialise directly from cache so the selection is
@@ -256,6 +261,15 @@ export default function ModelsPage() {
         setLiveStatuses((prev) => ({ ...prev, [result.name]: result.status }));
       }
     }
+    if (event.type === 'column_lineage_progress') {
+      const d = event.data as { checked: number; total: number };
+      setColumnLineageProgress({ checked: d.checked, total: d.total });
+      qc.invalidateQueries({ queryKey: ['column-lineage', id] });
+    }
+    if (event.type === 'column_lineage_finished') {
+      setColumnLineageProgress(null);
+      qc.invalidateQueries({ queryKey: ['column-lineage', id] });
+    }
   }, [id, qc, selectedModelKey, columnSelsKey, expandedNodesKey]));
 
   const filteredGraph = useMemo(() => {
@@ -331,7 +345,7 @@ export default function ModelsPage() {
   const reverseLineageIndex = useMemo(() => {
     const idx = new Map<string, Array<{ n: string; c: string }>>();
     if (!columnLineage) return idx;
-    for (const [downNode, colMap] of Object.entries(columnLineage.lineage)) {
+    for (const [downNode, colMap] of Object.entries(columnLineage.results)) {
       for (const [downCol, refs] of Object.entries(colMap)) {
         for (const ref of refs) {
           const key = `${ref.node}::${ref.column}`;
@@ -345,7 +359,7 @@ export default function ModelsPage() {
 
   const traceColumn = useCallback((nodeId: string, column: string): Array<{ n: string; c: string }> => {
     if (!columnLineage) return [{ n: nodeId, c: column }];
-    const lineage = columnLineage.lineage;
+    const lineage = columnLineage.results;
     const seedKey = `${nodeId}::${column}`;
 
     if (lineageMode === 'direct') {
@@ -557,9 +571,19 @@ export default function ModelsPage() {
             onToggleCoverage={handleToggleCoverage}
             columnLineageLoaded={!!columnLineage}
             columnLineageLoading={columnLineageLoading}
+            columnLineageProgress={columnLineageProgress}
             onLoadColumnLineage={() => {
               setColumnLineageEnabled(true);
-              qc.invalidateQueries({ queryKey: ['column-lineage', id] });
+              // Kick off (or piggyback on) a background scan. A 409 just means one
+              // is already running for this project — that's fine, the existing
+              // run's progress/finished events will update our query either way.
+              api.models.startColumnLineage(id).catch((err) => {
+                if (!(err instanceof Error) || !err.message.startsWith('409')) {
+                  console.error('failed to start column lineage scan', err);
+                }
+              }).finally(() => {
+                qc.invalidateQueries({ queryKey: ['column-lineage', id] });
+              });
             }}
           />
 

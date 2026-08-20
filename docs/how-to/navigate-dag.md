@@ -98,6 +98,20 @@ When the overlay is active:
 
 Coverage data is derived client-side from the full DAG (not filtered) — the overlay reflects all tests even if you've applied other filters. The toggle state persists across page reloads via sessionStorage.
 
+### Column-level lineage (beta)
+
+Click **Load column lineage** in the filter bar to compute column-to-column lineage across the whole project. This traces exactly which upstream column each downstream column was derived from, by parsing each model's compiled SQL with sqlglot.
+
+Key points:
+- **No yml documentation required.** Lineage is derived from a model's compiled SQL alone — a model with SQL but no `columns:` block in its schema.yml still gets full lineage. yml-documented columns are only used as a fallback for cases the SQL parse can't resolve on its own (for example, a top-level `SELECT *`, or a model that hasn't been compiled yet).
+- **Case-insensitive matching.** Warehouses that normalize unquoted identifier casing (e.g. Snowflake uppercases them) still resolve correctly — parent/column matching is case-insensitive, and the resulting column names are always shown in their original, correctly-cased spelling.
+- **UNPIVOT-aware.** A model whose outer `SELECT` reads from an `UNPIVOT`'d table still resolves lineage for every column *except* the pivoted output columns themselves (e.g. the metric-name and metric-value columns) — those genuinely have no single upstream column, since they fan in from several source columns at once, so they're correctly shown as having no lineage rather than a wrong or crashed trace.
+- **Runs in the background.** The scan is computed server-side across multiple worker processes rather than blocking the UI — the button shows `Column lineage: {checked}/{total}…` while it's running, and the rest of the app (including other DAG interactions) stays responsive the whole time.
+- Once loaded, expand a model node to reveal its columns. Click a column to highlight its lineage — connected columns and models are highlighted, everything else dims.
+- Cmd/ctrl-click multiple columns to select several traces at once.
+- Toggle **Direct lineage** / **Full lineage** (the pill above the canvas, visible once a column is selected) to switch between showing only immediate upstream/downstream columns versus the full transitive closure.
+- Click **Refresh column lineage** to re-run the scan after models change — it's skipped automatically (and returns instantly) if `target/manifest.json` hasn't changed since the last successful scan.
+
 ### Clearing filters
 
 Click **Clear** in the filter bar to reset all filters and return to the full graph.

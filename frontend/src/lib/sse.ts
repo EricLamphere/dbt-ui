@@ -32,6 +32,7 @@ export function useProjectEvents(projectId: number | null, onEvent: SseHandler) 
         'health_check_started', 'health_check_finished',
         'drift_started', 'drift_progress', 'drift_finished',
         'freshness_started', 'freshness_finished',
+        'column_lineage_started', 'column_lineage_progress', 'column_lineage_finished',
       ];
       types.forEach((type) => {
         es.addEventListener(type, (e: MessageEvent) => {

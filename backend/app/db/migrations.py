@@ -275,6 +275,32 @@ async def run_migrations() -> None:
         )
         await session.commit()
 
+        if not await _table_exists(session, "column_lineage_snapshots"):
+            await session.execute(text(
+                "CREATE TABLE column_lineage_snapshots ("
+                "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                "project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, "
+                "started_at DATETIME DEFAULT CURRENT_TIMESTAMP, "
+                "finished_at DATETIME, "
+                "status TEXT NOT NULL DEFAULT 'running', "
+                "total_models INTEGER NOT NULL DEFAULT 0, "
+                "checked_models INTEGER NOT NULL DEFAULT 0, "
+                "results_json TEXT NOT NULL DEFAULT '{}', "
+                "error_message TEXT, "
+                "manifest_mtime REAL NOT NULL DEFAULT 0)"
+            ))
+            await session.commit()
+
+        # Reset any column lineage scans left running from a crashed server process
+        await session.execute(
+            text(
+                "UPDATE column_lineage_snapshots SET status = 'error',"
+                " error_message = 'interrupted by server restart'"
+                " WHERE status = 'running'"
+            )
+        )
+        await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()

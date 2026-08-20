@@ -93,6 +93,7 @@ interface DagFilterBarProps {
   onToggleCoverage?: () => void;
   columnLineageLoaded: boolean;
   columnLineageLoading: boolean;
+  columnLineageProgress?: { checked: number; total: number } | null;
   onLoadColumnLineage: () => void;
 }
 
@@ -109,6 +110,7 @@ export default function DagFilterBar({
   onToggleCoverage,
   columnLineageLoaded,
   columnLineageLoading,
+  columnLineageProgress,
   onLoadColumnLineage,
 }: DagFilterBarProps) {
   const available = useMemo(
@@ -209,7 +211,12 @@ export default function DagFilterBar({
         disabled={columnLineageLoading}
         className="px-3 py-1.5 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 disabled:opacity-50 transition-colors shrink-0"
       >
-        {columnLineageLoading ? 'Column lineage loading…' : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}{!columnLineageLoading && <span className="ml-1 text-[10px] text-zinc-500">(beta)</span>}
+        {columnLineageLoading
+          ? (columnLineageProgress
+              ? `Column lineage: ${columnLineageProgress.checked}/${columnLineageProgress.total}…`
+              : 'Column lineage loading…')
+          : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
+        {!columnLineageLoading && <span className="ml-1 text-[10px] text-zinc-500">(beta)</span>}
       </button>
       <button
         onClick={onRefresh}

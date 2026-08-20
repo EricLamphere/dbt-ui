@@ -48,10 +48,12 @@ dbt-ui/
 │   │   │   ├── events.py            # /api/projects/{id}/events — SSE endpoint
 │   │   │   ├── debug.py             # /api/projects/{id}/debug — runs dbt debug, parses output into structured checks
 │   │   │   ├── drift.py             # /api/projects/{id}/drift — schema drift check (dbt show per model vs manifest columns)
+│   │   │   ├── freshness.py         # /api/projects/{id}/freshness — dbt source freshness, backgrounded snapshot
+│   │   │   ├── column_lineage.py    # /api/projects/{id}/column-lineage — backgrounded, parallel column-level lineage scan
 │   │   │   └── health.py            # /api/health
 │   │   ├── db/
 │   │   │   ├── engine.py            # Async SQLAlchemy engine, SessionLocal, get_session
-│   │   │   ├── models.py            # ORM: 11 tables (see Database Schema below)
+│   │   │   ├── models.py            # ORM: 12 tables (see Database Schema below)
 │   │   │   └── migrations.py        # DDL-on-startup migrations (idempotent; no Alembic)
 │   │   ├── dbt/
 │   │   │   ├── manifest.py          # Parse target/manifest.json → nodes + edges
@@ -62,6 +64,7 @@ dbt-ui/
 │   │   │   ├── init_scripts.py      # Read/write init/*.sh custom scripts
 │   │   │   ├── debug_parser.py      # Parse dbt debug stdout → structured DebugResult with per-check status
 │   │   │   ├── drift.py             # diff_columns / is_eligible_for_drift_check — column drift helpers
+│   │   │   ├── column_lineage.py    # SQL-first column lineage (sqlglot); LineageJob prep + trace_job (poolable worker fn)
 │   │   │   ├── profile.py           # Parse dbt show --output json output into column profile stats
 │   │   │   ├── show_parser.py       # parse_show_json() — handles dbt 1.5+ and 1.11+ show output formats
 │   │   │   └── interactive.py       # InteractiveInitManager singleton (PTY sessions; reused for terminal)
@@ -138,7 +141,7 @@ dbt-ui/
 
 ## Database Schema
 
-11 tables, all in `backend/app/db/models.py`:
+12 tables, all in `backend/app/db/models.py`:
 
 ```
 projects
@@ -243,6 +246,20 @@ freshness_snapshots
   target          TEXT(255) (nullable)  -- dbt target used during the scan
   results_json    TEXT       -- JSON array of SourceFreshnessResult objects
   error_message   TEXT (nullable)
+
+column_lineage_snapshots
+  id              INTEGER PK
+  project_id      INTEGER FK→projects (CASCADE)
+  started_at      DATETIME
+  finished_at     DATETIME (nullable)
+  status          TEXT(32)   -- running | done | error
+  total_models    INTEGER    -- number of models needing lineage (jobs)
+  checked_models  INTEGER    -- jobs completed so far (progress)
+  results_json    TEXT       -- JSON {downstream_uid: {column: [{node, column}, ...]}}
+  error_message   TEXT (nullable)
+  manifest_mtime  REAL       -- mtime of target/manifest.json this snapshot was computed from;
+                             -- used to short-circuit a re-scan when the manifest hasn't changed
+  -- Interrupted snapshots (status='running') are reset to 'error' on server restart
 ```
 
 ---
@@ -273,7 +290,9 @@ POST   /api/projects/{id}/models/{unique_id}/show        run dbt show, return ro
 POST   /api/projects/{id}/models/{unique_id}/profile    run dbt show (full table), return column profile stats
 GET    /api/projects/{id}/models/{unique_id}/sql
 PUT    /api/projects/{id}/models/{unique_id}/sql
-GET    /api/projects/{id}/column-lineage                 column-level lineage graph parsed from manifest.json
+POST   /api/projects/{id}/column-lineage/start            start async column lineage scan (202, or 200 if a fresh snapshot already exists); returns ColumnLineageSnapshot
+GET    /api/projects/{id}/column-lineage                 get the latest ColumnLineageSnapshot for a project
+GET    /api/projects/{id}/column-lineage/{snapshot_id}   get a specific ColumnLineageSnapshot by id
 
 POST   /api/projects/{id}/debug                          run dbt debug, return structured check results + raw log
 GET    /api/projects/{id}/debug/last                     get result of the most recent debug run (from cache)
@@ -413,6 +432,9 @@ Each SSE client gets its own queue. `publish` is non-blocking (`put_nowait`); ev
 | `drift_finished` | `drift.py` | Drift panel renders column diff results |
 | `freshness_started` | `freshness.py` | Freshness panel shows running state |
 | `freshness_finished` | `freshness.py` | Freshness panel invalidates query, renders results |
+| `column_lineage_started` | `column_lineage.py` | DagFilterBar shows lineage loading state |
+| `column_lineage_progress` | `column_lineage.py` | DagFilterBar updates checked/total counter; invalidates column-lineage query |
+| `column_lineage_finished` | `column_lineage.py` | Invalidates column-lineage query → DAG lineage trace becomes available |
 
 ### Init Session Event Types
 
@@ -534,18 +556,29 @@ DAG filtering (`dagFilter.ts`) is purely client-side — no backend involvement:
 
 ### 10. Column-Level Lineage
 
-`GET /api/projects/{id}/column-lineage`:
-1. Reads `target/manifest.json` in a thread pool executor (non-blocking)
-2. `dbt/column_lineage.py` → `build_column_lineage()` parses each node's `columns` and `depends_on.nodes` to build a `{downstream_node: {column: [ColumnRef(node, column)]}}` map
-3. Returns `ColumnLineageDto { lineage }` — a nested dict from downstream node → column → list of upstream `{node, column}` refs
+Column lineage is computed **SQL-first**: `dbt/column_lineage.py` derives each model's column list by parsing the compiled SQL's outer `SELECT` with sqlglot (`named_selects`) — no yml `columns:` documentation is required. yml-documented columns are used only as a fallback when the SQL parse can't determine an explicit column list (a top-level `SELECT *`, or missing `compiled_code` because `dbt compile` hasn't run).
+
+The scan is a backgrounded, progress-reporting job — same pattern as schema drift and source freshness (`column_lineage_snapshots` table; see Database Schema):
+
+1. `POST /api/projects/{id}/column-lineage/start`:
+   - Reads `target/manifest.json`'s mtime; if the latest snapshot for the project is `done` and its `manifest_mtime` matches, short-circuits and returns that snapshot directly (200) — no recomputation.
+   - Otherwise, runs the "prep" phase (`prepare_lineage_jobs()`, in a thread executor) — cheap manifest parsing that builds one `LineageJob` per model needing lineage (no `sqlglot.lineage.lineage()` calls yet).
+   - Creates a `running` `ColumnLineageSnapshot` row, spawns a background `asyncio.Task`, publishes `column_lineage_started`, returns 202.
+2. Background runner (`_run_column_lineage`) fans the actual CPU-bound tracing out across a `ProcessPoolExecutor` (sized `max(1, min(8, cpu_count-1))`) — one `trace_job(job)` call per model, submitted via `loop.run_in_executor(pool, trace_job, job)` and collected with `asyncio.wait(..., return_when=FIRST_COMPLETED)` so each completed job's `checked`/`total`/`current` can be published as it lands.
+3. As each job completes: increments `checked_models`, merges the result into `results_json`, commits, publishes `column_lineage_progress`.
+4. On completion: sets `status="done"`, `finished_at`, final `results_json` + `manifest_mtime`, publishes `column_lineage_finished`.
+5. `GET /api/projects/{id}/column-lineage` returns the latest snapshot (status + `results`, a nested dict from downstream node → column → list of upstream `{node, column}` refs).
+
+`build_column_lineage(manifest_path)` remains available as a synchronous, in-process, no-pool entry point sharing the same job-prep/trace logic — used by tests and any caller that just wants the full result computed inline.
 
 In the frontend (`Models.tsx`):
-- `useQuery(['column-lineage', id])` fetches the lineage map on load; the query runs as a background task on the backend so the DAG is usable before it completes
-- A loading banner ("Column lineage loading…") is shown while the query is in flight
+- Toggling "Load column lineage" calls `POST .../column-lineage/start` (ignoring 409 — a run already in flight is fine) and keeps `useQuery(['column-lineage', id])` (`GET .../column-lineage`) as the source of truth for rendered data.
+- A `useProjectEvents` handler invalidates `['column-lineage', id]` on `column_lineage_progress`/`column_lineage_finished`, and tracks `{checked, total}` from `column_lineage_progress` for an optimistic progress indicator (mirrors `DriftPanel.tsx`).
+- `DagFilterBar` shows `Column lineage: {checked}/{total}…` while a scan is running.
 - Expanding a model node in the DAG reveals its columns; clicking a column toggles it in `activeColumnSels`
 - `traceColumn()` walks the lineage map bidirectionally (upstream via `reverseLineageIndex`, downstream via forward traversal) to collect all `{node, column}` pairs in the trace
 - Highlighted `{node, column}` pairs are passed as props into each `ModelNode`; nodes and edges outside the trace are dimmed
-- `graph_changed` SSE event invalidates `['column-lineage', id]` so the trace updates after recompilation
+- None of this blocks other queries/interactions — the scan runs fully server-side in background worker processes; the frontend only ever does small polling GETs and SSE-driven invalidation.
 
 ### 11. SQL Workspace
 

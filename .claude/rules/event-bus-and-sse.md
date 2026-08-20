@@ -83,6 +83,9 @@ Use `sse_response_with_replay` for PTY sessions (both `init:{session_id}` and `t
 | `drift_finished` | project | `api/drift.py` — snapshot id + final status |
 | `freshness_started` | project | `api/freshness.py` — includes `snapshot_id` |
 | `freshness_finished` | project | `api/freshness.py` — includes `snapshot_id`, `ok`, `pass_count`, `warn_count`, `error_count` |
+| `column_lineage_started` | project | `api/column_lineage.py` — includes `snapshot_id`, `total` |
+| `column_lineage_progress` | project | `api/column_lineage.py` — includes `snapshot_id`, `checked`, `total`, `current` (model name) |
+| `column_lineage_finished` | project | `api/column_lineage.py` — includes `snapshot_id`, `ok` |
 
 ## Adding a New Event Type
 

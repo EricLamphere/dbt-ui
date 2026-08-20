@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -158,6 +158,25 @@ class FreshnessSnapshot(Base):
     target: Mapped[str | None] = mapped_column(String(255), nullable=True)
     results_json: Mapped[str] = mapped_column(Text, default="[]")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class ColumnLineageSnapshot(Base):
+    __tablename__ = "column_lineage_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("projects.id", ondelete="CASCADE"), index=True
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="running")  # running | done | error
+    total_models: Mapped[int] = mapped_column(Integer, default=0)
+    checked_models: Mapped[int] = mapped_column(Integer, default=0)
+    results_json: Mapped[str] = mapped_column(Text, default="{}")
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    manifest_mtime: Mapped[float] = mapped_column(Float, default=0.0)
 
 
 class RunInvocation(Base):
