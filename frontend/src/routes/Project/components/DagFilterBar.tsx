@@ -216,7 +216,6 @@ export default function DagFilterBar({
               ? `Column lineage: ${columnLineageProgress.checked}/${columnLineageProgress.total}…`
               : 'Column lineage loading…')
           : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
-        {!columnLineageLoading && <span className="ml-1 text-[10px] text-zinc-500">(beta)</span>}
       </button>
       <button
         onClick={onRefresh}

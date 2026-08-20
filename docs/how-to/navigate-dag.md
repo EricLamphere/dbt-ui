@@ -98,7 +98,7 @@ When the overlay is active:
 
 Coverage data is derived client-side from the full DAG (not filtered) — the overlay reflects all tests even if you've applied other filters. The toggle state persists across page reloads via sessionStorage.
 
-### Column-level lineage (beta)
+### Column-level lineage
 
 Click **Load column lineage** in the filter bar to compute column-to-column lineage across the whole project. This traces exactly which upstream column each downstream column was derived from, by parsing each model's compiled SQL with sqlglot.
 
