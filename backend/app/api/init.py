@@ -2,7 +2,8 @@ import asyncio
 import os
 import re
 import shlex
-from datetime import datetime, timezone
+import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,11 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import get_session
 from app.db.models import GlobalProfile, InitStep, Project, ProjectEnvVar
-from app.dbt.init_scripts import BASE_STEPS, INIT_DIR_NAME, list_scripts, save_script, delete_script
-from app.dbt.venv import venv_dbt, venv_pip, venv_python
+from app.dbt.init_scripts import BASE_STEPS, INIT_DIR_NAME, delete_script, list_scripts, save_script
 from app.dbt.interactive import manager as init_manager
+from app.dbt.venv import venv_dbt, venv_pip, venv_python
 from app.events.bus import Event, bus
-from app.events.sse import sse_response
+from app.events.sse import sse_response_with_output_replay
 from app.logging_setup import get_logger
 from app.logs.project_logger import append_project_log
 
@@ -557,8 +558,9 @@ _ACTIVE_GLOBAL_PROFILE_KEY = "active_global_profile_id"
 
 async def load_project_env(project_id: int) -> dict[str, str]:
     """Build an env dict from the current process env plus project + active-global-profile vars."""
-    from app.db.engine import SessionLocal
     from sqlalchemy.orm import selectinload
+
+    from app.db.engine import SessionLocal
     env = os.environ.copy()
     async with SessionLocal() as _ev_session:
         ev_result = await _ev_session.execute(
@@ -628,7 +630,7 @@ async def _run_init_steps_locked(project_id: int, project_path: str, steps: list
     await _set_project_init_status(
         project_id,
         last_init_status="running",
-        last_init_started_at=datetime.now(timezone.utc),
+        last_init_started_at=datetime.now(UTC),
         last_init_failed_step=None,
     )
     await bus.publish(
@@ -642,7 +644,7 @@ async def _run_init_steps_locked(project_id: int, project_path: str, steps: list
 
     for step in steps:
         append_project_log(project_path, f"--- Step: {step.name} ---", project_id)
-        step_started_at = datetime.now(timezone.utc)
+        step_started_at = datetime.now(UTC)
         started_at = step_started_at.isoformat()
         await _set_step_status(
             project_id, step.name, last_status="running", last_started_at=step_started_at
@@ -667,7 +669,10 @@ async def _run_init_steps_locked(project_id: int, project_path: str, steps: list
                     if not Path(req_path).exists():
                         raise FileNotFoundError(f"{label} requirements path '{req_path}' not found")
                     rc, lines = await _exec_and_capture(
-                        [str(venv_pip()), "install", "-r", req_path], project_path, env
+                        [str(venv_pip()), "install", "-r", req_path, "--progress-bar", "off",
+                         "--no-input", "-v", "--keyring-provider", "disabled"],
+                        project_path, {**env, "PYTHONUNBUFFERED": "1",
+                                       "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
                     )
                     log_lines.extend(lines)
                     if rc != 0:
@@ -680,7 +685,7 @@ async def _run_init_steps_locked(project_id: int, project_path: str, steps: list
                 )
                 ok = return_code == 0
             elif step.name == "base: dbt docs generate":
-                from app.api.docs import _generate_docs  # noqa: PLC0415
+                from app.api.docs import _generate_docs
                 ok, log_lines = await _generate_docs(project_id, project_path, env=env)
                 return_code = 0 if ok else 1
             elif step.name == "base: dbt compile":
@@ -742,7 +747,7 @@ async def _run_init_steps_locked(project_id: int, project_path: str, steps: list
         append_project_log(project_path, f"--- {step.name}: {status_str} ---", project_id)
         await asyncio.sleep(0)  # let pending project_log tasks publish before init_step
 
-        step_finished_at = datetime.now(timezone.utc)
+        step_finished_at = datetime.now(UTC)
         finished_at = step_finished_at.isoformat()
         step_log = "\n".join(log_lines[-200:])
         await _set_step_status(
@@ -771,7 +776,7 @@ async def _run_init_steps_locked(project_id: int, project_path: str, steps: list
             await _set_project_init_status(
                 project_id,
                 last_init_status="error",
-                last_init_finished_at=datetime.now(timezone.utc),
+                last_init_finished_at=datetime.now(UTC),
                 last_init_failed_step=step.name,
             )
             await asyncio.sleep(0)  # let pending project_log tasks publish before pipeline_finished
@@ -787,7 +792,7 @@ async def _run_init_steps_locked(project_id: int, project_path: str, steps: list
     await _set_project_init_status(
         project_id,
         last_init_status="success",
-        last_init_finished_at=datetime.now(timezone.utc),
+        last_init_finished_at=datetime.now(UTC),
         last_init_failed_step=None,
     )
     await asyncio.sleep(0)  # let pending project_log tasks publish before pipeline_finished
@@ -840,20 +845,30 @@ async def _exec_and_capture(
     args: list[str], cwd: str, env: dict
 ) -> tuple[int, list[str]]:
     log.info("init_exec", args=args, cwd=cwd)
+    run_env = {**env, "PYTHONUNBUFFERED": "1"}
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=cwd,
-        env=env,
+        env=run_env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
     assert proc.stdout is not None
+    buf = b""
     lines: list[str] = []
     while True:
-        raw = await proc.stdout.readline()
-        if not raw:
+        chunk = await proc.stdout.read(4096)
+        if not chunk:
+            # flush any remaining partial line
+            if buf:
+                lines.append(buf.decode(errors="replace").rstrip("\r\n"))
             break
-        lines.append(raw.decode(errors="replace").rstrip("\n"))
+        buf += chunk
+        # split on newlines; keep incomplete last chunk in buf
+        parts = buf.split(b"\n")
+        buf = parts[-1]
+        for part in parts[:-1]:
+            lines.append(part.decode(errors="replace").rstrip("\r"))
     return_code = await proc.wait()
     return return_code, lines
 
@@ -911,8 +926,8 @@ async def _pip_install_and_start_pty(
     skip_install: bool = False,
 ) -> None:
     """Run pip install in the background, stream output to the session topic, then start PTY."""
-    from app.events.bus import Event, bus
     from app.dbt.interactive import manager as init_manager
+    from app.events.bus import Event, bus
 
     topic = f"init:{session_id}"
     session = init_manager.get(session_id)
@@ -1102,86 +1117,231 @@ async def append_requirement(dto: AppendRequirementDto) -> dict[str, bool]:
     return {"ok": True}
 
 
-_global_setup_task: asyncio.Task | None = None
-_global_setup_proc: asyncio.subprocess.Process | None = None
+import queue as _queue
+import threading as _threading
+
+# All state is plain Python — no asyncio tasks involved.
+_global_setup_thread: _threading.Thread | None = None
+_global_setup_proc: subprocess.Popen | None = None  # type: ignore[type-arg]
+_global_setup_return_code: int | None = None
+_global_setup_replay: list[str] = []
+# output_queue carries chunks from the pip thread to any waiting SSE publishers.
+# Unbounded; pip thread puts chunks, SSE coroutine drains asynchronously via polling.
+_global_output_queue: _queue.Queue[str | None] = _queue.Queue()
 
 
-async def _run_global_pip_install(req_path: Path) -> None:
-    global _global_setup_proc
-    topic = "global-setup"
-    await bus.publish(Event(topic=topic, type="global_setup_started", data={}))
+def _global_setup_running() -> bool:
+    return _global_setup_thread is not None and _global_setup_thread.is_alive()
+
+
+_DBG_LOG = Path("/tmp/dbt_ui_pip_debug.log")
+
+
+def _dbg(msg: str) -> None:
+    import time as _time
+    with _DBG_LOG.open("a") as _f:
+        _f.write(f"[{_time.time():.3f}] {msg}\n")
+        _f.flush()
+
+
+def _run_pip_in_thread(pip: Path, req_path: Path, pip_env: dict) -> None:
+    """Pure-thread pip runner.
+
+    Root cause: uvicorn holds a multiprocessing.managers TCP server socket at fd 3
+    (localhost:vcom-tunnel). pip's wheel installer spawns multiprocessing workers via
+    Python's 'spawn' start method. These workers inherit fd 3 and then call accept()
+    on it forever, because the client side (inside pip's main process) has already
+    exited. The workers never finish, so our stdout pipe read never sees EOF.
+
+    Fix: wrap pip in a tiny shell script so pip's Python process is exec'd from bash.
+    bash doesn't hold Python's multiprocessing.managers socket (it's not Python), so
+    pip's workers inherit a clean fd table and exit normally after installation.
+    We use a temp file for output (not a pipe) so there's no fd for bash to pass along.
+    The thread tails the temp file while pip runs and signals completion.
+    """
+    global _global_setup_proc, _global_setup_return_code
+    import tempfile
+    import time as _time
+    rc = 1
+    log_path: str | None = None
     try:
-        pip = venv_pip()
-    except RuntimeError as exc:
-        await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": f"Error: {exc}\r\n"}))
-        await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": 1}))
-        return
-    proc = await asyncio.create_subprocess_exec(
-        str(pip), "install", "-r", str(req_path), "--progress-bar", "off",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-    )
-    _global_setup_proc = proc
-    assert proc.stdout is not None
+        _dbg("thread: creating tempfile")
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.pip.log', delete=False) as tf:
+            log_path = tf.name
+        _dbg(f"thread: tempfile={log_path}")
 
-    async def _drain_stdout() -> None:
-        """Read stdout continuously so the pipe never fills and blocks pip."""
-        while True:
-            chunk = await proc.stdout.read(4096)
-            if not chunk:
-                break
-            await bus.publish(Event(
-                topic=topic,
-                type="global_setup_output",
-                data={"data": chunk.decode(errors="replace")},
-            ))
+        # Invoke pip via bash. bash doesn't carry Python's multiprocessing.managers
+        # state, so pip's spawned multiprocessing workers won't inherit uvicorn's
+        # internal TCP socket and won't block on it.
+        # Paths are shell-quoted: the packaged app's venv lives under
+        # "~/Library/Application Support/dbt-ui/...", which contains a space —
+        # unquoted interpolation gets word-split by bash into a bogus command.
+        cmd = (
+            f"exec {shlex.quote(str(pip))} install -r {shlex.quote(str(req_path))}"
+            " --progress-bar off --no-input -v --keyring-provider disabled"
+            f" >> {shlex.quote(log_path)} 2>&1"
+        )
+        _dbg(f"thread: spawning bash -c pip install")
+        proc = subprocess.Popen(
+            ["bash", "-c", cmd],
+            stdin=subprocess.DEVNULL,
+            env=pip_env,
+        )
+        _dbg(f"thread: bash pid={proc.pid}")
+        _global_setup_proc = proc
 
-    drain_task = asyncio.create_task(_drain_stdout())
-    try:
-        await asyncio.shield(drain_task)
-    except asyncio.CancelledError:
-        drain_task.cancel()
-        proc.kill()
-        await proc.wait()
-        await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": -1}))
-        return
+        # Tail the log file while pip runs.
+        # We use proc.wait() in a separate thread + threading.Event rather than
+        # proc.poll(), because uvicorn's multiprocessing watchdog calls
+        # waitpid(-1, WNOHANG) and can reap our pip child before we do — after
+        # which proc.poll() returns None forever.
+        import threading as _threading
+        done_event = _threading.Event()
+
+        def _wait_for_proc() -> None:
+            try:
+                proc.wait()
+            except Exception as e:
+                _dbg(f"thread: proc.wait() exception: {e!r}")
+            finally:
+                done_event.set()
+
+        waiter = _threading.Thread(target=_wait_for_proc, daemon=True)
+        waiter.start()
+
+        chunks = 0
+        with open(log_path, 'rb') as reader:
+            while not done_event.is_set():
+                chunk = reader.read(4096)
+                if chunk:
+                    chunks += 1
+                    text = chunk.decode(errors="replace")
+                    _global_setup_replay.append(text)
+                    _global_output_queue.put(text)
+                else:
+                    _time.sleep(0.05)
+            # Final drain — read any output written between the last read and process exit
+            while True:
+                chunk = reader.read(4096)
+                if not chunk:
+                    break
+                text = chunk.decode(errors="replace")
+                _global_setup_replay.append(text)
+                _global_output_queue.put(text)
+
+        waiter.join(timeout=5)
+        _dbg(f"thread: done, rc={proc.returncode}")
+
+        rc = proc.returncode or 0
+        _dbg(f"thread: pip exited rc={rc}")
+        try:
+            import os as _os
+            _os.unlink(log_path)
+        except OSError:
+            pass
+    except Exception as exc:
+        _dbg(f"thread: EXCEPTION {exc!r}")
+        _global_output_queue.put(f"pip error: {exc}\r\n")
     finally:
+        _dbg(f"thread: finally rc={rc}")
+        _global_setup_return_code = rc
         _global_setup_proc = None
-
-    rc = await proc.wait()
-    await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": rc}))
+        _global_output_queue.put(None)  # EOF sentinel
 
 
 @global_router.post("/global-setup")
 async def run_global_setup() -> dict[str, bool]:
     """Install global requirements.txt into the backend venv."""
-    global _global_setup_task
+    global _global_setup_thread, _global_setup_return_code, _global_setup_replay
+    _dbg(f"main: run_global_setup")
     path_str = await _get_global_requirements_path()
     if not path_str:
         raise HTTPException(status_code=400, detail="DBT_UI_GLOBAL_REQUIREMENTS_PATH is not configured")
     req_path = Path(path_str)
     if not req_path.exists():
         raise HTTPException(status_code=404, detail=f"Requirements file not found: {path_str}")
-    if _global_setup_task and not _global_setup_task.done():
-        _global_setup_task.cancel()
-    _global_setup_task = asyncio.create_task(_run_global_pip_install(req_path))
+    if _global_setup_running():
+        return {"ok": True}  # already running — idempotent
+    try:
+        # venv_pip() creates the dbt venv on first call (packaged app: there's
+        # no install-time step like dev's `task install:backend` to have done
+        # this already) — that can take a few seconds, so run it off the
+        # event loop rather than blocking every other request meanwhile.
+        pip = await asyncio.get_running_loop().run_in_executor(None, venv_pip)
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+    # Reset state for new run
+    _global_setup_return_code = None
+    _global_setup_replay = []
+    while not _global_output_queue.empty():
+        try:
+            _global_output_queue.get_nowait()
+        except _queue.Empty:
+            break
+    pip_env = {**os.environ, "PYTHONUNBUFFERED": "1",
+               "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
+    _global_setup_thread = _threading.Thread(
+        target=_run_pip_in_thread, args=(pip, req_path, pip_env), daemon=True
+    )
+    _global_setup_thread.start()
+    # Publish started event from the event loop (fine — this is a fast, non-blocking publish)
+    await bus.publish(Event(topic="global-setup", type="global_setup_started", data={}))
+    # Launch a background task that drains the queue and publishes output events.
+    # This task is fire-and-forget; the frontend polls /status for completion.
+    asyncio.create_task(_drain_and_publish())
     return {"ok": True}
+
+
+async def _drain_and_publish() -> None:
+    """Drain pip output from the thread queue and publish SSE events. No blocking awaits."""
+    topic = "global-setup"
+    loop = asyncio.get_running_loop()
+    try:
+        while True:
+            # Non-blocking check first; if empty, yield to event loop then retry.
+            try:
+                item = _global_output_queue.get_nowait()
+            except _queue.Empty:
+                await asyncio.sleep(0.1)
+                continue
+            if item is None:
+                break
+            await bus.publish(Event(topic=topic, type="global_setup_output", data={"data": item}))
+        rc = _global_setup_return_code if _global_setup_return_code is not None else -1
+        await bus.publish(Event(topic=topic, type="global_setup_finished", data={"return_code": rc}))
+    except Exception as exc:
+        log.error("drain_and_publish_error", error=str(exc))
 
 
 @global_router.post("/global-setup/cancel")
 async def cancel_global_setup() -> dict[str, bool]:
     """Cancel a running global pip install."""
-    global _global_setup_task, _global_setup_proc
+    global _global_setup_proc
     if _global_setup_proc is not None:
         try:
             _global_setup_proc.kill()
         except ProcessLookupError:
             pass
-    if _global_setup_task and not _global_setup_task.done():
-        _global_setup_task.cancel()
     return {"ok": True}
 
 
 @global_router.get("/global-setup/events")
 async def global_setup_events():
-    return sse_response("global-setup")
+    running = _global_setup_running()
+    finished = not running and _global_setup_return_code is not None
+    return sse_response_with_output_replay(
+        topic="global-setup",
+        replay_chunks=list(_global_setup_replay),
+        already_finished=finished,
+        return_code=lambda: _global_setup_return_code,
+        started_event="global_setup_started",
+        output_event="global_setup_output",
+        finished_event="global_setup_finished",
+    )
+
+
+@global_router.get("/global-setup/status")
+async def global_setup_status() -> dict:
+    """Return whether a setup is running and the last return code."""
+    return {"running": _global_setup_running(), "return_code": _global_setup_return_code}
+

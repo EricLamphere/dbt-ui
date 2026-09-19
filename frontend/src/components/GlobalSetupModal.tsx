@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { api } from '../lib/api';
 
 interface Props {
@@ -8,6 +9,7 @@ interface Props {
 type SetupState = 'starting' | 'running' | 'done' | 'error';
 
 export function GlobalSetupModal({ onClose }: Props) {
+  const qc = useQueryClient();
   const [state, setState] = useState<SetupState>('starting');
   const [lines, setLines] = useState<string[]>([]);
   const [silentSecs, setSilentSecs] = useState(0);
@@ -48,6 +50,9 @@ export function GlobalSetupModal({ onClose }: Props) {
       setReturnCode(data.return_code);
       setSilentSecs(0);
       setState(data.return_code === 0 ? 'done' : 'error');
+      if (data.return_code === 0) {
+        qc.invalidateQueries({ queryKey: ['dbt-core-status'] });
+      }
       es.close();
     });
 
@@ -74,12 +79,26 @@ export function GlobalSetupModal({ onClose }: Props) {
     };
   }, []);
 
-  // Tick silent-seconds counter while running so user sees "still working"
+  // Tick silent-seconds counter while running so user sees "still working".
+  // Also poll the status endpoint every 3s to catch a missed global_setup_finished SSE event.
   useEffect(() => {
     if (state !== 'running') return;
-    const id = setInterval(() => {
+    const id = setInterval(async () => {
       setSilentSecs(Math.round((Date.now() - lastOutputRef.current) / 1000));
-    }, 1000);
+      try {
+        const status = await api.init.globalSetupStatus();
+        if (!status.running && status.return_code !== null && stateRef.current === 'running') {
+          setReturnCode(status.return_code);
+          setSilentSecs(0);
+          setState(status.return_code === 0 ? 'done' : 'error');
+          if (status.return_code === 0) {
+            qc.invalidateQueries({ queryKey: ['dbt-core-status'] });
+          }
+        }
+      } catch {
+        // best-effort — SSE is the primary signal
+      }
+    }, 3000);
     return () => clearInterval(id);
   }, [state]);
 
@@ -90,8 +109,9 @@ export function GlobalSetupModal({ onClose }: Props) {
     }
   }, [lines]);
 
-  // Only show the "still working" banner after 8s of silence so it doesn't flash on fast installs
-  const showWaiting = state === 'running' && silentSecs >= 8;
+  // Show the "still working" banner after 15s of silence (heartbeat resets every 5s,
+  // so this only fires if the process is genuinely stalled or the connection dropped)
+  const showWaiting = state === 'running' && silentSecs >= 15;
 
   const handleCancel = async () => {
     esRef.current?.close();
@@ -157,7 +177,7 @@ export function GlobalSetupModal({ onClose }: Props) {
           <div className="px-4 py-2 bg-gray-900 border-t border-gray-800 shrink-0 flex items-center gap-2">
             <span className="text-yellow-500 animate-pulse text-xs">●</span>
             <span className="text-xs text-gray-400">
-              Still installing… ({silentSecs}s without output — pip is writing files to disk)
+              Still installing… pip may be writing files to disk. This is normal for large requirement sets and can take several minutes.
             </span>
           </div>
         )}

@@ -32,9 +32,23 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 - Backend: FastAPI, SQLAlchemy (async), aiosqlite, sse-starlette, watchfiles, ptyprocess
 - Frontend: React 18, Vite, TypeScript, @xyflow/react, dagre, Monaco, xterm.js, TanStack Query, Tailwind CSS
 - DB: SQLite (11 tables)
-- dbt invocation: subprocess only via `backend/.venv/bin/dbt` (serialized per project via asyncio.Lock)
+- dbt invocation: subprocess only, always into an isolated venv (serialized per project via asyncio.Lock) — the venv lives at `backend/.venv` in dev mode, or in the OS user-data directory (e.g. `~/Library/Application Support/dbt-ui/dbt-venv` on macOS) for the packaged desktop app
 
 ## Quickstart
+
+dbt-ui can be run two ways: as a native desktop app (no Python/Node setup required), or from source for development.
+
+### Desktop app
+
+Build a standalone macOS app with the bundled backend and frontend:
+
+```bash
+task package:app
+```
+
+This produces `dbt-ui.app` and `dbt-ui_<version>_<arch>.dmg` under `src-tauri/target/release/bundle/`. The app needs `dbt` and `git` to already be reachable — `dbt` gets installed into an isolated venv (created automatically via your system Python) the first time you run **Run global setup** from the app; `git` must already be on `PATH`. Windows/Linux packaging and code signing/notarization aren't set up yet — an unsigned build only launches on the machine that built it (or with Gatekeeper bypassed) until that's added.
+
+### From source
 
 ### Prerequisites
 
@@ -76,7 +90,7 @@ task start
 |---|---|---|
 | `DBT_UI_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects (overridable via UI) |
 | `DBT_UI_GLOBAL_REQUIREMENTS_PATH` | _(none)_ | Path to a `requirements.txt` installed into the dbt venv on every project open |
-| `DBT_UI_DATA_DIR` | `data/` | SQLite storage directory |
+| `DBT_UI_DATA_DIR` | `data/` (dev) / OS user-data dir (packaged app) | SQLite storage directory |
 | `DBT_UI_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 Per-project settings (stored in `project_env_vars`, injected into every dbt subprocess):

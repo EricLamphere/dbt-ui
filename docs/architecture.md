@@ -9,7 +9,7 @@ dbt-ui is a local-first web UI that wraps dbt-core. It runs as a local dev serve
 | Layer | Technology | Why |
 |---|---|---|
 | Backend | FastAPI (Python 3.11+) | Async, native SSE/streaming, simple subprocess management |
-| dbt execution | `subprocess` calling the venv `dbt` binary | Safe — avoids dbt Python API global state issues; one process per invocation; always uses `backend/.venv/bin/dbt` |
+| dbt execution | `subprocess` calling the venv `dbt` binary | Safe — avoids dbt Python API global state issues; one process per invocation; always uses the isolated dbt venv (`backend/.venv` in dev, OS user-data dir in the packaged app — see `dbt_venv_dir` in Configuration) |
 | Manifest parsing | Custom JSON parser over `manifest.json` | Direct, version-agnostic parsing of dbt's output artifacts |
 | File watching | `watchfiles` (Rust-backed) | Low-overhead, async-friendly, debounced |
 | Live push | Server-Sent Events (SSE) via `sse-starlette` | One-way server→client is sufficient; simpler than WebSockets; built-in browser reconnect |
@@ -60,7 +60,7 @@ dbt-ui/
 │   │   │   ├── run_results.py       # Parse target/run_results.json → statuses
 │   │   │   ├── runner.py            # DbtRunner singleton; subprocess + asyncio.Lock per project; .run() for silent invocations
 │   │   │   ├── select.py            # Build --select strings (only/upstream/downstream/full)
-│   │   │   ├── venv.py              # venv_dbt/venv_pip/venv_python — resolve binaries in backend/.venv/bin/
+│   │   │   ├── venv.py              # venv_dbt/venv_pip/venv_python — resolve binaries in settings.dbt_venv_dir; self-provisions the venv via system python3 on first use
 │   │   │   ├── init_scripts.py      # Read/write init/*.sh custom scripts
 │   │   │   ├── debug_parser.py      # Parse dbt debug stdout → structured DebugResult with per-check status
 │   │   │   ├── drift.py             # diff_columns / is_eligible_for_drift_check — column drift helpers
@@ -708,9 +708,12 @@ Behavior:
 | Variable | Default | Description |
 |---|---|---|
 | `DBT_UI_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects; overridable via Global Settings UI |
-| `DBT_UI_DATA_DIR` | `data/` | Directory for SQLite database |
+| `DBT_UI_DATA_DIR` | `data/` (dev) / OS user-data dir (packaged app, via `platformdirs`) | Directory for SQLite database, logs, and (packaged app only) the dbt venv |
 | `DBT_UI_DATABASE_URL` | _(derived from DATA_DIR)_ | Override SQLite path |
 | `DBT_UI_LOG_LEVEL` | `INFO` | structlog level |
+| `DBT_UI_FRONTEND_DIST` | `frontend/dist` (dev) / resolved next to the packaged binary | Directory the SPA is served from — see `_mount_spa()` |
+
+`dbt_venv_dir` (`Settings`, not an env var): the isolated venv `dbt` runs from — `backend/.venv` in dev (created once by `task install:backend`), or `<data_dir>/dbt-venv` in the packaged app, self-created via the system's `python3` on first use of `venv_dbt()`/`venv_pip()`/`venv_python()` (see `app/dbt/venv.py`). `venv.create()` is never run from the app's own (possibly frozen) interpreter — doing so from a PyInstaller-frozen binary causes `ensurepip` to recursively re-exec the whole app.
 
 Global settings (stored in `app_settings` table, set via UI):
 
@@ -789,7 +792,7 @@ task install PYTHON=python3.12
 
 **dbt debug result cached in memory** — `dbt debug` is quick (~1s) but re-running it on every page load is unnecessary. The last result is stored in `_cache[project_id]` and served by `GET /debug/last` until explicitly re-triggered. The cache is process-local (no persistence across restarts).
 
-**All dbt commands use the venv binary** — `venv_dbt()` / `venv_pip()` / `venv_python()` in `dbt/venv.py` resolve binaries relative to `backend/.venv/bin/`. This ensures adapter packages installed during setup (e.g. `dbt-snowflake`) are available to every dbt invocation regardless of what's on `$PATH`.
+**All dbt commands use the venv binary** — `venv_dbt()` / `venv_pip()` / `venv_python()` in `dbt/venv.py` resolve binaries relative to `settings.dbt_venv_dir` (`backend/.venv` in dev; `<data_dir>/dbt-venv` in the packaged app, created on first use). This ensures adapter packages installed during setup (e.g. `dbt-snowflake`) are available to every dbt invocation regardless of what's on `$PATH`.
 
 **Docs generation bypasses `runner.stream()`** — `dbt compile --write-catalog` and `dbt docs generate` are invoked directly (not via `DbtRunner`) so they emit `compile_started`/`compile_finished` or `docs_generating`/`docs_generated` events but never `run_started`. This prevents the frontend from switching to the Run tab when docs are generated.
 

@@ -7,9 +7,24 @@ vars:
 tasks:
   # ---- Development ----
 
+  ensure:backend:
+    desc: Ensure .venv exists and all requirements are installed
+    dir: "{{.BACKEND_DIR}}"
+    vars:
+      PYTHON: '{{.PYTHON | default "python3"}}'
+    cmds:
+      - |
+        if [ ! -d ".venv" ]; then
+          echo "Creating virtual environment..."
+          {{.PYTHON}} -m venv .venv
+        fi
+      - .venv/bin/pip install -q -e ".[dev]"
+
   dev:backend:
     desc: Start the FastAPI backend in dev mode (hot reload)
     dir: "{{.BACKEND_DIR}}"
+    deps:
+      - task: ensure:backend
     cmds:
       - .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
     env:
@@ -123,3 +138,42 @@ tasks:
     cmds:
       - rm -f data/dbt_ui.sqlite
       - echo "Database reset."
+
+  reset:
+    desc: Full reset for testing — wipe DB, delete backend venv, reinstall with python3.12
+    cmds:
+      - task: db:reset
+      - rm -rf backend/.venv
+      - task: install
+        vars:
+          PYTHON: python3.12
+
+  # ---- Package (Tauri desktop app) ----
+
+  package:backend:
+    desc: Bundle the FastAPI backend into a standalone executable via PyInstaller
+    dir: "{{.BACKEND_DIR}}"
+    deps:
+      - task: ensure:backend
+    cmds:
+      - .venv/bin/pip install -q -e ".[packaging]"
+      - rm -rf dist build
+      - .venv/bin/pyinstaller packaging/dbt_ui.spec --distpath dist --workpath build --noconfirm
+
+  package:frontend:
+    desc: Build the frontend for embedding in the packaged app
+    dir: "{{.FRONTEND_DIR}}"
+    cmds:
+      - npm run build
+
+  package:app:
+    desc: Build the full Tauri desktop app (backend sidecar + frontend + native shell)
+    deps:
+      - task: package:backend
+      - task: package:frontend
+    cmds:
+      - rm -rf src-tauri/binaries/frontend_dist
+      - mkdir -p src-tauri/binaries
+      - cp -r frontend/dist src-tauri/binaries/frontend_dist
+      - cp backend/dist/dbt-ui-backend src-tauri/binaries/dbt-ui-backend-$(rustc -Vv | grep host | cut -d' ' -f2)
+      - cd src-tauri && cargo tauri build

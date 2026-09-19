@@ -634,6 +634,8 @@ export const api = {
       post<{ ok: boolean }>('/init/global-setup'),
     cancelGlobalSetup: () =>
       post<{ ok: boolean }>('/init/global-setup/cancel'),
+    globalSetupStatus: () =>
+      get<{ running: boolean; return_code: number | null }>('/init/global-setup/status'),
   },
   profiles: {
     dbtTargets: (projectId: number) =>
