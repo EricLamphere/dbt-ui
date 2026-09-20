@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Header from './components/Header';
 import Home from './routes/Home';
+import Pricing from './routes/Pricing';
 import ProjectHome from './routes/Project/index';
 import ProjectLayout from './routes/Project/ProjectLayout';
 import ModelsPage from './routes/Project/Models';
@@ -21,6 +22,7 @@ export default function App() {
         <main className="flex-1 overflow-hidden">
           <Routes>
             <Route path="/" element={<Home />} />
+            <Route path="/pricing" element={<Pricing />} />
             <Route path="/projects/:projectId" element={<ProjectLayout />}>
               <Route index element={<ProjectHome />} />
               <Route path="models" element={<ModelsPage />} />

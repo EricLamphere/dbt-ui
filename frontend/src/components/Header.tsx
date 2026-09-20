@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Sparkles } from 'lucide-react';
 import { api } from '../lib/api';
 import { GlobalSettingsModal } from './GlobalSettingsModal';
 import { GlobalSetupModal } from './GlobalSetupModal';
@@ -113,6 +114,12 @@ export default function Header() {
 
   const projectEmoji = project ? (PLATFORM_ICONS[project.platform.toLowerCase()] ?? PLATFORM_ICONS.unknown) : null;
 
+  const { data: license } = useQuery({
+    queryKey: ['license'],
+    queryFn: () => api.license.get(),
+  });
+  const isPricingPage = location.pathname === '/pricing';
+
   return (
     <header className="flex items-center justify-between px-4 h-12 bg-surface-panel border-b border-gray-800 shrink-0 z-50">
       {/* Left — home */}
@@ -166,6 +173,15 @@ export default function Header() {
               + New project
             </button>
           </>
+        )}
+        {!license?.entitled && !isPricingPage && (
+          <button
+            onClick={() => navigate('/pricing')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-brand-600/10 border border-brand-500/40 text-brand-300 hover:bg-brand-600/20 font-medium transition-colors"
+          >
+            <Sparkles size={12} />
+            Upgrade to Pro
+          </button>
         )}
         <button
           onClick={() => setSettingsOpen(true)}

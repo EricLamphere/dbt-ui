@@ -16,7 +16,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { api, isProFeatureRequiredError, type ModelNode, type GraphDto } from '../../lib/api';
+import { api, ApiError, isProFeatureRequiredError, type ModelNode, type GraphDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 import ModelNodeComponent from './components/ModelNode';
 import NewModelModal from './components/NewModelModal';
@@ -590,9 +590,21 @@ export default function ModelsPage() {
               api.models.startColumnLineage(id).catch((err) => {
                 if (isProFeatureRequiredError(err)) {
                   setUpgradeModalOpen(true);
-                } else if (!(err instanceof Error) || !err.message.startsWith('409')) {
-                  console.error('failed to start column lineage scan', err);
+                  return;
                 }
+                if (err instanceof ApiError && err.status === 409) {
+                  return; // already running — existing run's events will update our query
+                }
+                if (err instanceof ApiError && err.status === 503) {
+                  alert('Column-level lineage is unavailable in this build (the dbt-ui Pro package is not installed).');
+                  return;
+                }
+                if (err instanceof ApiError && err.status === 422) {
+                  alert('Column-level lineage requires a compiled project. Run dbt compile (or a run/build) first.');
+                  return;
+                }
+                console.error('failed to start column lineage scan', err);
+                alert(`Failed to start column lineage scan: ${String(err)}`);
               }).finally(() => {
                 qc.invalidateQueries({ queryKey: ['column-lineage', id] });
               });

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import get_session
 from app.db.models import ColumnLineageSnapshot, Project
-from app.dbt.column_lineage import LineageJob, prepare_lineage_jobs, trace_job
+from app.dbt.column_lineage import ColumnLineageUnavailable, LineageJob, prepare_lineage_jobs, trace_job
 from app.events.bus import Event, bus
 from app.licensing import entitlements
 from app.logging_setup import get_logger
@@ -130,7 +130,10 @@ async def start_column_lineage(
         return _snapshot_to_dto(latest)
 
     loop = asyncio.get_event_loop()
-    jobs: list[LineageJob] = await loop.run_in_executor(None, prepare_lineage_jobs, manifest_path)
+    try:
+        jobs: list[LineageJob] = await loop.run_in_executor(None, prepare_lineage_jobs, manifest_path)
+    except ColumnLineageUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
     snap = ColumnLineageSnapshot(
         project_id=project_id,

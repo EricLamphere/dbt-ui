@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { api, ApiError } from '../../../lib/api';
 
@@ -19,6 +20,7 @@ const REASON_COPY: Record<string, string> = {
 
 export function UpgradeModal({ onClose, feature = 'Column-level lineage' }: UpgradeModalProps) {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const [licenseKey, setLicenseKey] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -76,16 +78,12 @@ export function UpgradeModal({ onClose, feature = 'Column-level lineage' }: Upgr
             </p>
           )}
 
-          {license?.checkout_url && (
-            <a
-              href={license.checkout_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-center px-3 py-2 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
-            >
-              Subscribe to dbt-ui Pro →
-            </a>
-          )}
+          <button
+            onClick={() => { onClose(); navigate('/pricing'); }}
+            className="text-center px-3 py-2 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
+          >
+            Compare plans & subscribe →
+          </button>
 
           <div className="flex items-center gap-2 text-[11px] text-gray-600 my-1">
             <div className="flex-1 h-px bg-gray-800" />

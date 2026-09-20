@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, useEffect } from 'react';
 import { X, ChevronDown, FlaskConical, Lock } from 'lucide-react';
 import type { GraphDto } from '../../../lib/api';
 import { type FilterState, emptyFilter, isFilterActive, getAvailableFilters } from '../lib/dagFilter';
+import { ProFeatureButton } from '../../../components/ProFeatureButton';
 
 interface FilterDropdownProps {
   label: string;
@@ -211,15 +212,10 @@ export default function DagFilterBar({
       )}
 
       {/* Action buttons */}
-      <button
-        onClick={columnLineageLocked ? onColumnLineageLockedClick : onLoadColumnLineage}
+      <ProFeatureButton
+        onClick={columnLineageLocked ? onColumnLineageLockedClick! : onLoadColumnLineage}
         disabled={!columnLineageLocked && columnLineageLoading}
         title={columnLineageLocked ? 'Column-level lineage is a dbt-ui Pro feature' : undefined}
-        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors shrink-0 disabled:opacity-50 ${
-          columnLineageLocked
-            ? 'bg-brand-600/10 border border-brand-500/40 text-brand-300 hover:bg-brand-600/20'
-            : 'bg-surface-elevated hover:bg-gray-700 text-gray-400'
-        }`}
       >
         {columnLineageLocked && <Lock size={12} />}
         {columnLineageLocked
@@ -229,7 +225,7 @@ export default function DagFilterBar({
                 ? `Column lineage: ${columnLineageProgress.checked}/${columnLineageProgress.total}…`
                 : 'Column lineage loading…')
             : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
-      </button>
+      </ProFeatureButton>
       <button
         onClick={onRefresh}
         disabled={compiling}
