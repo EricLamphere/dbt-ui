@@ -333,6 +333,19 @@ async def run_migrations() -> None:
                     )
             await session.commit()
 
+        if not await _table_exists(session, "license_state"):
+            await session.execute(text(
+                "CREATE TABLE license_state ("
+                "id INTEGER PRIMARY KEY CHECK (id = 1), "
+                "license_key TEXT, "
+                "activation_id TEXT, "
+                "device_id TEXT NOT NULL, "
+                "entitled BOOLEAN NOT NULL DEFAULT 0, "
+                "status TEXT NOT NULL DEFAULT 'unset', "
+                "checked_at DATETIME)"
+            ))
+            await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()

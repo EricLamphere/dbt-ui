@@ -219,3 +219,24 @@ class InvocationModelResult(Base):
     message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     invocation: Mapped["RunInvocation"] = relationship(back_populates="node_results")
+
+
+class LicenseState(Base):
+    """Single-row (id=1) cache of the last-known Pro license/entitlement state.
+
+    Validated against Polar's license-key API on a schedule (see
+    app/licensing/), not on every request — this row is the grace-period
+    cache that lets Pro features keep working for a while if Polar is
+    unreachable (offline, outage), while still requiring a fresh successful
+    check periodically so a canceled subscription doesn't stay entitled
+    forever just by staying offline.
+    """
+    __tablename__ = "license_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    license_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    activation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    device_id: Mapped[str] = mapped_column(String(64))
+    entitled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    status: Mapped[str] = mapped_column(String(32), default="unset")
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

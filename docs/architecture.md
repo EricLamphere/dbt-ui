@@ -261,6 +261,15 @@ column_lineage_snapshots
   manifest_mtime  REAL       -- mtime of target/manifest.json this snapshot was computed from;
                              -- used to short-circuit a re-scan when the manifest hasn't changed
   -- Interrupted snapshots (status='running') are reset to 'error' on server restart
+
+license_state
+  id              INTEGER PK  -- always 1, single-row cache for this installation
+  license_key     TEXT (nullable)   -- Polar license key, or null if unset
+  activation_id   TEXT(64) (nullable)  -- Polar device activation id for this install
+  device_id       TEXT(64)          -- stable per-install device id (uuid4 hex), generated once
+  entitled        BOOLEAN default false
+  status          TEXT(32) default 'unset'  -- unset | granted | not_entitled | ... (mirrors Polar's status)
+  checked_at      DATETIME (nullable)  -- last time entitlement was checked against Polar
 ```
 
 ---
@@ -291,9 +300,13 @@ POST   /api/projects/{id}/models/{unique_id}/show        run dbt show, return ro
 POST   /api/projects/{id}/models/{unique_id}/profile    run dbt show (full table), return column profile stats
 GET    /api/projects/{id}/models/{unique_id}/sql
 PUT    /api/projects/{id}/models/{unique_id}/sql
-POST   /api/projects/{id}/column-lineage/start            start async column lineage scan (202, or 200 if a fresh snapshot already exists); returns ColumnLineageSnapshot
-GET    /api/projects/{id}/column-lineage                 get the latest ColumnLineageSnapshot for a project
-GET    /api/projects/{id}/column-lineage/{snapshot_id}   get a specific ColumnLineageSnapshot by id
+POST   /api/projects/{id}/column-lineage/start            start async column lineage scan (202, or 200 if a fresh snapshot already exists); returns ColumnLineageSnapshot — Pro feature, 403 if not entitled
+GET    /api/projects/{id}/column-lineage                 get the latest ColumnLineageSnapshot for a project — Pro feature, 403 if not entitled
+GET    /api/projects/{id}/column-lineage/{snapshot_id}   get a specific ColumnLineageSnapshot by id — Pro feature, 403 if not entitled
+
+GET    /api/license                                      current cached entitlement status (does not force a fresh Polar check)
+PUT    /api/license                                       set (or clear, if license_key is null) the license key; immediately checks it against Polar
+POST   /api/license/recheck                               force an immediate Polar check, bypassing the recheck interval
 
 POST   /api/projects/{id}/debug                          run dbt debug, return structured check results + raw log
 GET    /api/projects/{id}/debug/last                     get result of the most recent debug run (from cache)
@@ -555,7 +568,11 @@ DAG filtering (`dagFilter.ts`) is purely client-side — no backend involvement:
 5. Publishes `docs_generated {ok, generated_at}`
 6. Frontend invalidates `['docs-status', projectId]`; the native docs browser (`Docs.tsx`) re-fetches `GET /api/projects/{id}/docs/data`
 
-### 10. Column-Level Lineage
+### 10. Column-Level Lineage (dbt-ui Pro)
+
+Column-level lineage is the first paid ("Pro") feature — all three routes (`start`, latest, and by-snapshot-id) call `_require_pro(session)` (`api/column_lineage.py`), which raises `403 {"error": "pro_feature_required", "reason": <Entitlement.reason>}` when `entitlements.check_entitlement()` returns not-entitled. Both GET routes are gated too, not just `start`, because an already-computed snapshot persists in the DB indefinitely and would otherwise keep serving results forever after a subscription lapses. See "Licensing (dbt-ui Pro)" below for the entitlement system itself.
+
+**Open-core split:** the actual sqlglot-based tracing algorithm (`prepare_lineage_jobs`, `trace_job`, `build_column_lineage`, and their private helpers) lives in a separate private repo, `dbt-ui-pro` (not in this repo) — all licensing/entitlement enforcement stays in this public repo, since that code must run inside the distributed app regardless of who can read the source. `backend/app/dbt/column_lineage.py` in *this* repo is a thin public shim: it defines the real, always-importable `ColumnRef`/`LineageJob` dataclasses (required at server-startup import time by `api/column_lineage.py`, so they can't be `TYPE_CHECKING`-only) and lazily imports `dbt_ui_pro.column_lineage` inside each function, raising `ColumnLineageUnavailable` if the private package isn't installed. The public repo therefore builds and runs completely standalone for contributors; only maintainer/release builds of the packaged desktop app install `dbt-ui-pro`: run `task package:pro` (installs `dbt-ui-pro` from a sibling checkout, editable) before `task package:backend`/`task package:app`. `packaging/dbt_ui.spec` detects whether `dbt_ui_pro` is importable at build time (`importlib.util.find_spec`) and only adds it to PyInstaller's `hiddenimports` when present — required because it's imported lazily at call time, which PyInstaller's static analysis can't discover on its own. Skipping `package:pro` produces a normal public build with lineage unavailable; nothing else in the packaging flow changes.
 
 Column lineage is computed **SQL-first**: `dbt/column_lineage.py` derives each model's column list by parsing the compiled SQL's outer `SELECT` with sqlglot (`named_selects`) — no yml `columns:` documentation is required. yml-documented columns are used only as a fallback when the SQL parse can't determine an explicit column list (a top-level `SELECT *`, or missing `compiled_code` because `dbt compile` hasn't run).
 
@@ -576,10 +593,23 @@ In the frontend (`Models.tsx`):
 - Toggling "Load column lineage" calls `POST .../column-lineage/start` (ignoring 409 — a run already in flight is fine) and keeps `useQuery(['column-lineage', id])` (`GET .../column-lineage`) as the source of truth for rendered data.
 - A `useProjectEvents` handler invalidates `['column-lineage', id]` on `column_lineage_progress`/`column_lineage_finished`, and tracks `{checked, total}` from `column_lineage_progress` for an optimistic progress indicator (mirrors `DriftPanel.tsx`).
 - `DagFilterBar` shows `Column lineage: {checked}/{total}…` while a scan is running.
+- If `columnLineage`'s query error or the `start` call's rejection is a 403 with `{"error": "pro_feature_required"}` (detected via `isProFeatureRequiredError()` in `lib/api.ts`), the lineage button renders locked (`Lock` icon, "Column lineage (Pro)") and clicking it opens `UpgradeModal` instead of starting a scan. `UpgradeModal` reads `GET /api/license` for status/reason copy and a Polar checkout link (`checkout_url`, from `POLAR_*_CHECKOUT_URL`), and lets the user paste + activate a license key inline (`PUT /api/license`) or force a recheck (`POST /api/license/recheck`).
 - Expanding a model node in the DAG reveals its columns; clicking a column toggles it in `activeColumnSels`
 - `traceColumn()` walks the lineage map bidirectionally (upstream via `reverseLineageIndex`, downstream via forward traversal) to collect all `{node, column}` pairs in the trace
 - Highlighted `{node, column}` pairs are passed as props into each `ModelNode`; nodes and edges outside the trace are dimmed
 - None of this blocks other queries/interactions — the scan runs fully server-side in background worker processes; the frontend only ever does small polling GETs and SSE-driven invalidation.
+
+### 10a. Licensing (dbt-ui Pro entitlement)
+
+Entitlement resolution (`app/licensing/entitlements.py`) wraps a thin async Polar client (`app/licensing/polar_client.py`, `httpx`-based) with a persistent grace-period cache (`license_state` table, single row, id=1) so Pro features keep working through brief offline periods:
+
+1. `check_entitlement(session, force=False)`: if no `license_key` is set → `not_licensed`. If checked within `RECHECK_INTERVAL` (6h) and not forced, trusts the cache.
+2. If due for a check: activates this device against the key if no `activation_id` is cached yet (`POST .../license-keys/activate`), then validates (`POST .../license-keys/validate`).
+3. `LicenseKeyNotEntitled` (Polar's real-world shape for a canceled subscription — confirmed via live sandbox testing to be a 404 from validate or a 403 with "no longer active" from activate) is **always trusted immediately**, regardless of the grace period — caches `entitled=False, reason="not_entitled"`.
+4. `ActivationLimitReached` (403 from activate, seat limit) returns `reason="activation_limit_reached"` **without** caching, so a retry after freeing a seat re-attempts activation instead of waiting out `RECHECK_INTERVAL`.
+5. Any other `PolarError` (network failure, unexpected response) falls back to `_grace_period_result()`: if the last cached result was `entitled=True` and within `GRACE_PERIOD` (7 days) of `checked_at`, returns `reason="grace_period"` (still entitled); otherwise `reason="unreachable"` (not entitled).
+
+`api/license.py` exposes this as `GET/PUT /api/license` + `POST /api/license/recheck` (see API Routes). `polar_use_sandbox` / the `polar_organization_id` / `polar_api_key` / `polar_api_base` properties on `Settings` (`config.py`) pick sandbox vs. production Polar credentials and API base URL.
 
 ### 11. SQL Workspace
 
@@ -716,6 +746,13 @@ Behavior:
 | `DBT_UI_DATABASE_URL` | _(derived from DATA_DIR)_ | Override SQLite path |
 | `DBT_UI_LOG_LEVEL` | `INFO` | structlog level |
 | `DBT_UI_FRONTEND_DIST` | `frontend/dist` (dev) / resolved next to the packaged binary | Directory the SPA is served from — see `_mount_spa()` |
+| `POLAR_USE_SANDBOX` | `true` | Which Polar environment to validate license keys against — sandbox or production |
+| `POLAR_SANDBOX_ORGANIZATION_ID` | _(none)_ | Polar sandbox org id (not a secret) |
+| `POLAR_SANDBOX_API_KEY` | _(none)_ | Polar sandbox API key — secret, `backend/.env` only, never committed |
+| `POLAR_PRODUCTION_ORGANIZATION_ID` | _(none)_ | Polar production org id (not a secret) |
+| `POLAR_PRODUCTION_API_KEY` | _(none)_ | Polar production API key — secret, `backend/.env` only, never committed |
+| `POLAR_SANDBOX_CHECKOUT_URL` | _(none)_ | Polar sandbox checkout link, surfaced in the frontend upgrade modal |
+| `POLAR_PRODUCTION_CHECKOUT_URL` | _(none)_ | Polar production checkout link, surfaced in the frontend upgrade modal |
 
 `dbt_venv_dir` (`Settings`, not an env var): the isolated venv `dbt` runs from — `backend/.venv` in dev (created once by `task install:backend`), or `<data_dir>/dbt-venv` in the packaged app, self-created via the system's `python3` on first use of `venv_dbt()`/`venv_pip()`/`venv_python()` (see `app/dbt/venv.py`). `venv.create()` is never run from the app's own (possibly frozen) interpreter — doing so from a PyInstaller-frozen binary causes `ensurepip` to recursively re-exec the whole app.
 

@@ -13,15 +13,26 @@ from app.git.repo import find_repo_root, parse_porcelain_v2
 
 
 def test_find_repo_root_at_root(tmp_path: Path) -> None:
+    # A .git dir only counts as a real repo when it has a HEAD file (see
+    # find_repo_root's docstring) — a bare/incomplete .git dir is skipped.
     (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     assert find_repo_root(tmp_path) == tmp_path
 
 
 def test_find_repo_root_nested(tmp_path: Path) -> None:
     (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
     deep = tmp_path / "a" / "b" / "c"
     deep.mkdir(parents=True)
     assert find_repo_root(deep) == tmp_path
+
+
+def test_find_repo_root_incomplete_git_dir_skipped(tmp_path: Path) -> None:
+    # A .git dir with no HEAD file (e.g. from git-crypt or a botched init)
+    # should be skipped, not treated as a repo root.
+    (tmp_path / ".git").mkdir()
+    assert find_repo_root(tmp_path) is None
 
 
 def test_find_repo_root_no_repo(tmp_path: Path) -> None:

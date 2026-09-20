@@ -9,6 +9,27 @@ background asyncio.Task that fans work out across a ProcessPoolExecutor, and
 progress/completion are observable both via polling GET and via SSE events on
 the bus.
 
+Column-level lineage is a dbt-ui Pro feature (see app/licensing/): the real
+tracing algorithm lives in the private dbt_ui_pro package, not this repo.
+These tests don't need it installed — `_entitled` below forces
+check_entitlement() to report entitled for every test in this file (a
+separate test class covers the actual gating behavior when NOT entitled),
+and `_fake_algorithm` substitutes a small, deterministic stand-in for
+prepare_lineage_jobs/trace_job that reproduces the exact lineage
+_make_manifest()'s fixture data would really trace, without depending on
+sqlglot or the private package at all.
+
+Patching trace_job specifically requires patching app.dbt.column_lineage's
+copy, not app.api.column_lineage's imported alias of it: trace_job is
+submitted to a ProcessPoolExecutor by reference (loop.run_in_executor(_pool,
+trace_job, job)), and the worker subprocess re-imports it fresh from its
+true origin module (app.dbt.column_lineage) rather than seeing whatever
+local alias the test patched in api/column_lineage.py's namespace.
+prepare_lineage_jobs, by contrast, runs via run_in_executor(None, ...) — a
+thread pool in the SAME process — so patching either module's reference
+would work for it, but we patch both consistently at their shared true
+origin for clarity.
+
 Note: the background runner (`_run_column_lineage` in api/column_lineage.py)
 imports `SessionLocal` fresh from `app.db.engine` on every DB write (mirroring
 the drift/freshness pattern), rather than going through FastAPI's DI. The
@@ -25,14 +46,66 @@ import json
 from pathlib import Path
 
 import pytest
-from httpx import AsyncClient, ASGITransport
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 import app.db.engine as db_engine
+import app.dbt.column_lineage as column_lineage_module
 from app.db.engine import get_session
 from app.db.models import Base, Project
+from app.dbt.column_lineage import ColumnRef, LineageJob
 from app.events.bus import bus
+from app.licensing import entitlements
 from app.main import app
+
+
+def _fake_prepare_lineage_jobs(manifest_path: Path) -> list[LineageJob]:
+    """Reproduces exactly what the real algorithm would compute for
+    _make_manifest()'s fixture data (orders.order_id <- stg_orders.order_id),
+    without depending on sqlglot or dbt_ui_pro."""
+    data = json.loads(manifest_path.read_text())
+    if "model.proj.orders" not in data.get("nodes", {}):
+        return []
+    return [
+        LineageJob(
+            uid="model.proj.orders",
+            columns=("order_id",),
+            sql="SELECT order_id FROM stg_orders",
+            dialect=None,
+            parent_short_names=("stg_orders",),
+            name_to_uid={"stg_orders": "model.proj.stg_orders", "orders": "model.proj.orders"},
+            sources={"stg_orders": "SELECT order_id"},
+        )
+    ]
+
+
+def _fake_trace_job(job: LineageJob) -> tuple[str, dict[str, list[ColumnRef]]]:
+    """Matches _fake_prepare_lineage_jobs' single job — real ProcessPoolExecutor
+    fan-out still happens, this just replaces the sqlglot tracing itself."""
+    return job.uid, {"order_id": [ColumnRef(node="model.proj.stg_orders", column="order_id")]}
+
+
+@pytest.fixture(autouse=True)
+def _fake_algorithm(monkeypatch: pytest.MonkeyPatch):
+    """See module docstring for why both the true-origin module AND the
+    api module's imported alias are patched."""
+    monkeypatch.setattr(column_lineage_module, "prepare_lineage_jobs", _fake_prepare_lineage_jobs)
+    monkeypatch.setattr(column_lineage_module, "trace_job", _fake_trace_job)
+    import app.api.column_lineage as api_module
+    monkeypatch.setattr(api_module, "prepare_lineage_jobs", _fake_prepare_lineage_jobs)
+    monkeypatch.setattr(api_module, "trace_job", _fake_trace_job)
+
+
+@pytest.fixture(autouse=True)
+async def _entitled(monkeypatch: pytest.MonkeyPatch):
+    """Forces every test in this file to see an entitled installation —
+    entitlement-gating behavior itself (403 when NOT entitled) is covered
+    separately below in TestEntitlementGating, which does NOT use this
+    fixture."""
+    async def _always_entitled(session, *, force: bool = False):
+        return entitlements.Entitlement(entitled=True, reason="granted")
+
+    monkeypatch.setattr(entitlements, "check_entitlement", _always_entitled)
 
 
 @pytest.fixture
@@ -211,10 +284,12 @@ async def test_start_twice_returns_409_while_running(
     assert first.status_code == 202
 
     second = await client.post(f"/api/projects/{pid}/column-lineage/start")
-    # Either a 409 (still running) or, if it raced to completion already, a
-    # fresh 202 restart is also acceptable — on a fast machine the scan (2
-    # tiny models) could complete before the second request lands.
-    assert second.status_code in (202, 409)
+    # 409 (still running) is the expected case. But on a fast machine the
+    # scan (2 tiny models) can complete before the second request lands —
+    # then start_column_lineage's manifest-mtime short-circuit kicks in and
+    # returns the already-`done` snapshot: 200 if the manifest is unchanged,
+    # or a fresh 202 restart if it decided a new scan was needed anyway.
+    assert second.status_code in (200, 202, 409)
 
     await _wait_for_done(client, pid)
 
@@ -267,3 +342,46 @@ async def test_rerun_short_circuits_when_manifest_unchanged(
     second_start = await client.post(f"/api/projects/{pid}/column-lineage/start")
     assert second_start.status_code == 200
     assert second_start.json()["id"] == first_id
+
+
+class TestEntitlementGating:
+    """Unlike every test above, these do NOT use the _entitled autouse
+    fixture's override — they verify the real check_entitlement() logic
+    correctly blocks all three routes when there's no valid license."""
+
+    @pytest.fixture(autouse=True)
+    def _not_entitled(self, monkeypatch: pytest.MonkeyPatch):
+        async def _never_entitled(session, *, force: bool = False):
+            return entitlements.Entitlement(entitled=False, reason="not_licensed")
+
+        monkeypatch.setattr(entitlements, "check_entitlement", _never_entitled)
+
+    async def test_start_returns_403_when_not_entitled(
+        self, client: AsyncClient, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        proj_dir = tmp_path / "proj_gated"
+        proj_dir.mkdir()
+        target = proj_dir / "target"
+        target.mkdir()
+        _make_manifest(target)
+        pid = await _seed_project(db_session, str(proj_dir))
+
+        r = await client.post(f"/api/projects/{pid}/column-lineage/start")
+        assert r.status_code == 403
+        assert r.json()["detail"]["error"] == "pro_feature_required"
+
+    async def test_get_latest_returns_403_when_not_entitled(
+        self, client: AsyncClient, db_session: AsyncSession, tmp_path: Path
+    ) -> None:
+        proj_dir = tmp_path / "proj_gated2"
+        proj_dir.mkdir()
+        pid = await _seed_project(db_session, str(proj_dir))
+
+        r = await client.get(f"/api/projects/{pid}/column-lineage")
+        assert r.status_code == 403
+
+    async def test_get_snapshot_returns_403_when_not_entitled(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        r = await client.get("/api/projects/1/column-lineage/1")
+        assert r.status_code == 403

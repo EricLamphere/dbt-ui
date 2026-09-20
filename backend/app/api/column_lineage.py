@@ -14,6 +14,7 @@ from app.db.engine import get_session
 from app.db.models import ColumnLineageSnapshot, Project
 from app.dbt.column_lineage import LineageJob, prepare_lineage_jobs, trace_job
 from app.events.bus import Event, bus
+from app.licensing import entitlements
 from app.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -53,6 +54,20 @@ def _to_utc_iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
+async def _require_pro(session: AsyncSession) -> None:
+    """Column-level lineage is a dbt-ui Pro feature. Gates all three routes
+    below (start + both read routes) — not just start — because an already-
+    computed ColumnLineageSnapshot persists in the DB indefinitely, so a
+    lapsed subscription could otherwise keep reading old results forever
+    just by never re-triggering a scan."""
+    entitlement = await entitlements.check_entitlement(session)
+    if not entitlement.entitled:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "pro_feature_required", "reason": entitlement.reason},
+        )
+
+
 def _snapshot_to_dto(snap: ColumnLineageSnapshot) -> ColumnLineageSnapshotDto:
     try:
         raw: dict = json.loads(snap.results_json)
@@ -85,6 +100,8 @@ async def start_column_lineage(
     response: Response,
     session: AsyncSession = Depends(get_session),
 ) -> ColumnLineageSnapshotDto:
+    await _require_pro(session)
+
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
@@ -145,6 +162,8 @@ async def get_latest_column_lineage(
     project_id: int,
     session: AsyncSession = Depends(get_session),
 ) -> ColumnLineageSnapshotDto | None:
+    await _require_pro(session)
+
     project = await session.get(Project, project_id)
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
@@ -165,6 +184,8 @@ async def get_column_lineage_snapshot(
     snapshot_id: int,
     session: AsyncSession = Depends(get_session),
 ) -> ColumnLineageSnapshotDto:
+    await _require_pro(session)
+
     snap = await session.get(ColumnLineageSnapshot, snapshot_id)
     if snap is None or snap.project_id != project_id:
         raise HTTPException(status_code=404, detail="snapshot not found")

@@ -14,6 +14,8 @@
 # resulting dbt-ui-backend/ folder is shipped as a plain Tauri "resource"
 # and spawned directly (see src-tauri/src/lib.rs) instead of via .sidecar().
 
+import importlib.util
+
 from PyInstaller.utils.hooks import collect_submodules
 
 block_cipher = None
@@ -28,6 +30,17 @@ hidden_imports = (
         "aiosqlite",
     ]
 )
+
+# dbt_ui_pro (the private column-lineage algorithm package — see
+# app/dbt/column_lineage.py) is only present in maintainer/release builds
+# that ran `task package:pro` first (pip install -e ../dbt-ui-pro). It's
+# imported lazily at call time, not at module load, so PyInstaller's static
+# analysis can never discover it on its own — it must be added to
+# hiddenimports explicitly whenever it's actually installed. Contributor
+# builds without it simply don't bundle it; column lineage stays unavailable
+# (ColumnLineageUnavailable), same as running the public repo directly.
+if importlib.util.find_spec("dbt_ui_pro") is not None:
+    hidden_imports += collect_submodules("dbt_ui_pro")
 
 # NOTE: the dbt venv (where "Run global setup" pip-installs dbt-core + an
 # adapter) is created via the user's own system python3 on PATH, NOT via this

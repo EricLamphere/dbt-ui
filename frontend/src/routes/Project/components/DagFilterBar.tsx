@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
-import { X, ChevronDown, FlaskConical } from 'lucide-react';
+import { X, ChevronDown, FlaskConical, Lock } from 'lucide-react';
 import type { GraphDto } from '../../../lib/api';
 import { type FilterState, emptyFilter, isFilterActive, getAvailableFilters } from '../lib/dagFilter';
 
@@ -95,6 +95,9 @@ interface DagFilterBarProps {
   columnLineageLoading: boolean;
   columnLineageProgress?: { checked: number; total: number } | null;
   onLoadColumnLineage: () => void;
+  /** When true, column lineage is a locked Pro feature — clicking opens the upgrade modal instead. */
+  columnLineageLocked?: boolean;
+  onColumnLineageLockedClick?: () => void;
 }
 
 export default function DagFilterBar({
@@ -112,6 +115,8 @@ export default function DagFilterBar({
   columnLineageLoading,
   columnLineageProgress,
   onLoadColumnLineage,
+  columnLineageLocked = false,
+  onColumnLineageLockedClick,
 }: DagFilterBarProps) {
   const available = useMemo(
     () => (graph ? getAvailableFilters(graph) : { resourceTypes: [], materializations: [], tags: [], statuses: [] }),
@@ -207,15 +212,23 @@ export default function DagFilterBar({
 
       {/* Action buttons */}
       <button
-        onClick={onLoadColumnLineage}
-        disabled={columnLineageLoading}
-        className="px-3 py-1.5 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 disabled:opacity-50 transition-colors shrink-0"
+        onClick={columnLineageLocked ? onColumnLineageLockedClick : onLoadColumnLineage}
+        disabled={!columnLineageLocked && columnLineageLoading}
+        title={columnLineageLocked ? 'Column-level lineage is a dbt-ui Pro feature' : undefined}
+        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded transition-colors shrink-0 disabled:opacity-50 ${
+          columnLineageLocked
+            ? 'bg-brand-600/10 border border-brand-500/40 text-brand-300 hover:bg-brand-600/20'
+            : 'bg-surface-elevated hover:bg-gray-700 text-gray-400'
+        }`}
       >
-        {columnLineageLoading
-          ? (columnLineageProgress
-              ? `Column lineage: ${columnLineageProgress.checked}/${columnLineageProgress.total}…`
-              : 'Column lineage loading…')
-          : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
+        {columnLineageLocked && <Lock size={12} />}
+        {columnLineageLocked
+          ? 'Column lineage (Pro)'
+          : columnLineageLoading
+            ? (columnLineageProgress
+                ? `Column lineage: ${columnLineageProgress.checked}/${columnLineageProgress.total}…`
+                : 'Column lineage loading…')
+            : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
       </button>
       <button
         onClick={onRefresh}

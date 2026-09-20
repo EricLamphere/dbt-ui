@@ -17,7 +17,7 @@ Built with <img src="img/claude-code.png" width="30" height="30" align="center">
 - **Init pipeline** — configurable initialization steps (`pip install`, `dbt deps`, custom shell scripts) that run automatically when a project is opened; env vars exported from scripts are captured and injected into all dbt invocations
 - **Environment profiles** — define named env var sets globally and apply them per-project; switch profiles and dbt targets from the header
 - **Interactive project creation** — `dbt init` runs in a full in-browser terminal; adapter install, profiles.yml setup, and project discovery all handled automatically
-- **Column-level lineage** — click any column in the DAG to trace its data flow upstream and downstream across models; edges highlight the exact columns that feed into each transformation. Lineage is derived from each model's compiled SQL (no yml column documentation required) and computed in the background across multiple worker processes, with a live progress indicator
+- **Column-level lineage** (dbt-ui Pro) — click any column in the DAG to trace its data flow upstream and downstream across models; edges highlight the exact columns that feed into each transformation. Lineage is derived from each model's compiled SQL (no yml column documentation required) and computed in the background across multiple worker processes, with a live progress indicator. Requires an active dbt-ui Pro license
 - **Column-level test coverage heatmap** — optional overlay on the DAG showing per-column test coverage with visual buckets (untested/1 test/2 tests/3+ tests); model headers show overall coverage percentage with color-coded badges
 - **Command palette** — ⌘K / Ctrl+K to open a VS Code-style command palette. On the homepage: open any project by name, create a new project, rescan, or open global settings. Inside a project: quick navigation (go to any page), running dbt commands, and searching models
 - **Source control (Git)** — VSCode-style source control panel: view changed files, stage/unstage, Monaco diff viewer, commit, push/pull with live streaming output, branch switch/create, and commit history
@@ -92,6 +92,10 @@ task start
 | `DBT_UI_GLOBAL_REQUIREMENTS_PATH` | _(none)_ | Path to a `requirements.txt` installed into the dbt venv on every project open |
 | `DBT_UI_DATA_DIR` | `data/` (dev) / OS user-data dir (packaged app) | SQLite storage directory |
 | `DBT_UI_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `POLAR_USE_SANDBOX` | `true` | Which Polar environment (sandbox/production) license checks talk to |
+| `POLAR_SANDBOX_ORGANIZATION_ID` / `POLAR_PRODUCTION_ORGANIZATION_ID` | _(none)_ | Polar org id used to validate license keys (not a secret) |
+| `POLAR_SANDBOX_API_KEY` / `POLAR_PRODUCTION_API_KEY` | _(none)_ | Polar API key — **secret**, set in `backend/.env` only, never commit |
+| `POLAR_SANDBOX_CHECKOUT_URL` / `POLAR_PRODUCTION_CHECKOUT_URL` | _(none)_ | Checkout link shown in the in-app "Upgrade to Pro" modal |
 
 Per-project settings (stored in `project_env_vars`, injected into every dbt subprocess):
 

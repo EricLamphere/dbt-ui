@@ -1,5 +1,23 @@
 const BASE = '/api';
 
+export class ApiError extends Error {
+  status: number;
+  body: unknown;
+
+  constructor(status: number, text: string, body: unknown) {
+    super(`${status} ${text}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+export function isProFeatureRequiredError(err: unknown): boolean {
+  if (!(err instanceof ApiError) || err.status !== 403) return false;
+  const body = err.body as { error?: string } | null;
+  return body?.error === 'pro_feature_required';
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -7,7 +25,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text().catch(() => res.statusText);
-    throw new Error(`${res.status} ${text}`);
+    let body: unknown = null;
+    try {
+      const parsed = JSON.parse(text);
+      body = parsed?.detail ?? parsed;
+    } catch {
+      // not JSON — leave body null
+    }
+    throw new ApiError(res.status, text, body);
   }
   if (res.status === 204 || res.headers.get('content-length') === '0') {
     return undefined as T;
@@ -261,6 +286,15 @@ export interface ColumnLineageDto {
   checked_models: number;
   results: Record<string, Record<string, ColumnLineageEntry[]>>;
   error_message: string | null;
+}
+
+export interface LicenseStatusDto {
+  has_key: boolean;
+  entitled: boolean;
+  reason: string;
+  status: string;
+  checked_at: string | null;
+  checkout_url: string | null;
 }
 
 export interface Edge {
@@ -740,5 +774,11 @@ export const api = {
       get<{ lines: string[] }>(`/projects/${projectId}/logs/api?tail=${tail}`),
     clearApiLogs: (projectId: number) =>
       del<{ ok: boolean }>(`/projects/${projectId}/logs/api`),
+  },
+  license: {
+    get: () => get<LicenseStatusDto>('/license'),
+    set: (licenseKey: string | null) =>
+      put<LicenseStatusDto>('/license', { license_key: licenseKey }),
+    recheck: () => post<LicenseStatusDto>('/license/recheck'),
   },
 };

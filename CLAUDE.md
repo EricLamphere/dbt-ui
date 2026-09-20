@@ -19,7 +19,7 @@ Backend on `:8001`, frontend on `:5173`.
 
 ```
 backend/app/
-  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git, debug, drift, freshness, column_lineage)
+  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git, debug, drift, freshness, column_lineage, license)
   db/
     models.py     — All SQLAlchemy models (12 tables)
     engine.py     — get_session dependency
@@ -33,7 +33,10 @@ backend/app/
     interactive.py — InteractiveInitManager (ptyprocess PTY sessions; reused for terminal too)
     debug_parser.py — parse_debug_output() → structured DebugResult from dbt debug stdout
     drift.py      — diff_columns() + is_eligible_for_drift_check() — column schema diff helpers
-    column_lineage.py — SQL-first column lineage (sqlglot); prepare_lineage_jobs()/trace_job() split for ProcessPoolExecutor fan-out; build_column_lineage() sync entry point; case-insensitive parent/column matching with canonical-casing restoration (required for case-normalizing dialects like Snowflake); strips UNPIVOT from the outer SELECT so non-pivoted columns still resolve (pivoted output columns are correctly left unresolvable)
+    column_lineage.py — dbt-ui Pro feature (gated via app/licensing). Public shim only: defines the real, always-importable ColumnRef/LineageJob dataclasses (required at import time by api/column_lineage.py) and lazily delegates prepare_lineage_jobs()/trace_job()/build_column_lineage() to the private `dbt_ui_pro` package (separate repo), raising ColumnLineageUnavailable if it isn't installed. The actual sqlglot-based tracing algorithm (case-insensitive matching, UNPIVOT stripping, etc.) lives in dbt-ui-pro, not this repo.
+  licensing/
+    polar_client.py — thin async httpx client wrapping Polar's license-key validate/activate endpoints (sandbox or production per Settings.polar_use_sandbox)
+    entitlements.py — check_entitlement() with 7-day grace-period cache (LicenseState) + 6h recheck interval; a definitive "not entitled" from Polar is always trusted immediately, bypassing the grace period
     profile.py    — build_column_profile() — per-column stats from dbt show output
     show_parser.py — parse_show_json() — handles dbt 1.5+ and 1.11+ show output formats
   events/
@@ -94,7 +97,7 @@ frontend/src/
 
 ## Database Tables
 
-All 12 in `backend/app/db/models.py`:
+All 13 in `backend/app/db/models.py`:
 - `projects` — discovered dbt projects (includes `init_script_path: str` per-project init dir; `ignored: bool` to hide from list; `last_init_status: str` (idle/running/success/error), `last_init_started_at`, `last_init_finished_at`, `last_init_failed_step` — persisted init pipeline status shown on the homepage and Initialization page)
 - `init_steps` — ordered init pipeline steps per project (includes `script_path` for linked external scripts; `last_status: str` (idle/running/success/error), `last_started_at`, `last_finished_at`, `last_log: str` (capped at 200 lines) — persisted per-step run status)
 - `model_statuses` — per-model run status (idle/pending/running/success/error/warn/stale)
@@ -108,6 +111,7 @@ All 12 in `backend/app/db/models.py`:
 - `drift_snapshots` — schema drift scan results per project; stores status (running/done/error), progress counters, and results_json (array of per-model column diffs)
 - `freshness_snapshots` — source freshness scan results per project; stores status (running/done/error), target, started_at, finished_at, results_json (array of per-source freshness results), and error_message
 - `column_lineage_snapshots` — backgrounded column-level lineage scan results per project; stores status (running/done/error), total_models/checked_models progress counters, results_json (map of downstream unique_id → column → list of upstream `{node, column}` refs), error_message, and `manifest_mtime` (used to short-circuit a re-scan when `target/manifest.json` hasn't changed)
+- `license_state` — single-row (id=1) cached Polar entitlement state for this installation: `license_key`, `activation_id`, `device_id`, `entitled`, `status`, `checked_at` — see `app/licensing/entitlements.py`
 
 ## Critical Architecture Rules
 

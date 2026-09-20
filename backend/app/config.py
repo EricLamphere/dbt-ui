@@ -69,6 +69,35 @@ class Settings(BaseSettings):
     frontend_dist: Path = Field(default_factory=_default_frontend_dist)
     dbt_venv_dir: Path = Field(default_factory=_default_dbt_venv_dir)
 
+    # Polar (polar.sh) licensing — organization ID is not a secret (it just
+    # identifies which Polar org to validate license keys against), but the
+    # API key IS a secret and must never be committed; both come from
+    # backend/.env (gitignored), never hardcoded. polar_use_sandbox picks
+    # which Polar environment (and API base URL) to talk to.
+    polar_use_sandbox: bool = Field(default=True, alias="POLAR_USE_SANDBOX")
+    polar_sandbox_organization_id: str | None = Field(default=None, alias="POLAR_SANDBOX_ORGANIZATION_ID")
+    polar_sandbox_api_key: str | None = Field(default=None, alias="POLAR_SANDBOX_API_KEY")
+    polar_production_organization_id: str | None = Field(default=None, alias="POLAR_PRODUCTION_ORGANIZATION_ID")
+    polar_production_api_key: str | None = Field(default=None, alias="POLAR_PRODUCTION_API_KEY")
+    polar_sandbox_checkout_url: str | None = Field(default=None, alias="POLAR_SANDBOX_CHECKOUT_URL")
+    polar_production_checkout_url: str | None = Field(default=None, alias="POLAR_PRODUCTION_CHECKOUT_URL")
+
+    @property
+    def polar_checkout_url(self) -> str | None:
+        return self.polar_sandbox_checkout_url if self.polar_use_sandbox else self.polar_production_checkout_url
+
+    @property
+    def polar_organization_id(self) -> str | None:
+        return self.polar_sandbox_organization_id if self.polar_use_sandbox else self.polar_production_organization_id
+
+    @property
+    def polar_api_key(self) -> str | None:
+        return self.polar_sandbox_api_key if self.polar_use_sandbox else self.polar_production_api_key
+
+    @property
+    def polar_api_base(self) -> str:
+        return "https://sandbox-api.polar.sh" if self.polar_use_sandbox else "https://api.polar.sh"
+
     def resolved_database_url(self) -> str:
         if self.database_url:
             return self.database_url

@@ -150,6 +150,28 @@ tasks:
 
   # ---- Package (Tauri desktop app) ----
 
+  package:pro:
+    desc: |
+      Maintainer-only. Install the private dbt-ui-pro package (column-lineage
+      algorithm) from a sibling checkout into the backend venv, so it gets
+      bundled into the next `task package:backend`/`package:app` build.
+      Contributors without access to dbt-ui-pro can skip this entirely —
+      the public build works fine without it (column lineage is simply
+      unavailable, same as the entitlement-gated behavior for non-Pro users).
+    dir: "{{.BACKEND_DIR}}"
+    vars:
+      PRO_DIR: '{{.PRO_DIR | default "../dbt-ui-pro"}}'
+    deps:
+      - task: ensure:backend
+    cmds:
+      - |
+        if [ ! -d "{{.PRO_DIR}}" ]; then
+          echo "dbt-ui-pro not found at {{.PRO_DIR}} — clone it as a sibling of dbt-ui/, or pass PRO_DIR=<path>."
+          exit 1
+        fi
+        .venv/bin/pip install -q -e "{{.PRO_DIR}}"
+        echo "dbt-ui-pro installed — next 'task package:backend' will bundle it."
+
   package:backend:
     desc: Bundle the FastAPI backend into a standalone executable via PyInstaller
     dir: "{{.BACKEND_DIR}}"

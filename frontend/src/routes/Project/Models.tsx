@@ -16,13 +16,14 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { api, type ModelNode, type GraphDto } from '../../lib/api';
+import { api, isProFeatureRequiredError, type ModelNode, type GraphDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 import ModelNodeComponent from './components/ModelNode';
 import NewModelModal from './components/NewModelModal';
 import NavRail from './components/NavRail';
 import { SidePane, type PreviewCache, type FailedRowsCache } from './components/SidePane';
 import DagFilterBar from './components/DagFilterBar';
+import { UpgradeModal } from './components/UpgradeModal';
 import { computeLayout, NODE_HEIGHT } from './lib/layout';
 import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserializeFilter } from './lib/dagFilter';
 import { ColumnLineageContext, type ColumnLineageContextValue } from './lib/columnLineageContext';
@@ -172,17 +173,24 @@ export default function ModelsPage() {
 
   const [columnLineageEnabled, setColumnLineageEnabled] = useState(false);
   const [columnLineageProgress, setColumnLineageProgress] = useState<{ checked: number; total: number } | null>(null);
-  const { data: columnLineageSnapshot, isFetching: columnLineageFetching } = useQuery({
+  const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const {
+    data: columnLineageSnapshot,
+    isFetching: columnLineageFetching,
+    error: columnLineageError,
+  } = useQuery({
     queryKey: ['column-lineage', id],
     queryFn: () => api.models.columnLineage(id),
     refetchInterval: false,
     staleTime: Infinity,
     enabled: columnLineageEnabled,
+    retry: (failureCount, err) => !isProFeatureRequiredError(err) && failureCount < 3,
   });
   // Only treat lineage as "loaded" once a snapshot has actually finished computing —
   // a `running` snapshot has partial/empty results and shouldn't be rendered as final.
   const columnLineage = columnLineageSnapshot?.status === 'done' ? columnLineageSnapshot : undefined;
   const columnLineageLoading = columnLineageFetching || columnLineageSnapshot?.status === 'running';
+  const columnLineageLocked = isProFeatureRequiredError(columnLineageError);
 
   // Pre-select model from ?model=<unique_id> query param (takes priority),
   // or from sessionStorage. Initialise directly from cache so the selection is
@@ -572,13 +580,17 @@ export default function ModelsPage() {
             columnLineageLoaded={!!columnLineage}
             columnLineageLoading={columnLineageLoading}
             columnLineageProgress={columnLineageProgress}
+            columnLineageLocked={columnLineageLocked}
+            onColumnLineageLockedClick={() => setUpgradeModalOpen(true)}
             onLoadColumnLineage={() => {
               setColumnLineageEnabled(true);
               // Kick off (or piggyback on) a background scan. A 409 just means one
               // is already running for this project — that's fine, the existing
               // run's progress/finished events will update our query either way.
               api.models.startColumnLineage(id).catch((err) => {
-                if (!(err instanceof Error) || !err.message.startsWith('409')) {
+                if (isProFeatureRequiredError(err)) {
+                  setUpgradeModalOpen(true);
+                } else if (!(err instanceof Error) || !err.message.startsWith('409')) {
                   console.error('failed to start column lineage scan', err);
                 }
               }).finally(() => {
@@ -586,6 +598,13 @@ export default function ModelsPage() {
               });
             }}
           />
+
+          {upgradeModalOpen && (
+            <UpgradeModal
+              feature="Column-level lineage"
+              onClose={() => setUpgradeModalOpen(false)}
+            />
+          )}
 
           {/* React Flow */}
           <div className="flex-1 overflow-hidden">
