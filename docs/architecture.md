@@ -90,9 +90,10 @@ dbt-ui/
 │   │   │   └── sse.ts               # useProjectEvents, useInitSessionEvents, useTerminalEvents
 │   │   ├── components/
 │   │   │   ├── Header.tsx           # Persistent nav; Profile + Target dropdowns on project pages (reads projectId from pathname)
+│   │   │   ├── HomeCommandPalette.tsx # ⌘K palette for Home.tsx — open project by name, new project, rescan, global settings
 │   │   │   └── StatusBadge.tsx      # Status color chip
 │   │   └── routes/
-│   │       ├── Home.tsx             # Project list, search, rescan, new project modal, global settings modal
+│   │       ├── Home.tsx             # Project list, search, rescan, new project modal, global settings modal; own ⌘K listener → HomeCommandPalette
 │   │       └── Project/
 │   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet overflow-auto>); global ⌘K listener; CommandPaletteContext
 │   │           ├── lib/
@@ -674,7 +675,10 @@ Session state (`sessionStorage`) persists open file path, expanded tree nodes, a
 
 ### 16. Command Palette
 
-`ProjectLayout.tsx` listens for ⌘K / Ctrl+K globally and opens `CommandPalette.tsx` (portal-rendered at z-[60]). The palette provides:
+Two separate palettes, since the homepage sits outside `ProjectLayout` and has no project context to build project-scoped commands from:
+
+- **Homepage** (`Home.tsx` + `components/HomeCommandPalette.tsx`) — its own ⌘K / Ctrl+K listener opens `HomeCommandPalette`, offering "Open [project name]" for every non-ignored project plus New project / Rescan projects / Global settings actions.
+- **Inside a project** — `ProjectLayout.tsx` listens for ⌘K / Ctrl+K globally and opens `CommandPalette.tsx` (portal-rendered at z-[60]). The palette provides:
 
 **Navigation commands** (always visible when query is empty):
 - Go to [page name] for each project route (DAG, Files, Docs, Workspace, Git, Environment, Init, Health)
