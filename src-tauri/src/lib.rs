@@ -1,28 +1,27 @@
+use std::process::Child;
 use std::time::Duration;
 
 use tauri::{Manager, RunEvent};
-use tauri_plugin_shell::process::CommandChild;
-use tauri_plugin_shell::ShellExt;
 
 const BACKEND_HEALTH_URL: &str = "http://127.0.0.1:8001/api/health";
 const BACKEND_POLL_TIMEOUT: Duration = Duration::from_secs(20);
 const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
-/// Holds the sidecar's child handle for the lifetime of the app so it can be
-/// killed explicitly on shutdown — Tauri does not guarantee sidecar cleanup on
-/// every exit path (e.g. force-quit) without this.
-struct BackendProcess(std::sync::Mutex<Option<CommandChild>>);
+/// Holds the backend process's child handle for the lifetime of the app so it
+/// can be killed explicitly on shutdown — nothing else guarantees its cleanup
+/// on every exit path (e.g. force-quit) without this.
+struct BackendProcess(std::sync::Mutex<Option<Child>>);
 
-/// Kills the sidecar and any of its direct children.
+/// Kills the backend process and any of its direct children.
 ///
-/// The PyInstaller one-file backend binary forks a `multiprocessing.resource_tracker`
+/// The PyInstaller-bundled backend forks a `multiprocessing.resource_tracker`
 /// helper process (spawned the first time anything touches `multiprocessing`, e.g.
 /// via `ProcessPoolExecutor` import machinery). That helper is deliberately designed
 /// to survive a plain kill of its parent so it can clean up shared resources, which
 /// left it (and the port 8001 listener) orphaned when we only killed the tracked PID.
 /// `pkill -P <pid>` reaps any such children before/alongside killing the parent.
-fn kill_backend_tree(child: CommandChild) {
-    let pid = child.pid();
+fn kill_backend_tree(mut child: Child) {
+    let pid = child.id();
     let _ = std::process::Command::new("pkill")
         .args(["-9", "-P", &pid.to_string()])
         .status();
@@ -31,7 +30,6 @@ fn kill_backend_tree(child: CommandChild) {
 
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_shell::init())
         .manage(BackendProcess(std::sync::Mutex::new(None)))
         .setup(|app| {
             let resource_dir = app
@@ -45,14 +43,23 @@ pub fn run() {
                 .app_data_dir()
                 .expect("failed to resolve app data dir");
 
-            let shell = app.shell();
-            let (_rx, child) = shell
-                .sidecar("dbt-ui-backend")
-                .expect("failed to create dbt-ui-backend sidecar command")
+            // Spawned directly from the onedir resource folder rather than as a
+            // Tauri sidecar/externalBin: PyInstaller onefile mode re-extracts the
+            // whole interpreter into a fresh temp dir (and macOS Gatekeeper
+            // re-validates that "new" unsigned binary) on every single launch,
+            // adding ~7s to startup. onedir's executable lives at a fixed path on
+            // disk across launches, so extraction and the Gatekeeper check each
+            // only happen once, ever.
+            let backend_exe = resource_dir
+                .join("binaries")
+                .join("dbt-ui-backend")
+                .join("dbt-ui-backend");
+
+            let child = std::process::Command::new(&backend_exe)
                 .env("DBT_UI_FRONTEND_DIST", frontend_dist.to_string_lossy().to_string())
                 .env("DBT_UI_DATA_DIR", data_dir.to_string_lossy().to_string())
                 .spawn()
-                .expect("failed to spawn dbt-ui-backend sidecar");
+                .expect("failed to spawn dbt-ui-backend");
 
             app.state::<BackendProcess>()
                 .0

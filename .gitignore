@@ -22,6 +22,7 @@ dist/
 # Packaging (Tauri + PyInstaller build outputs)
 backend/build/
 src-tauri/target/
+src-tauri/binaries/
 
 # App data (runtime-generated, never committed)
 data/

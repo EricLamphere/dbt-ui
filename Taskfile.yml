@@ -167,15 +167,15 @@ tasks:
       - npm run build
 
   package:app:
-    desc: Build the full Tauri desktop app (backend sidecar + frontend + native shell)
+    desc: Build the full Tauri desktop app (backend resource + frontend + native shell)
     deps:
       - task: package:backend
       - task: package:frontend
     cmds:
-      - rm -rf src-tauri/binaries/frontend_dist
+      - rm -rf src-tauri/binaries/frontend_dist src-tauri/binaries/dbt-ui-backend
       - mkdir -p src-tauri/binaries
       - cp -r frontend/dist src-tauri/binaries/frontend_dist
-      - cp backend/dist/dbt-ui-backend src-tauri/binaries/dbt-ui-backend-$(rustc -Vv | grep host | cut -d' ' -f2)
+      - cp -r backend/dist/dbt-ui-backend src-tauri/binaries/dbt-ui-backend
       - cd src-tauri && cargo tauri build
 
   package:install:
