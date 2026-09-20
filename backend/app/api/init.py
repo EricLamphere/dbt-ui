@@ -99,12 +99,21 @@ async def _sync_steps_from_disk(
     )
     has_project_requirements = req_var_result.scalar_one_or_none() is not None
 
-    order_counter = 0
+    # New rows are appended after the highest order already in use — never
+    # derived from position-in-BASE_STEPS. That counter used to advance once
+    # per step *visited* (existing or new) regardless of what order value
+    # that step actually already had in the DB, so a step created in an
+    # earlier sync (e.g. "pip install" appearing only after REQUIREMENTS_PATH
+    # was set) could land on the same order as an unrelated pre-existing
+    # step. Existing rows' order is never touched here, since that's how a
+    # user's drag-and-drop reorder (persisted via the reorder endpoint)
+    # survives this resync running again on the next page load.
+    next_new_order = (max((s.order for s in existing), default=-1)) + 1
 
     def next_order() -> int:
-        nonlocal order_counter
-        order_counter += 1
-        return order_counter - 1
+        nonlocal next_new_order
+        next_new_order += 1
+        return next_new_order - 1
 
     for base_name, _ in BASE_STEPS:
         if base_name == "base: pip install":
@@ -120,8 +129,6 @@ async def _sync_steps_from_disk(
                             enabled=True,
                         )
                     )
-                else:
-                    next_order()
             else:
                 if existing_pip is not None:
                     await session.delete(existing_pip)
@@ -138,8 +145,6 @@ async def _sync_steps_from_disk(
                     enabled=True,
                 )
             )
-        else:
-            next_order()
 
     scripts = list_scripts(Path(project.path), project.init_script_path or INIT_DIR_NAME)
     script_names = {f"custom: {s.name}" for s in scripts}

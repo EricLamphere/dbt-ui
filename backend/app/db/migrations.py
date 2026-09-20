@@ -301,6 +301,38 @@ async def run_migrations() -> None:
         )
         await session.commit()
 
+        # One-time fixup: a bug in _sync_steps_from_disk (fixed in code) could
+        # assign a newly-appearing base step (e.g. "base: pip install", which
+        # only appears once REQUIREMENTS_PATH is set) the same `order` value
+        # as an unrelated pre-existing step, since the old counter advanced
+        # once per BASE_STEPS entry *visited* rather than being derived from
+        # order values actually already in use. Duplicate orders made
+        # ORDER BY init_steps.order non-deterministic across identical
+        # queries, which surfaced as steps silently reordering themselves
+        # and drag-and-drop reordering appearing broken. Renumber, per
+        # project, using each row's existing (order, id) as the stable sort
+        # key — this only breaks ties; it never changes the relative order
+        # of two rows that already had distinct order values, so a real
+        # user-driven reorder from before this fixup is preserved.
+        if await _table_exists(session, "init_steps"):
+            result = await session.execute(
+                text('SELECT id, project_id, "order" FROM init_steps ORDER BY project_id, "order", id')
+            )
+            rows = result.fetchall()
+            by_project: dict[int, list[tuple[int, int]]] = {}
+            for row_id, project_id, order in rows:
+                by_project.setdefault(project_id, []).append((row_id, order))
+            for project_id, project_rows in by_project.items():
+                has_collision = len({order for _, order in project_rows}) != len(project_rows)
+                if not has_collision:
+                    continue
+                for new_order, (row_id, _old_order) in enumerate(project_rows):
+                    await session.execute(
+                        text('UPDATE init_steps SET "order" = :new_order WHERE id = :row_id'),
+                        {"new_order": new_order, "row_id": row_id},
+                    )
+            await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()

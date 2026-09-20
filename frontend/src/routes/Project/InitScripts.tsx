@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api, type InitStepDto } from '../../lib/api';
@@ -10,6 +10,13 @@ import { StatusLogPopover } from './components/StatusLogPopover';
 // ---- types ----
 
 type StepStatus = 'idle' | 'running' | 'success' | 'error';
+
+// Stable reference for the "no data yet" default below — `data: steps = []`
+// would otherwise allocate a brand-new empty array on every render where the
+// query hasn't resolved, which fed a `useEffect(() => setLocalSteps(steps),
+// [steps])` an ever-changing "new" array and caused a render loop (visible
+// as React's "Maximum update depth exceeded" warning on this page).
+const EMPTY_STEPS: InitStepDto[] = [];
 
 interface StepRunState {
   status: StepStatus;
@@ -82,7 +89,7 @@ export default function InitScriptsPage() {
     refetchOnMount: 'always',
   });
 
-  const { data: steps = [], isLoading } = useQuery({
+  const { data: steps = EMPTY_STEPS, isLoading } = useQuery({
     queryKey: ['init-steps', id],
     queryFn: () => api.init.steps(id),
     refetchOnMount: 'always',
@@ -206,11 +213,172 @@ export default function InitScriptsPage() {
     return () => document.removeEventListener('mousedown', handleOutside);
   }, [addDropdownOpen]);
   const [localSteps, setLocalSteps] = useState<InitStepDto[]>([]);
-  const dragIndexRef = useRef<number | null>(null);
+  // Pointer-based drag, not native HTML5 drag-and-drop: WKWebView (Tauri's
+  // macOS webview) has a long-standing bug where dragover/drop don't
+  // reliably fire for in-page reordering — dragstart fires, then the OS-level
+  // drag session silently goes straight to dragend without ever crossing a
+  // drop target. Chromium's implementation is more complete, so testing only
+  // in a normal browser never surfaced this. Plain pointer events don't
+  // involve the OS drag subsystem at all, so they work the same everywhere.
+  const dragFromRef = useRef<number | null>(null);
+  const dragStartIndexRef = useRef<number | null>(null);
+  // Keyed by step name, not array index: the dragged tile's logical index
+  // (dragFromRef) changes every time it crosses a sibling during the drag,
+  // but it's still the SAME DOM node the whole time. Indexing this by
+  // position (the array-index version this replaced) looked up whatever
+  // tile now rendered at that position after a reorder — a different node —
+  // so the "follow the cursor" transform silently applied to the wrong
+  // (or no) element after the first swap.
+  const tileRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const draggedNameRef = useRef<string | null>(null);
+  // Cursor Y and the dragged tile's own natural (untransformed) top edge,
+  // both re-baselined every time the array reorders — see the
+  // useLayoutEffect below. Each pointermove's transform is just "how far
+  // has the cursor moved since the last time we re-baselined", so a swap
+  // (which shifts the tile's natural flex position by about one tile
+  // height) never stacks its own layout shift on top of the already-correct
+  // cursor-tracking offset — the classic bug this replaced, where the tile
+  // visibly jumped away from the cursor after each swap.
+  const baselineClientYRef = useRef(0);
+  const baselineTransformYRef = useRef(0);
+  // Set right before a swap reorders localSteps, to whatever the dragged
+  // tile's natural (untransformed) top edge was at that instant. The
+  // useLayoutEffect below reads it back after React has reflowed the list
+  // with the new order, to measure exactly how far the reflow itself moved
+  // the tile, and folds that into baselineTransformYRef so the visible
+  // (transformed) position never jumps.
+  const preSwapNaturalTopRef = useRef<number | null>(null);
+  // Genuinely discrete state — only changes on drag start/end — purely for
+  // the isDragging visual (dimming the tile being dragged).
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+  // Ref mirror of localSteps so the pointerup handler below (captured once
+  // per effect run, at drag start) always mutates with the latest reordered
+  // list rather than a stale closure from when the drag began.
+  const localStepsRef = useRef(localSteps);
+  useEffect(() => {
+    localStepsRef.current = localSteps;
+  }, [localSteps]);
 
   useEffect(() => {
     setLocalSteps(steps);
   }, [steps]);
+
+  // Runs synchronously right after React reflows the list with a new order
+  // (before the browser paints), so it can measure exactly how far that
+  // reflow moved the dragged tile's natural position and fold that shift
+  // into the transform. Without this, the transform kept accumulating
+  // relative to the tile's position at drag START, so every swap's own
+  // ~one-tile-height layout shift stacked on top of the (already correct)
+  // cursor-tracking offset — visibly kicking the tile away from the cursor
+  // with each crossing, worse the further it had already traveled.
+  useLayoutEffect(() => {
+    const draggedName = draggedNameRef.current;
+    const preSwapTop = preSwapNaturalTopRef.current;
+    if (draggedName === null || preSwapTop === null) return;
+    const el = tileRefs.current.get(draggedName);
+    if (!el) return;
+
+    const prevTransform = el.style.transform;
+    el.style.transform = '';
+    const postSwapNaturalTop = el.getBoundingClientRect().top;
+    el.style.transform = prevTransform;
+
+    const reflowShift = postSwapNaturalTop - preSwapTop;
+    baselineTransformYRef.current -= reflowShift;
+    el.style.transform = `translateY(${baselineTransformYRef.current}px)`;
+
+    preSwapNaturalTopRef.current = null;
+  }, [localSteps]);
+
+  // Global pointermove/pointerup while a drag is active — attached to
+  // `document` (not the tile) so the drag keeps tracking even if the pointer
+  // briefly leaves a tile's bounds between two adjacent tiles.
+  useEffect(() => {
+    if (dragIndex === null) return;
+
+    const handlePointerMove = (e: PointerEvent) => {
+      const from = dragFromRef.current;
+      const draggedName = draggedNameRef.current;
+      if (from === null || draggedName === null) return;
+
+      // Move the dragged tile with the cursor. Written straight to the DOM
+      // (not via setState) so this tracks every pointermove at full frame
+      // rate — routing it through React state would mean a re-render per
+      // pixel of movement. The transform is "the offset in effect at the
+      // last baseline" plus "how far the cursor has moved since then" — NOT
+      // raw distance from where the drag first started. When a swap below
+      // reorders the array, the tile's own natural (untransformed) flex
+      // position shifts by about one tile height on the next render; if the
+      // transform kept accumulating from the original drag-start position,
+      // that layout shift stacked on top of the cursor-tracking offset and
+      // visibly kicked the tile away from the cursor with every swap.
+      // Re-baselining on each swap (below) means this always measures
+      // motion relative to the tile's current resting spot, so the two
+      // effects never combine.
+      const transformY = baselineTransformYRef.current + (e.clientY - baselineClientYRef.current);
+      const draggedEl = tileRefs.current.get(draggedName);
+      if (draggedEl) {
+        draggedEl.style.transform = `translateY(${transformY}px)`;
+      }
+
+      // Hit-test against each OTHER tile's current bounding box rather than
+      // the event target, since the pointer capture is on the handle, not
+      // the tile the cursor is currently over.
+      const names = localStepsRef.current.map((s) => s.name);
+      for (let i = 0; i < names.length; i++) {
+        if (i === from) continue;
+        const el = tileRefs.current.get(names[i]);
+        if (!el) continue;
+        const rect = el.getBoundingClientRect();
+        if (e.clientY >= rect.top && e.clientY <= rect.bottom) {
+          // The dragged tile's natural (untransformed) top edge right now,
+          // derived from its current rendered position minus the transform
+          // already applied to it — read BEFORE the reorder below changes
+          // its natural position. The useLayoutEffect after this render
+          // compares this to the tile's natural top once the swap has
+          // settled, and folds the difference into the transform so the
+          // rendered pixel position doesn't jump.
+          if (draggedEl) {
+            preSwapNaturalTopRef.current = draggedEl.getBoundingClientRect().top - transformY;
+          }
+          setLocalSteps((prev) => {
+            const next = [...prev];
+            const [moved] = next.splice(from, 1);
+            next.splice(i, 0, moved);
+            return next;
+          });
+          dragFromRef.current = i;
+          setDragIndex(i);
+          baselineTransformYRef.current = transformY;
+          baselineClientYRef.current = e.clientY;
+          break;
+        }
+      }
+    };
+
+    const handlePointerUp = () => {
+      const moved = dragFromRef.current !== dragStartIndexRef.current;
+      const draggedName = draggedNameRef.current;
+      if (draggedName !== null) {
+        const draggedEl = tileRefs.current.get(draggedName);
+        if (draggedEl) draggedEl.style.transform = '';
+      }
+      dragFromRef.current = null;
+      dragStartIndexRef.current = null;
+      draggedNameRef.current = null;
+      setDragIndex(null);
+      if (moved) {
+        reorderMutation.mutate(localStepsRef.current.map((s) => s.name));
+      }
+    };
+
+    document.addEventListener('pointermove', handlePointerMove);
+    document.addEventListener('pointerup', handlePointerUp);
+    return () => {
+      document.removeEventListener('pointermove', handlePointerMove);
+      document.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [dragIndex, reorderMutation]);
 
   if (isLoading) {
     return (
@@ -220,30 +388,17 @@ export default function InitScriptsPage() {
     );
   }
 
-  const handleDragStart = (idx: number) => {
-    dragIndexRef.current = idx;
-  };
-
-  const handleDragOver = (e: React.DragEvent, idx: number) => {
+  const handlePointerDown = (e: React.PointerEvent, idx: number, name: string) => {
+    // Suppress the browser's default text-selection drag — without this,
+    // moving the pointer across sibling tiles during a drag highlights their
+    // text the same way a click-drag text selection would.
     e.preventDefault();
-    const from = dragIndexRef.current;
-    if (from === null || from === idx) return;
-    setLocalSteps((prev) => {
-      const next = [...prev];
-      const [moved] = next.splice(from, 1);
-      next.splice(idx, 0, moved);
-      dragIndexRef.current = idx;
-      return next;
-    });
-  };
-
-  const handleDrop = () => {
-    dragIndexRef.current = null;
-    reorderMutation.mutate(localSteps.map((s) => s.name));
-  };
-
-  const handleDragEnd = () => {
-    dragIndexRef.current = null;
+    dragFromRef.current = idx;
+    dragStartIndexRef.current = idx;
+    draggedNameRef.current = name;
+    baselineClientYRef.current = e.clientY;
+    baselineTransformYRef.current = 0;
+    setDragIndex(idx);
   };
 
   const handleDelete = (step: InitStepDto) => {
@@ -324,7 +479,7 @@ export default function InitScriptsPage() {
             <p className="text-sm text-gray-600 py-4">No steps configured yet.</p>
           )}
 
-          <div className="flex flex-col gap-3">
+          <div className={`flex flex-col gap-3 ${dragIndex !== null ? 'select-none' : ''}`}>
             {localSteps.map((step, idx) => (
               <StepTile
                 key={step.name}
@@ -338,11 +493,12 @@ export default function InitScriptsPage() {
                 onEdit={!step.is_base ? () => setEditStep(step) : undefined}
                 onDelete={!step.is_base ? () => handleDelete(step) : undefined}
                 onCapturedVarsChange={(vars) => capturedVarsMutation.mutate({ name: step.name, vars })}
-                onDragStart={() => handleDragStart(idx)}
-                onDragOver={(e) => handleDragOver(e, idx)}
-                onDrop={handleDrop}
-                onDragEnd={handleDragEnd}
-                isDragging={dragIndexRef.current === idx}
+                tileRef={(el) => {
+                  if (el) tileRefs.current.set(step.name, el);
+                  else tileRefs.current.delete(step.name);
+                }}
+                onHandlePointerDown={(e) => handlePointerDown(e, idx, step.name)}
+                isDragging={dragIndex === idx}
               />
             ))}
           </div>
@@ -414,14 +570,12 @@ interface StepTileProps {
   onEdit?: () => void;
   onDelete?: () => void;
   onCapturedVarsChange: (vars: string[]) => void;
-  onDragStart: () => void;
-  onDragOver: (e: React.DragEvent) => void;
-  onDrop: () => void;
-  onDragEnd: () => void;
+  tileRef: (el: HTMLDivElement | null) => void;
+  onHandlePointerDown: (e: React.PointerEvent) => void;
   isDragging: boolean;
 }
 
-function StepTile({ step, projectId, runState, onToggle, onRunStep, onEdit, onDelete, onCapturedVarsChange, onDragStart, onDragOver, onDrop, onDragEnd, isDragging }: StepTileProps) {
+function StepTile({ step, projectId, runState, onToggle, onRunStep, onEdit, onDelete, onCapturedVarsChange, tileRef, onHandlePointerDown, isDragging }: StepTileProps) {
   const displayName = step.name.replace(/^(base|custom):\s*/, '');
   const prefix = step.is_base ? 'base' : 'custom';
   const status: StepStatus = runState?.status ?? 'idle';
@@ -474,20 +628,30 @@ function StepTile({ step, projectId, runState, onToggle, onRunStep, onEdit, onDe
 
   return (
     <div
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-      onDragEnd={onDragEnd}
-      className={`rounded-xl border px-4 py-3 flex flex-col gap-2 transition-all
-        ${isDragging ? 'opacity-40 scale-[0.99]' : ''}
+      ref={tileRef}
+      className={`rounded-xl border px-4 py-3 flex flex-col gap-2
+        ${isDragging
+          // The dragged tile's transform is written directly to the DOM on
+          // every pointermove (see the effect above) so it tracks the
+          // cursor at full frame rate — a CSS transition on transform here
+          // would fight that, easing toward each new position instead of
+          // following it 1:1. Other (non-dragged) tiles keep transition-all
+          // so their reflow when the array reorders reads as a smooth
+          // "make room" shift instead of an instant snap.
+          ? 'opacity-90 shadow-2xl scale-[1.02] z-10 relative'
+          : 'transition-all'}
         ${step.enabled
           ? 'bg-surface-panel border-gray-800'
           : 'bg-surface-panel/50 border-gray-800/50 opacity-60'}`}
     >
       {/* Header row */}
       <div className="flex items-center gap-2.5">
-        <span className="text-gray-700 hover:text-gray-500 cursor-grab active:cursor-grabbing shrink-0 select-none text-sm leading-none">⠿</span>
+        <span
+          onPointerDown={onHandlePointerDown}
+          className="text-gray-700 hover:text-gray-500 cursor-grab active:cursor-grabbing shrink-0 select-none text-sm leading-none touch-none"
+        >
+          ⠿
+        </span>
 
         {/* Enable toggle */}
         <button

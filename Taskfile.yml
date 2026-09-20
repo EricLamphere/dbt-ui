@@ -177,3 +177,25 @@ tasks:
       - cp -r frontend/dist src-tauri/binaries/frontend_dist
       - cp backend/dist/dbt-ui-backend src-tauri/binaries/dbt-ui-backend-$(rustc -Vv | grep host | cut -d' ' -f2)
       - cd src-tauri && cargo tauri build
+
+  package:install:
+    desc: Install the last-built app bundle to /Applications (macOS; run package:app first)
+    cmds:
+      - |
+        BUNDLE="src-tauri/target/release/bundle/macos/dbt-ui.app"
+        if [ ! -d "$BUNDLE" ]; then
+          echo "No build found at $BUNDLE — run 'task package:app' first."
+          exit 1
+        fi
+        pkill -9 -f dbt-ui-backend 2>/dev/null || true
+        pkill -9 -f "dbt-ui.app" 2>/dev/null || true
+        sleep 1
+        rm -rf /Applications/dbt-ui.app
+        cp -r "$BUNDLE" /Applications/dbt-ui.app
+        echo "Installed to /Applications/dbt-ui.app"
+
+  package:reinstall:
+    desc: Build the desktop app and install it to /Applications in one step (macOS)
+    cmds:
+      - task: package:app
+      - task: package:install
