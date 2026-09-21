@@ -273,7 +273,7 @@ async def _generate_docs(
     profiles_args = ["--profiles-dir", project_path] if (project / "profiles.yml").exists() else []
 
     async def _run_and_log(args: list[str]) -> tuple[bool, list[str]]:
-        append_project_log(project_path, f">>> {' '.join(args[1:])}", project_id)
+        append_project_log(project_path, f">>> dbt {' '.join(args[1:])}", project_id)
         try:
             proc = await asyncio.create_subprocess_exec(
                 *args,
@@ -293,7 +293,7 @@ async def _generate_docs(
             lines.append(line)
         rc = await proc.wait()
         status = "OK" if rc == 0 else f"FAILED (rc={rc})"
-        append_project_log(project_path, f"<<< {' '.join(args[1:])} {status}", project_id)
+        append_project_log(project_path, f"<<< dbt {' '.join(args[1:])} {status}", project_id)
         combined = "\n".join(lines).lower()
         unrecognised = any(kw in combined for kw in ("unrecognized", "no such option", "invalid value"))
         return rc == 0 and not unrecognised, lines
