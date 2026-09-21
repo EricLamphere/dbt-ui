@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Check, Lock, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Check, Lock, Settings, Sparkles, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
+import { GlobalSettingsModal } from '../components/GlobalSettingsModal';
 
 const REASON_COPY: Record<string, string> = {
   not_entitled: 'Your subscription is no longer active. Renew or enter a new license key to continue.',
@@ -55,6 +56,7 @@ export default function Pricing() {
   const qc = useQueryClient();
   const [licenseKey, setLicenseKey] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [manageSubscriptionOpen, setManageSubscriptionOpen] = useState(false);
 
   const { data: license } = useQuery({
     queryKey: ['license'],
@@ -225,10 +227,23 @@ export default function Pricing() {
       )}
 
       {isPro && (
-        <div className="flex items-center justify-center gap-1.5 pb-6 text-center text-brand-300 text-sm font-medium">
-          <Lock size={14} />
-          dbt-ui Pro is active on this device
+        <div className="flex flex-col items-center gap-3 pb-6">
+          <div className="flex items-center justify-center gap-1.5 text-center text-brand-300 text-sm font-medium">
+            <Lock size={14} />
+            dbt-ui Pro is active on this device
+          </div>
+          <button
+            onClick={() => setManageSubscriptionOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-gray-700 text-gray-400 hover:text-gray-200 hover:border-gray-600 transition-colors"
+          >
+            <Settings size={12} />
+            Manage subscription
+          </button>
         </div>
+      )}
+
+      {manageSubscriptionOpen && (
+        <GlobalSettingsModal onClose={() => setManageSubscriptionOpen(false)} initialTab="subscription" />
       )}
     </div>
   );

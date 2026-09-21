@@ -270,6 +270,9 @@ license_state
   entitled        BOOLEAN default false
   status          TEXT(32) default 'unset'  -- unset | granted | not_entitled | ... (mirrors Polar's status)
   checked_at      DATETIME (nullable)  -- last time entitlement was checked against Polar
+  customer_id     TEXT (nullable)  -- Polar customer id, captured from validate(); required to cancel a subscription
+  license_key_id  TEXT (nullable)  -- Polar's internal id for this key (not the key string), captured from validate(); required to look up activation count
+  limit_activations INTEGER (nullable)  -- max devices allowed on this key (from Polar's "Limit Activations" benefit); null means unlimited
 ```
 
 ---
@@ -304,9 +307,11 @@ POST   /api/projects/{id}/column-lineage/start            start async column lin
 GET    /api/projects/{id}/column-lineage                 get the latest ColumnLineageSnapshot for a project — Pro feature, 403 if not entitled
 GET    /api/projects/{id}/column-lineage/{snapshot_id}   get a specific ColumnLineageSnapshot by id — Pro feature, 403 if not entitled
 
-GET    /api/license                                      current cached entitlement status (does not force a fresh Polar check)
+GET    /api/license                                      current cached entitlement status (does not force a fresh Polar check); includes the plaintext license_key and can_cancel
 PUT    /api/license                                       set (or clear, if license_key is null) the license key; immediately checks it against Polar
 POST   /api/license/recheck                               force an immediate Polar check, bypassing the recheck interval
+POST   /api/license/cancel                                cancel the active subscription at period end via Polar; 502 if no customer_id on record or the Polar call fails
+GET    /api/license/activations                          live count of devices currently activated against this license key (not cached); 502 if no license_key_id on record or the Polar call fails
 
 POST   /api/projects/{id}/debug                          run dbt debug, return structured check results + raw log
 GET    /api/projects/{id}/debug/last                     get result of the most recent debug run (from cache)
@@ -609,7 +614,13 @@ Entitlement resolution (`app/licensing/entitlements.py`) wraps a thin async Pola
 4. `ActivationLimitReached` (403 from activate, seat limit) returns `reason="activation_limit_reached"` **without** caching, so a retry after freeing a seat re-attempts activation instead of waiting out `RECHECK_INTERVAL`.
 5. Any other `PolarError` (network failure, unexpected response) falls back to `_grace_period_result()`: if the last cached result was `entitled=True` and within `GRACE_PERIOD` (7 days) of `checked_at`, returns `reason="grace_period"` (still entitled); otherwise `reason="unreachable"` (not entitled).
 
-`api/license.py` exposes this as `GET/PUT /api/license` + `POST /api/license/recheck` (see API Routes). `polar_use_sandbox` / the `polar_organization_id` / `polar_api_key` / `polar_api_base` properties on `Settings` (`config.py`) pick sandbox vs. production Polar credentials and API base URL.
+`api/license.py` exposes this as `GET/PUT /api/license` + `POST /api/license/recheck` + `POST /api/license/cancel` + `GET /api/license/activations` (see API Routes). `polar_use_sandbox` / the `polar_organization_id` / `polar_api_key` / `polar_api_base` properties on `Settings` (`config.py`) pick sandbox vs. production Polar credentials and API base URL.
+
+**Cancellation** (`entitlements.cancel_subscription()`) is a separate flow from entitlement checking, since Polar's license-key validate/activate endpoints are unauthenticated and don't expose subscription management. It uses the organization API key (`polar_api_key`, server-side only, never sent to the frontend) to mint a short-lived customer session token (`POST /v1/customer-sessions/`, keyed on the `customer_id` captured from a prior `validate()` call), then lists and cancels the customer's active subscription(s) via the customer-portal subscriptions API (`GET`/`DELETE /v1/customer-portal/subscriptions/...`). Cancellation is **at period end** — Polar keeps the subscription (and Pro access) active until the current billing period ends; `cancel_subscription()` deliberately does not clear local license state, so the normal `RECHECK_INTERVAL` polling picks up the eventual `not_entitled` result from Polar on its own once the period actually ends.
+
+**Activation visibility** (`entitlements.get_activation_count()`) exists because a license key is a bare shared secret — Polar's activation-limit benefit (`limit_activations`, currently 2 devices per key, configured in the Polar dashboard) is the only thing stopping a key from being shared/leaked and used by strangers; nothing else in this system detects or prevents it. This function surfaces how many devices are *currently* activated (via the org-authenticated `GET /v1/license-keys/{license_key_id}`, whose `activations` array is counted) so a legitimate user can notice unexpected activity — e.g. more devices than they own — and go deactivate the extra one from their Polar customer portal. It's a live, uncached look-up (not baked into `check_entitlement()`'s cache) since it's only fetched on demand when the Subscription UI is open, not on every entitlement check.
+
+The Global Settings modal's "Subscription" tab (`components/SubscriptionSection.tsx`, wired into `components/GlobalSettingsModal.tsx`) is the UI for all of this — installation-wide, not per-project, matching where the license itself lives. It shows the license key (masked by default, revealed via an eye-icon toggle — `GET /api/license` now returns the plaintext key for this purpose, with copy warning the user not to share it), subscription status, a live "X of Y devices activated" row (when `can_view_activations` is true) with a manual refresh button, and a confirm-before-cancel "Cancel subscription" button when `can_cancel` is true; when no key is set, shows a "Subscribe" link (to `checkout_url`) and an inline key-activation input.
 
 ### 11. SQL Workspace
 

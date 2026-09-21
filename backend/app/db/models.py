@@ -240,3 +240,6 @@ class LicenseState(Base):
     entitled: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     status: Mapped[str] = mapped_column(String(32), default="unset")
     checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    license_key_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    limit_activations: Mapped[int | None] = mapped_column(Integer, nullable=True)

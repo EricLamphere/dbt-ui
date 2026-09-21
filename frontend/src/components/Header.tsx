@@ -174,13 +174,14 @@ export default function Header() {
             </button>
           </>
         )}
-        {!license?.entitled && !isPricingPage && (
+        {!isPricingPage && (
           <button
             onClick={() => navigate('/pricing')}
+            title={license?.entitled ? 'View your dbt-ui Pro subscription' : undefined}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded bg-brand-600/10 border border-brand-500/40 text-brand-300 hover:bg-brand-600/20 font-medium transition-colors"
           >
             <Sparkles size={12} />
-            Upgrade to Pro
+            {license?.entitled ? 'Pro' : 'Upgrade to Pro'}
           </button>
         )}
         <button

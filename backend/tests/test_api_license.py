@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, patch
 
 from httpx import ASGITransport, AsyncClient
 
-from app.licensing.polar_client import LicenseKeyState
+from app.licensing.polar_client import LicenseKeyState, PolarError
 from app.main import app
 
 
@@ -23,9 +23,13 @@ async def test_get_status_no_key_set() -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["has_key"] is False
+    assert body["license_key"] is None
     assert body["entitled"] is False
     assert body["reason"] == "not_licensed"
     assert body["checked_at"] is None
+    assert body["can_cancel"] is False
+    assert body["limit_activations"] is None
+    assert body["can_view_activations"] is False
 
 
 async def test_set_license_key_activates_and_validates() -> None:
@@ -33,7 +37,16 @@ async def test_set_license_key_activates_and_validates() -> None:
         "app.licensing.entitlements.polar_client.activate", new=AsyncMock(return_value="act_123")
     ), patch(
         "app.licensing.entitlements.polar_client.validate",
-        new=AsyncMock(return_value=LicenseKeyState(status="granted", expires_at=None, activation_id="act_123")),
+        new=AsyncMock(
+            return_value=LicenseKeyState(
+                status="granted",
+                expires_at=None,
+                activation_id="act_123",
+                customer_id="cust_123",
+                license_key_id="lk_123",
+                limit_activations=2,
+            )
+        ),
     ):
         async with await _client() as client:
             r = await client.put("/api/license", json={"license_key": "DBTUI_-TEST-KEY"})
@@ -41,10 +54,14 @@ async def test_set_license_key_activates_and_validates() -> None:
     assert r.status_code == 200
     body = r.json()
     assert body["has_key"] is True
+    assert body["license_key"] == "DBTUI_-TEST-KEY"
     assert body["entitled"] is True
     assert body["reason"] == "granted"
     assert body["status"] == "granted"
     assert body["checked_at"] is not None
+    assert body["can_cancel"] is True
+    assert body["limit_activations"] == 2
+    assert body["can_view_activations"] is True
 
 
 async def test_set_license_key_not_entitled() -> None:
@@ -109,3 +126,112 @@ async def test_checkout_url_included_when_configured() -> None:
         assert r.json()["checkout_url"] == "https://polar.sh/lamphere-labs/checkout/test"
     finally:
         settings.polar_sandbox_checkout_url = original
+
+
+async def _activate_licensed_client(client: AsyncClient) -> None:
+    with patch(
+        "app.licensing.entitlements.polar_client.activate", new=AsyncMock(return_value="act_123")
+    ), patch(
+        "app.licensing.entitlements.polar_client.validate",
+        new=AsyncMock(
+            return_value=LicenseKeyState(
+                status="granted",
+                expires_at=None,
+                activation_id="act_123",
+                customer_id="cust_123",
+                license_key_id="lk_123",
+                limit_activations=2,
+            )
+        ),
+    ):
+        await client.put("/api/license", json={"license_key": "DBTUI_-TEST-KEY"})
+
+
+async def test_cancel_subscription_success() -> None:
+    async with await _client() as client:
+        await _activate_licensed_client(client)
+
+        with patch(
+            "app.licensing.entitlements.polar_client.create_customer_session",
+            new=AsyncMock(return_value="session_token_abc"),
+        ), patch(
+            "app.licensing.entitlements.polar_client.list_active_subscription_ids",
+            new=AsyncMock(return_value=["sub_123"]),
+        ), patch(
+            "app.licensing.entitlements.polar_client.cancel_subscription", new=AsyncMock()
+        ) as mock_cancel:
+            r = await client.post("/api/license/cancel")
+
+    assert r.status_code == 200
+    assert r.json() == {"ok": True, "error": None}
+    mock_cancel.assert_awaited_once_with("session_token_abc", "sub_123")
+
+
+async def test_cancel_subscription_without_customer_id_fails() -> None:
+    async with await _client() as client:
+        r = await client.post("/api/license/cancel")
+
+    assert r.status_code == 502
+
+
+async def test_cancel_subscription_no_active_subscription_fails() -> None:
+    async with await _client() as client:
+        await _activate_licensed_client(client)
+
+        with patch(
+            "app.licensing.entitlements.polar_client.create_customer_session",
+            new=AsyncMock(return_value="session_token_abc"),
+        ), patch(
+            "app.licensing.entitlements.polar_client.list_active_subscription_ids",
+            new=AsyncMock(return_value=[]),
+        ):
+            r = await client.post("/api/license/cancel")
+
+    assert r.status_code == 502
+
+
+async def test_cancel_subscription_polar_error_propagates() -> None:
+    async with await _client() as client:
+        await _activate_licensed_client(client)
+
+        with patch(
+            "app.licensing.entitlements.polar_client.create_customer_session",
+            new=AsyncMock(side_effect=PolarError("boom")),
+        ):
+            r = await client.post("/api/license/cancel")
+
+    assert r.status_code == 502
+
+
+async def test_get_activations_success() -> None:
+    async with await _client() as client:
+        await _activate_licensed_client(client)
+
+        with patch(
+            "app.licensing.entitlements.polar_client.get_activation_count",
+            new=AsyncMock(return_value=2),
+        ):
+            r = await client.get("/api/license/activations")
+
+    assert r.status_code == 200
+    assert r.json() == {"count": 2, "limit": 2}
+
+
+async def test_get_activations_without_license_key_id_fails() -> None:
+    async with await _client() as client:
+        r = await client.get("/api/license/activations")
+
+    assert r.status_code == 502
+
+
+async def test_get_activations_polar_error_propagates() -> None:
+    async with await _client() as client:
+        await _activate_licensed_client(client)
+
+        with patch(
+            "app.licensing.entitlements.polar_client.get_activation_count",
+            new=AsyncMock(side_effect=PolarError("boom")),
+        ):
+            r = await client.get("/api/license/activations")
+
+    assert r.status_code == 502

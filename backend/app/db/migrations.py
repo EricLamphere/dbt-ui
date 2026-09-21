@@ -346,6 +346,24 @@ async def run_migrations() -> None:
             ))
             await session.commit()
 
+        if not await _column_exists(session, "license_state", "customer_id"):
+            await session.execute(
+                text("ALTER TABLE license_state ADD COLUMN customer_id TEXT")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "license_state", "license_key_id"):
+            await session.execute(
+                text("ALTER TABLE license_state ADD COLUMN license_key_id TEXT")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "license_state", "limit_activations"):
+            await session.execute(
+                text("ALTER TABLE license_state ADD COLUMN limit_activations INTEGER")
+            )
+            await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()

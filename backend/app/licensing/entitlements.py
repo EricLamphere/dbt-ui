@@ -131,8 +131,52 @@ async def check_entitlement(session: AsyncSession, *, force: bool = False) -> En
     state.entitled = result.status == "granted"
     state.status = result.status
     state.checked_at = now
+    if result.customer_id:
+        state.customer_id = result.customer_id
+    if result.license_key_id:
+        state.license_key_id = result.license_key_id
+    state.limit_activations = result.limit_activations
     await session.commit()
     return Entitlement(entitled=state.entitled, reason="granted" if state.entitled else "not_entitled")
+
+
+async def cancel_subscription(session: AsyncSession) -> None:
+    """Cancel the active installation's subscription at period end via Polar.
+
+    Deliberately does NOT clear the local license key or entitled flag —
+    cancel-at-period-end means Pro access correctly continues until the
+    period ends, at which point the normal RECHECK_INTERVAL polling picks up
+    Polar's now-not-entitled answer and this installation drops access on
+    its own, same as any other lapsed subscription.
+
+    Raises PolarError if the cancel call itself fails.
+    """
+    state = await _get_or_create_state(session)
+    if not state.customer_id:
+        raise PolarError("No customer on record for this license — cannot cancel")
+
+    token = await polar_client.create_customer_session(state.customer_id)
+    subscription_ids = await polar_client.list_active_subscription_ids(token)
+    if not subscription_ids:
+        raise PolarError("No active subscription found to cancel")
+
+    for subscription_id in subscription_ids:
+        await polar_client.cancel_subscription(token, subscription_id)
+
+
+async def get_activation_count(session: AsyncSession) -> int:
+    """Live count of devices currently activated against this installation's
+    license key, fetched from Polar on demand (not cached — this is a
+    deliberately fresh look-up, not part of the entitlement-check cache, so
+    it reflects reality right when the user opens the Subscription tab).
+
+    Raises PolarError if there's no license_key_id on record yet (e.g. never
+    successfully validated) or the Polar call fails.
+    """
+    state = await _get_or_create_state(session)
+    if not state.license_key_id:
+        raise PolarError("No license key id on record — cannot fetch activation count")
+    return await polar_client.get_activation_count(state.license_key_id)
 
 
 def _grace_period_result(state: LicenseState, now: datetime) -> Entitlement:

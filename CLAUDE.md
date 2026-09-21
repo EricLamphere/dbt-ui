@@ -111,7 +111,7 @@ All 13 in `backend/app/db/models.py`:
 - `drift_snapshots` — schema drift scan results per project; stores status (running/done/error), progress counters, and results_json (array of per-model column diffs)
 - `freshness_snapshots` — source freshness scan results per project; stores status (running/done/error), target, started_at, finished_at, results_json (array of per-source freshness results), and error_message
 - `column_lineage_snapshots` — backgrounded column-level lineage scan results per project; stores status (running/done/error), total_models/checked_models progress counters, results_json (map of downstream unique_id → column → list of upstream `{node, column}` refs), error_message, and `manifest_mtime` (used to short-circuit a re-scan when `target/manifest.json` hasn't changed)
-- `license_state` — single-row (id=1) cached Polar entitlement state for this installation: `license_key`, `activation_id`, `device_id`, `entitled`, `status`, `checked_at` — see `app/licensing/entitlements.py`
+- `license_state` — single-row (id=1) cached Polar entitlement state for this installation: `license_key`, `activation_id`, `device_id`, `entitled`, `status`, `checked_at`, `customer_id` (Polar customer id, captured from `validate()`; required to cancel a subscription), `license_key_id` (Polar's internal id for the key, required to look up activation count), `limit_activations` (max devices allowed on this key) — see `app/licensing/entitlements.py`
 
 ## Critical Architecture Rules
 

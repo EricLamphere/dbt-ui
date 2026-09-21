@@ -1,13 +1,18 @@
-"""Thin async client for Polar's customer-portal license-key API.
+"""Thin async client for Polar's license-key and subscription-management API.
 
-Only the two endpoints dbt-ui needs: validate (check a key's current status)
-and activate (register this device against a key, respecting Polar's
-activation-limit seat cap). Both are public/unauthenticated per Polar's docs —
+License-key validate/activate are public/unauthenticated per Polar's docs —
 they're designed to be called directly from an untrusted client like a
-desktop app — so no API key is sent on these calls.
+desktop app — so no API key is sent on those calls.
 
-See https://polar.sh/docs/api-reference/customer-portal/license-keys/validate
-and .../activate.
+Subscription cancellation is a separate flow: it requires a customer-portal
+call authenticated with a customer session token, which in turn requires the
+organization API key to mint (create_customer_session). The org API key is
+never sent to the frontend — this module is the only place it's used, and
+only server-side.
+
+See https://polar.sh/docs/api-reference/customer-portal/license-keys/validate,
+.../activate, .../customer-sessions/create-customer-session, and
+.../customer-portal/subscriptions/list + .../cancel.
 """
 
 from dataclasses import dataclass
@@ -79,6 +84,9 @@ class LicenseKeyState:
     status: str  # "granted" (the only value observed for a currently-active key)
     expires_at: str | None
     activation_id: str | None
+    customer_id: str | None = None
+    license_key_id: str | None = None  # Polar's internal id for this key (not the key string itself)
+    limit_activations: int | None = None  # max devices allowed; None means unlimited
 
 
 async def activate(license_key: str, device_label: str) -> str:
@@ -172,4 +180,106 @@ async def validate(
         status=data.get("status", "unset"),
         expires_at=data.get("expires_at"),
         activation_id=activation.get("id"),
+        customer_id=data.get("customer_id"),
+        license_key_id=data.get("id"),
+        limit_activations=data.get("limit_activations"),
     )
+
+
+async def get_activation_count(license_key_id: str) -> int:
+    """Number of devices currently activated against this key, via the
+    organization-authenticated license-keys endpoint (not the unauthenticated
+    customer-portal one, which only ever returns this device's own
+    activation). Used to surface "X of Y devices" in the UI so a user can
+    notice if their key has been activated on devices they don't recognize
+    (e.g. shared/leaked) — server-side only, uses the org API key.
+    """
+    api_key = settings.polar_api_key
+    if not api_key:
+        raise PolarError("Polar API key is not configured")
+
+    url = f"{settings.polar_api_base}/v1/license-keys/{license_key_id}"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            resp = await client.get(url, headers={"Authorization": f"Bearer {api_key}"})
+        except httpx.HTTPError as exc:
+            raise PolarError(f"Network error contacting Polar: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise PolarError(f"Polar get license key failed ({resp.status_code}): {resp.text}")
+
+    data: dict[str, Any] = resp.json()
+    activations = data.get("activations") or []
+    return len(activations)
+
+
+async def create_customer_session(customer_id: str) -> str:
+    """Mint a short-lived customer session token for `customer_id`, used to
+    call customer-portal endpoints (e.g. list/cancel subscriptions) on that
+    customer's behalf. Requires the organization API key — server-side only,
+    never exposed to the frontend.
+    """
+    api_key = settings.polar_api_key
+    if not api_key:
+        raise PolarError("Polar API key is not configured")
+
+    url = f"{settings.polar_api_base}/v1/customer-sessions/"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            resp = await client.post(
+                url,
+                json={"customer_id": customer_id},
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        except httpx.HTTPError as exc:
+            raise PolarError(f"Network error contacting Polar: {exc}") from exc
+
+    if resp.status_code != 201:
+        raise PolarError(f"Polar create customer session failed ({resp.status_code}): {resp.text}")
+
+    data: dict[str, Any] = resp.json()
+    token = data.get("token")
+    if not token:
+        raise PolarError("Polar customer session response missing token")
+    return token
+
+
+async def list_active_subscription_ids(customer_session_token: str) -> list[str]:
+    """List the given customer's active subscription IDs via the customer
+    portal, authenticated with a customer session token (not the org API
+    key)."""
+    url = f"{settings.polar_api_base}/v1/customer-portal/subscriptions/"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            resp = await client.get(
+                url,
+                params={"active": "true"},
+                headers={"Authorization": f"Bearer {customer_session_token}"},
+            )
+        except httpx.HTTPError as exc:
+            raise PolarError(f"Network error contacting Polar: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise PolarError(f"Polar list subscriptions failed ({resp.status_code}): {resp.text}")
+
+    data: dict[str, Any] = resp.json()
+    items = data.get("items") or []
+    return [item["id"] for item in items if item.get("id")]
+
+
+async def cancel_subscription(customer_session_token: str, subscription_id: str) -> None:
+    """Cancel a subscription at period end via the customer portal —
+    Pro access remains active until the current billing period ends, then
+    lapses naturally through the normal entitlement check."""
+    url = f"{settings.polar_api_base}/v1/customer-portal/subscriptions/{subscription_id}"
+    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        try:
+            resp = await client.delete(
+                url,
+                headers={"Authorization": f"Bearer {customer_session_token}"},
+            )
+        except httpx.HTTPError as exc:
+            raise PolarError(f"Network error contacting Polar: {exc}") from exc
+
+    if resp.status_code != 200:
+        raise PolarError(f"Polar cancel subscription failed ({resp.status_code}): {resp.text}")
