@@ -40,13 +40,15 @@ dbt-ui can be run two ways: as a native desktop app (no Python/Node setup requir
 
 ### Desktop app
 
-Build a standalone macOS app with the bundled backend and frontend:
+Download the latest macOS build from [GitHub Releases](https://github.com/EricLamphere/dbt-ui/releases), or build it yourself:
 
 ```bash
 task package:app
 ```
 
-This produces `dbt-ui.app` and `dbt-ui_<version>_<arch>.dmg` under `src-tauri/target/release/bundle/`. The app needs `dbt` and `git` to already be reachable — `dbt` gets installed into an isolated venv (created automatically via your system Python) the first time you run **Run global setup** from the app; `git` must already be on `PATH`. Windows/Linux packaging and code signing/notarization aren't set up yet — an unsigned build only launches on the machine that built it (or with Gatekeeper bypassed) until that's added.
+This produces `dbt-ui.app` and `dbt-ui_<version>_<arch>.dmg` under `src-tauri/target/release/bundle/`. The app needs `dbt` and `git` to already be reachable — `dbt` gets installed into an isolated venv (created automatically via your system Python) the first time you run **Run global setup** from the app; `git` must already be on `PATH`.
+
+**The build is unsigned** — code signing/notarization isn't set up yet (Windows/Linux packaging isn't either). macOS Gatekeeper will refuse to open it with "dbt-ui is damaged and can't be opened" or "unidentified developer." To run it anyway: right-click (or Control-click) `dbt-ui.app` → **Open** → **Open** in the confirmation dialog. This only needs to be done once per machine.
 
 ### From source
 
