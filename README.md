@@ -48,7 +48,13 @@ task package:app
 
 This produces `dbt-ui.app` and `dbt-ui_<version>_<arch>.dmg` under `src-tauri/target/release/bundle/`. The app needs `dbt` and `git` to already be reachable — `dbt` gets installed into an isolated venv (created automatically via your system Python) the first time you run **Run global setup** from the app; `git` must already be on `PATH`.
 
-**The build is unsigned** — code signing/notarization isn't set up yet (Windows/Linux packaging isn't either). macOS Gatekeeper will refuse to open it with "dbt-ui is damaged and can't be opened" or "unidentified developer." To run it anyway: right-click (or Control-click) `dbt-ui.app` → **Open** → **Open** in the confirmation dialog. This only needs to be done once per machine.
+**The build is ad-hoc signed, not notarized** — there's no paid Apple Developer ID behind it yet (Windows/Linux packaging isn't set up either). Because the DMG is downloaded via a browser, macOS quarantines it and Gatekeeper will say **"dbt-ui.app is from an unidentified developer."** To run it: right-click (or Control-click) `dbt-ui.app` in `/Applications` → **Open** → **Open** again in the confirmation dialog. This only needs to be done once per machine, per download.
+
+If you instead see **"dbt-ui is damaged and can't be opened"** (this happens on a build from before ad-hoc signing was added, or if you built it yourself without `signingIdentity` set), that message means Gatekeeper is rejecting a fully unsigned binary — right-click → Open won't help in that case. Clear the quarantine attribute manually instead:
+
+```bash
+xattr -cr /Applications/dbt-ui.app
+```
 
 ### From source
 
