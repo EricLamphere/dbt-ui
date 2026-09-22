@@ -11,9 +11,17 @@ def _is_frozen() -> bool:
 
 
 def _bundle_dir() -> Path:
-    """Directory containing bundled data files (PyInstaller extraction dir, or repo root in dev)."""
+    """Directory containing bundled data files (PyInstaller extraction dir, or repo root in dev).
+
+    Deliberately NOT sys._MEIPASS: for this onedir build, _MEIPASS resolves
+    to the dbt-ui-backend/_internal/ subdirectory, not the top-level
+    dbt-ui-backend/ folder Tauri lays out as a resource (see
+    _default_frontend_dist's comment for the same reasoning) — so this must
+    match that same sys.executable-relative resolution to find files placed
+    alongside the binary itself.
+    """
     if _is_frozen():
-        return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parent.parent.parent
 
 
@@ -50,9 +58,17 @@ def _default_dbt_venv_dir() -> Path:
 
 
 class Settings(BaseSettings):
+    # TEMPORARY: when frozen, pydantic-settings' default env_file=".env" is
+    # resolved relative to the process cwd, which the packaged Tauri app does
+    # NOT set to the bundle dir — so .env is silently never found. Point at
+    # an absolute path next to the binary instead. This is a one-off local
+    # workaround for testing sandbox Polar values in the packaged .app; the
+    # real fix is baking public config (checkout URL, org ID) into compiled
+    # defaults for release builds, never relying on a bundled .env for
+    # secrets. Revert this once that's done.
     model_config = SettingsConfigDict(
         env_prefix="DBT_UI_",
-        env_file=".env",
+        env_file=str(_bundle_dir() / ".env") if _is_frozen() else ".env",
         extra="ignore",
         populate_by_name=True,
     )

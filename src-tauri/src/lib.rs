@@ -30,6 +30,7 @@ fn kill_backend_tree(mut child: Child) {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
         .manage(BackendProcess(std::sync::Mutex::new(None)))
         .setup(|app| {
             let resource_dir = app

@@ -225,7 +225,10 @@ async def test_start_and_poll_end_to_end(
     assert start_resp.status_code == 202
     started = start_resp.json()
     assert started["status"] == "running"
-    assert started["total_models"] == 1  # only 'orders' has a parent + resolvable columns
+    # total_models is 0 in the immediate response — prepare_lineage_jobs() now
+    # runs inside the background task (so the endpoint stays fast even when a
+    # stale manifest needs a `dbt compile` first), not before the snapshot row
+    # is created. The real count shows up once polling reaches "done" below.
 
     final = await _wait_for_done(client, pid)
     assert final["status"] == "done"
@@ -235,6 +238,107 @@ async def test_start_and_poll_end_to_end(
     assert len(refs) == 1
     assert refs[0]["node"] == "model.proj.stg_orders"
     assert refs[0]["column"] == "order_id"
+
+
+async def test_start_auto_compiles_stale_manifest(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A manifest with no compiled_code on any model (e.g. from `dbt parse`,
+    or before the project has ever been compiled) must not silently report
+    zero models — start_column_lineage should run `dbt compile` first, then
+    proceed with the scan against the freshly compiled manifest."""
+    proj_dir = tmp_path / "stale_proj"
+    proj_dir.mkdir()
+    target = proj_dir / "target"
+    target.mkdir()
+    manifest_path = target / "manifest.json"
+    manifest_path.write_text(json.dumps({
+        "nodes": {
+            "model.proj.stg_orders": {
+                "unique_id": "model.proj.stg_orders",
+                "name": "stg_orders",
+                "resource_type": "model",
+                "original_file_path": "models/stg_orders.sql",
+                "columns": {},
+                # no compiled_code — this is the "needs compile" condition
+            },
+        },
+        "sources": {},
+        "parent_map": {},
+        "metadata": {},
+    }))
+    pid = await _seed_project(db_session, str(proj_dir))
+
+    compile_calls: list[int] = []
+
+    async def _fake_compile_project(project_id: int, project_path: str) -> bool:
+        compile_calls.append(project_id)
+        # Simulate a real `dbt compile`: it rewrites the manifest with
+        # compiled_code populated.
+        _make_manifest(Path(project_path) / "target")
+        return True
+
+    import app.api.models as models_module
+    monkeypatch.setattr(models_module, "_compile_project", _fake_compile_project)
+
+    queue = await bus.subscribe(f"project:{pid}")
+    try:
+        r = await client.post(f"/api/projects/{pid}/column-lineage/start")
+        assert r.status_code == 202
+        assert r.json()["status"] == "running"
+
+        seen_types: list[str] = []
+        async with asyncio.timeout(30):
+            while "column_lineage_finished" not in seen_types:
+                event = await queue.get()
+                seen_types.append(event.type)
+    finally:
+        await bus.unsubscribe(f"project:{pid}", queue)
+
+    assert compile_calls == [pid]
+    # compiling must be signaled before the scan itself starts
+    assert seen_types.index("column_lineage_compiling") < seen_types.index("column_lineage_started")
+
+    final = await _wait_for_done(client, pid)
+    assert final["status"] == "done"
+    assert "model.proj.orders" in final["results"]
+
+
+async def test_start_reports_error_when_compile_fails(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    proj_dir = tmp_path / "stale_proj_fails"
+    proj_dir.mkdir()
+    target = proj_dir / "target"
+    target.mkdir()
+    (target / "manifest.json").write_text(json.dumps({
+        "nodes": {
+            "model.proj.stg_orders": {
+                "unique_id": "model.proj.stg_orders",
+                "name": "stg_orders",
+                "resource_type": "model",
+                "original_file_path": "models/stg_orders.sql",
+                "columns": {},
+            },
+        },
+        "sources": {},
+        "parent_map": {},
+        "metadata": {},
+    }))
+    pid = await _seed_project(db_session, str(proj_dir))
+
+    async def _fake_compile_project_fails(project_id: int, project_path: str) -> bool:
+        return False
+
+    import app.api.models as models_module
+    monkeypatch.setattr(models_module, "_compile_project", _fake_compile_project_fails)
+
+    r = await client.post(f"/api/projects/{pid}/column-lineage/start")
+    assert r.status_code == 202
+
+    final = await _wait_for_done(client, pid)
+    assert final["status"] == "error"
+    assert "compile failed" in final["error_message"]
 
 
 async def test_start_no_manifest_returns_422(

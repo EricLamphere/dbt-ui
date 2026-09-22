@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { ArrowLeft, Check, Lock, Settings, Sparkles, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { GlobalSettingsModal } from '../components/GlobalSettingsModal';
@@ -146,14 +147,12 @@ export default function Pricing() {
                 Active
               </button>
             ) : license?.checkout_url ? (
-              <a
-                href={license.checkout_url}
-                target="_blank"
-                rel="noreferrer"
+              <button
+                onClick={() => openUrl(license.checkout_url!)}
                 className="w-full text-center px-2.5 py-1.5 text-[11px] rounded-md bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
               >
                 Subscribe to Pro →
-              </a>
+              </button>
             ) : (
               <button
                 disabled

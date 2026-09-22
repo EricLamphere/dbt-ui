@@ -172,6 +172,7 @@ export default function ModelsPage() {
   });
 
   const [columnLineageEnabled, setColumnLineageEnabled] = useState(false);
+  const [columnLineageCompiling, setColumnLineageCompiling] = useState(false);
   const [columnLineageProgress, setColumnLineageProgress] = useState<{ checked: number; total: number } | null>(null);
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const {
@@ -189,7 +190,7 @@ export default function ModelsPage() {
   // Only treat lineage as "loaded" once a snapshot has actually finished computing —
   // a `running` snapshot has partial/empty results and shouldn't be rendered as final.
   const columnLineage = columnLineageSnapshot?.status === 'done' ? columnLineageSnapshot : undefined;
-  const columnLineageLoading = columnLineageFetching || columnLineageSnapshot?.status === 'running';
+  const columnLineageLoading = columnLineageCompiling || columnLineageFetching || columnLineageSnapshot?.status === 'running';
   const columnLineageLocked = isProFeatureRequiredError(columnLineageError);
 
   // Pre-select model from ?model=<unique_id> query param (takes priority),
@@ -269,12 +270,17 @@ export default function ModelsPage() {
         setLiveStatuses((prev) => ({ ...prev, [result.name]: result.status }));
       }
     }
+    if (event.type === 'column_lineage_compiling') {
+      setColumnLineageCompiling(true);
+    }
     if (event.type === 'column_lineage_progress') {
       const d = event.data as { checked: number; total: number };
+      setColumnLineageCompiling(false);
       setColumnLineageProgress({ checked: d.checked, total: d.total });
       qc.invalidateQueries({ queryKey: ['column-lineage', id] });
     }
     if (event.type === 'column_lineage_finished') {
+      setColumnLineageCompiling(false);
       setColumnLineageProgress(null);
       qc.invalidateQueries({ queryKey: ['column-lineage', id] });
     }
@@ -579,6 +585,7 @@ export default function ModelsPage() {
             onToggleCoverage={handleToggleCoverage}
             columnLineageLoaded={!!columnLineage}
             columnLineageLoading={columnLineageLoading}
+            columnLineageCompiling={columnLineageCompiling}
             columnLineageProgress={columnLineageProgress}
             columnLineageLocked={columnLineageLocked}
             onColumnLineageLockedClick={() => setUpgradeModalOpen(true)}

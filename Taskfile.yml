@@ -149,18 +149,60 @@ tasks:
           PYTHON: python3.12
 
   # ---- Package (Tauri desktop app) ----
+  #
+  # Three build scenarios, each a single top-level task that builds AND
+  # installs to /Applications:
+  #
+  #   task package:sandbox:pro    — pro features + Polar sandbox (dev testing of Pro)
+  #   task package:sandbox:base   — no pro features + Polar sandbox (dev testing of free tier)
+  #   task package:production     — pro features + Polar production (the real release build)
+  #
+  # Polar config is selected via backend/.env.sandbox (gitignored — holds
+  # your real sandbox API key) or backend/.env.production (checked in —
+  # public checkout_url + org_id only; the shipped app never needs an API
+  # key, since license validate/activate are unauthenticated Polar endpoints
+  # by design — see app/licensing/polar_client.py). The chosen file is
+  # copied into the INSTALLED app's bundle directory after install (NOT
+  # backend/.env, which PyInstaller never bundles — config.py's
+  # _is_frozen() env_file resolution reads from beside the installed
+  # binary at runtime). backend/.env itself is never touched by these
+  # tasks and never committed.
+  #
+  # NOTE: package:production still relies on a real .env sitting next to
+  # the shipped binary, same as the sandbox scenarios. The more robust fix
+  # — baking public production Polar values as compiled defaults in
+  # config.py so the shipped app needs no .env file at all — is a known
+  # follow-up, not yet done.
+
+  _package:pro-check:
+    desc: "Internal: fail loudly if dbt_ui_pro isn't importable in the venv (silent staleness was today's actual bug)."
+    dir: "{{.BACKEND_DIR}}"
+    internal: true
+    deps:
+      - task: ensure:backend
+    cmds:
+      - |
+        if ! .venv/bin/python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('dbt_ui_pro') else 1)"; then
+          echo "dbt_ui_pro is not installed in backend/.venv — run 'task package:pro' first (or pass PRO_DIR=<path> to it if dbt-ui-pro isn't a sibling checkout)."
+          exit 1
+        fi
 
   package:pro:
     desc: |
       Maintainer-only. Install the private dbt-ui-pro package (column-lineage
       algorithm) from a sibling checkout into the backend venv, so it gets
-      bundled into the next `task package:backend`/`package:app` build.
-      Contributors without access to dbt-ui-pro can skip this entirely —
-      the public build works fine without it (column lineage is simply
-      unavailable, same as the entitlement-gated behavior for non-Pro users).
+      bundled into the next pro build. Contributors without access to
+      dbt-ui-pro can skip this and use `package:sandbox:base` instead —
+      column lineage is simply unavailable, same as the entitlement-gated
+      behavior for non-Pro users.
     dir: "{{.BACKEND_DIR}}"
     vars:
-      PRO_DIR: '{{.PRO_DIR | default "../dbt-ui-pro"}}'
+      # dbt-ui-pro is a sibling of dbt-ui/ itself (../.. from backend/, which
+      # is where this task's dir: puts its cwd) — NOT a sibling of backend/.
+      # A previous "../dbt-ui-pro" default silently failed this check on
+      # every real run; it only ever appeared to work when dbt_ui_pro had
+      # been pip installed into the venv by some other means beforehand.
+      PRO_DIR: '{{.PRO_DIR | default "../../dbt-ui-pro"}}'
     deps:
       - task: ensure:backend
     cmds:
@@ -169,12 +211,20 @@ tasks:
           echo "dbt-ui-pro not found at {{.PRO_DIR}} — clone it as a sibling of dbt-ui/, or pass PRO_DIR=<path>."
           exit 1
         fi
-        .venv/bin/pip install -q -e "{{.PRO_DIR}}"
-        echo "dbt-ui-pro installed — next 'task package:backend' will bundle it."
+        # NOT -e (editable): PEP 660 editable installs resolve dbt_ui_pro at
+        # runtime via a generated import finder, not real files under
+        # site-packages/dbt_ui_pro/ — PyInstaller's static Analysis can't see
+        # through that indirection, so hiddenimports lists the module but the
+        # bundle silently ends up without it ("missing module named
+        # dbt_ui_pro" in build/dbt_ui/warn-dbt_ui.txt). A plain install
+        # copies real files PyInstaller can actually find.
+        .venv/bin/pip install -q "{{.PRO_DIR}}"
+        echo "dbt-ui-pro installed — the next pro build (package:sandbox:pro / package:production) will bundle it."
 
-  package:backend:
-    desc: Bundle the FastAPI backend into a standalone executable via PyInstaller
+  _package:backend:
+    desc: "Internal: bundle the FastAPI backend via PyInstaller, using whichever backend/.env is in place at call time."
     dir: "{{.BACKEND_DIR}}"
+    internal: true
     deps:
       - task: ensure:backend
     cmds:
@@ -182,17 +232,16 @@ tasks:
       - rm -rf dist build
       - .venv/bin/pyinstaller packaging/dbt_ui.spec --distpath dist --workpath build --noconfirm
 
-  package:frontend:
-    desc: Build the frontend for embedding in the packaged app
+  _package:frontend:
+    desc: "Internal: build the frontend for embedding in the packaged app."
     dir: "{{.FRONTEND_DIR}}"
+    internal: true
     cmds:
       - npm run build
 
-  package:app:
-    desc: Build the full Tauri desktop app (backend resource + frontend + native shell)
-    deps:
-      - task: package:backend
-      - task: package:frontend
+  _package:app:
+    desc: "Internal: assemble the Tauri desktop app (backend resource + frontend + native shell) from the last backend/frontend builds."
+    internal: true
     cmds:
       - rm -rf src-tauri/binaries/frontend_dist src-tauri/binaries/dbt-ui-backend
       - mkdir -p src-tauri/binaries
@@ -200,13 +249,14 @@ tasks:
       - cp -r backend/dist/dbt-ui-backend src-tauri/binaries/dbt-ui-backend
       - cd src-tauri && cargo tauri build
 
-  package:install:
-    desc: Install the last-built app bundle to /Applications (macOS; run package:app first)
+  _package:install:
+    desc: "Internal: install the last-built app bundle to /Applications (macOS)."
+    internal: true
     cmds:
       - |
         BUNDLE="src-tauri/target/release/bundle/macos/dbt-ui.app"
         if [ ! -d "$BUNDLE" ]; then
-          echo "No build found at $BUNDLE — run 'task package:app' first."
+          echo "No build found at $BUNDLE — the app build step must have failed."
           exit 1
         fi
         pkill -9 -f dbt-ui-backend 2>/dev/null || true
@@ -216,8 +266,75 @@ tasks:
         cp -r "$BUNDLE" /Applications/dbt-ui.app
         echo "Installed to /Applications/dbt-ui.app"
 
-  package:reinstall:
-    desc: Build the desktop app and install it to /Applications in one step (macOS)
+  _package:build-with-env:
+    desc: |
+      Internal: build + install the app, then copy ENV_FILE next to the
+      INSTALLED binary (not backend/.env — PyInstaller never bundles
+      backend/.env into the binary; config.py's _is_frozen() env_file
+      resolution reads it from beside the installed executable at runtime,
+      which only exists after _package:install has placed it in
+      /Applications). This is the same manual step package:install:sandbox
+      used to do by hand — see today's session for why the two paths
+      (build-time backend/.env vs. the installed app's own directory) are
+      not interchangeable.
+    internal: true
+    requires:
+      vars: [ENV_FILE]
     cmds:
-      - task: package:app
-      - task: package:install
+      - |
+        if [ ! -f "{{.ENV_FILE}}" ]; then
+          echo "{{.ENV_FILE}} not found."
+          exit 1
+        fi
+      - task: _package:backend
+      - task: _package:frontend
+      - task: _package:app
+      - task: _package:install
+      - |
+        cp "{{.ENV_FILE}}" "/Applications/dbt-ui.app/Contents/Resources/binaries/dbt-ui-backend/.env"
+        echo "Copied {{.ENV_FILE}} into the installed app."
+
+  package:sandbox:pro:
+    desc: Build + install the app with Pro features enabled, talking to Polar SANDBOX. For testing paid features locally.
+    cmds:
+      # Sequential, not deps: — package:pro and _package:pro-check both
+      # depend on ensure:backend, and Task runs deps concurrently by
+      # default, which races two `pip install -e` calls against the same
+      # venv (observed: OSError on the editable-install .pth file).
+      - task: package:pro
+      - task: _package:pro-check
+      - task: _package:build-with-env
+        vars:
+          ENV_FILE: "{{.BACKEND_DIR}}/.env.sandbox"
+
+  package:sandbox:base:
+    desc: |
+      Build + install the app WITHOUT Pro features, talking to Polar SANDBOX.
+      For testing the free-tier experience. Uninstalls dbt_ui_pro from the
+      shared backend/.venv first if present — pro and base builds share one
+      venv, and PyInstaller bundles dbt_ui_pro whenever it's importable
+      regardless of which scenario you're building, so it must actually be
+      absent, not just unused. Run `task package:pro` again afterward before
+      building a pro scenario.
+    deps:
+      - task: ensure:backend
+    cmds:
+      - "{{.BACKEND_DIR}}/.venv/bin/pip uninstall -y dbt_ui_pro -q 2>/dev/null || true"
+      - task: _package:build-with-env
+        vars:
+          ENV_FILE: "{{.BACKEND_DIR}}/.env.sandbox"
+
+  package:production:
+    desc: |
+      Build + install the REAL release app — Pro features + Polar PRODUCTION.
+      This is what actually gets distributed. backend/.env.production must
+      have real POLAR_PRODUCTION_ORGANIZATION_ID / POLAR_PRODUCTION_CHECKOUT_URL
+      values (both public, safe to commit) before running this — it never
+      needs POLAR_PRODUCTION_API_KEY, and that key must never be added to
+      backend/.env.production.
+    cmds:
+      - task: package:pro
+      - task: _package:pro-check
+      - task: _package:build-with-env
+        vars:
+          ENV_FILE: "{{.BACKEND_DIR}}/.env.production"

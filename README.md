@@ -113,19 +113,51 @@ Per-project settings (stored in `project_env_vars`, injected into every dbt subp
 #### Homepage
 ![Homepage](img/home.png)
 
+#### Global Settings
+![Global Settings](img/settings.png)
+
 #### Project Homepage
 ![Project Homepage](img/project_home.png)
 
+#### Environment
+![Environment](img/environment.png)
+
+#### Initialization
+![Initialization](img/initialization.png)
+
 #### File Explorer
-![File Explorer](img/files_model_exec_dag.png)
+![File Explorer](img/file_explorer.png)
+
+![File Explorer — Data Preview](img/file_explorer_data_preview.png)
+
+![File Explorer — Column Profile](img/file_explorer_profile.png)
 
 #### DAG
-![DAG](img/dag_logs.png)
+![DAG](img/dag_view.png)
+
+#### Column-Level Lineage (Pro)
+![Column Lineage](img/column_lineage.png)
 
 #### Docs
-![Docs Overview](img/docs_overview.png)
+![Docs — Model](img/docs_model.png)
 
-![Docs Model](img/docs_model_terminal.png)
+![Docs — Macro](img/docs_macro.png)
+
+#### SQL Workspace
+![SQL Workspace](img/sql_workspace.png)
+
+#### Run History
+![Run History](img/run_history.png)
+
+#### Health
+![dbt Health Check](img/health_check.png)
+
+![Schema Drift](img/schema_drift.png)
+
+![Source Freshness](img/source_freshness.png)
+
+#### Source Control
+![Source Control](img/source_control.png)
 
 #### Light Theme
 ![Light Theme](img/light_theme.png)

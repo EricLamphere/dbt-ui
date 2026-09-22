@@ -54,6 +54,25 @@ def _to_utc_iso(dt: datetime) -> str:
     return dt.isoformat()
 
 
+def _manifest_needs_compile(manifest_path: Path) -> bool:
+    """True if this manifest exists but has no compiled SQL on any model node —
+    e.g. it was produced by `dbt parse` rather than `dbt compile`/`dbt run`, or
+    predates the project's most recent `dbt parse`. prepare_lineage_jobs()
+    silently returns zero jobs in this case (compiled_code is the only source
+    of per-model SQL it traces), which looks identical to "nothing to trace"
+    from the caller's side — so this must be checked explicitly, not inferred
+    from an empty jobs list after the fact."""
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    nodes = data.get("nodes") or {}
+    models = [n for n in nodes.values() if n.get("resource_type") == "model"]
+    if not models:
+        return False
+    return not any(n.get("compiled_code") or n.get("compiled_sql") for n in models)
+
+
 async def _require_pro(session: AsyncSession) -> None:
     """Column-level lineage is a dbt-ui Pro feature. Gates all three routes
     below (start + both read routes) — not just start — because an already-
@@ -116,29 +135,33 @@ async def start_column_lineage(
     except OSError:
         raise HTTPException(status_code=422, detail="manifest not found — run dbt compile first")
 
+    needs_compile = _manifest_needs_compile(manifest_path)
+
     # Short-circuit: if the latest snapshot is done and the manifest hasn't
-    # changed since, there's nothing new to compute.
-    result = await session.execute(
-        select(ColumnLineageSnapshot)
-        .where(ColumnLineageSnapshot.project_id == project_id)
-        .order_by(ColumnLineageSnapshot.id.desc())
-        .limit(1)
-    )
-    latest = result.scalar_one_or_none()
-    if latest is not None and latest.status == "done" and latest.manifest_mtime == manifest_mtime:
-        response.status_code = 200
-        return _snapshot_to_dto(latest)
+    # changed since, there's nothing new to compute. Skipped when a compile
+    # is about to run — the manifest's mtime (and possibly its compiled SQL)
+    # is stale until that finishes, so this check must happen again after.
+    if not needs_compile:
+        result = await session.execute(
+            select(ColumnLineageSnapshot)
+            .where(ColumnLineageSnapshot.project_id == project_id)
+            .order_by(ColumnLineageSnapshot.id.desc())
+            .limit(1)
+        )
+        latest = result.scalar_one_or_none()
+        if latest is not None and latest.status == "done" and latest.manifest_mtime == manifest_mtime:
+            response.status_code = 200
+            return _snapshot_to_dto(latest)
 
-    loop = asyncio.get_event_loop()
-    try:
-        jobs: list[LineageJob] = await loop.run_in_executor(None, prepare_lineage_jobs, manifest_path)
-    except ColumnLineageUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-
+    # A placeholder "running" snapshot with unknown totals — prepare_lineage_jobs()
+    # (and, if needed, dbt compile first) both happen inside the background task
+    # below, not here, so this endpoint stays fast (202-style) even on a large
+    # project or a slow compile. The frontend renders this as "loading" and
+    # gets real progress via the column_lineage_compiling/_progress SSE events.
     snap = ColumnLineageSnapshot(
         project_id=project_id,
         status="running",
-        total_models=len(jobs),
+        total_models=0,
         checked_models=0,
         results_json="{}",
         manifest_mtime=manifest_mtime,
@@ -148,14 +171,19 @@ async def start_column_lineage(
     await session.refresh(snap)
     snap_id = snap.id
 
-    task = asyncio.create_task(_run_column_lineage(project_id, snap_id, jobs, manifest_mtime))
+    task = asyncio.create_task(
+        _compile_then_run_column_lineage(project_id, snap_id, project.path, manifest_path, needs_compile)
+    )
     _running[project_id] = task
 
-    await bus.publish(Event(
-        topic=f"project:{project_id}",
-        type="column_lineage_started",
-        data={"snapshot_id": snap_id, "total": len(jobs)},
-    ))
+    if needs_compile:
+        await bus.publish(Event(topic=f"project:{project_id}", type="column_lineage_compiling", data={}))
+    else:
+        await bus.publish(Event(
+            topic=f"project:{project_id}",
+            type="column_lineage_started",
+            data={"snapshot_id": snap_id, "total": 0},
+        ))
 
     return _snapshot_to_dto(snap)
 
@@ -193,6 +221,74 @@ async def get_column_lineage_snapshot(
     if snap is None or snap.project_id != project_id:
         raise HTTPException(status_code=404, detail="snapshot not found")
     return _snapshot_to_dto(snap)
+
+
+async def _compile_then_run_column_lineage(
+    project_id: int,
+    snap_id: int,
+    project_path: str,
+    manifest_path: Path,
+    needs_compile: bool,
+) -> None:
+    """Background task started by start_column_lineage(). Runs `dbt compile`
+    first if the manifest had no compiled SQL, then re-reads the (now fresh)
+    manifest, builds the jobs list, and hands off to _run_column_lineage() for
+    the actual per-model tracing — all off the request path so the endpoint
+    itself stays fast regardless of how long compile or a large project's
+    trace takes."""
+    from app.db.engine import SessionLocal
+
+    topic = f"project:{project_id}"
+
+    async def _fail(message: str) -> None:
+        async with SessionLocal() as session:
+            snap = await session.get(ColumnLineageSnapshot, snap_id)
+            if snap is not None:
+                snap.status = "error"
+                snap.finished_at = datetime.now(timezone.utc)
+                snap.error_message = message
+                await session.commit()
+        await bus.publish(Event(
+            topic=topic,
+            type="column_lineage_finished",
+            data={"snapshot_id": snap_id, "ok": False},
+        ))
+
+    if needs_compile:
+        from app.api.models import _compile_project
+
+        ok = await _compile_project(project_id, project_path)
+        if not ok:
+            await _fail("dbt compile failed — check Project Logs for details, then retry column lineage.")
+            return
+
+    try:
+        manifest_mtime = manifest_path.stat().st_mtime
+    except OSError:
+        await _fail("manifest not found — run dbt compile first")
+        return
+
+    loop = asyncio.get_event_loop()
+    try:
+        jobs: list[LineageJob] = await loop.run_in_executor(None, prepare_lineage_jobs, manifest_path)
+    except ColumnLineageUnavailable as exc:
+        await _fail(str(exc))
+        return
+
+    async with SessionLocal() as session:
+        snap = await session.get(ColumnLineageSnapshot, snap_id)
+        if snap is not None:
+            snap.total_models = len(jobs)
+            snap.manifest_mtime = manifest_mtime
+            await session.commit()
+
+    await bus.publish(Event(
+        topic=topic,
+        type="column_lineage_started",
+        data={"snapshot_id": snap_id, "total": len(jobs)},
+    ))
+
+    await _run_column_lineage(project_id, snap_id, jobs, manifest_mtime)
 
 
 async def _run_column_lineage(

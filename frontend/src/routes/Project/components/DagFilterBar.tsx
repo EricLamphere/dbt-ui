@@ -94,6 +94,7 @@ interface DagFilterBarProps {
   onToggleCoverage?: () => void;
   columnLineageLoaded: boolean;
   columnLineageLoading: boolean;
+  columnLineageCompiling?: boolean;
   columnLineageProgress?: { checked: number; total: number } | null;
   onLoadColumnLineage: () => void;
   /** When true, column lineage is a locked Pro feature — clicking opens the upgrade modal instead. */
@@ -114,6 +115,7 @@ export default function DagFilterBar({
   onToggleCoverage,
   columnLineageLoaded,
   columnLineageLoading,
+  columnLineageCompiling = false,
   columnLineageProgress,
   onLoadColumnLineage,
   columnLineageLocked = false,
@@ -220,11 +222,13 @@ export default function DagFilterBar({
         {columnLineageLocked && <Lock size={12} />}
         {columnLineageLocked
           ? 'Column lineage (Pro)'
-          : columnLineageLoading
-            ? (columnLineageProgress
-                ? `Column lineage: ${columnLineageProgress.checked}/${columnLineageProgress.total}…`
-                : 'Column lineage loading…')
-            : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
+          : columnLineageCompiling
+            ? 'Compiling…'
+            : columnLineageLoading
+              ? (columnLineageProgress
+                  ? `Column lineage: ${columnLineageProgress.checked}/${columnLineageProgress.total}…`
+                  : 'Loading column lineage…')
+              : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
       </ProFeatureButton>
       <button
         onClick={onRefresh}

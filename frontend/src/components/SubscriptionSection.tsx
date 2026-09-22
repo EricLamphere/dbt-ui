@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { openUrl } from '@tauri-apps/plugin-opener';
 import { Eye, EyeOff, CheckCircle2, AlertTriangle, Monitor, RefreshCw } from 'lucide-react';
 import { api, ApiError, type LicenseStatusDto } from '../lib/api';
 
@@ -209,14 +210,12 @@ function UnsubscribedView({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
 
       <div className="flex items-center gap-2">
         {license?.checkout_url && (
-          <a
-            href={license.checkout_url}
-            target="_blank"
-            rel="noreferrer"
+          <button
+            onClick={() => openUrl(license.checkout_url!)}
             className="px-3 py-1.5 text-xs rounded bg-brand-600 hover:bg-brand-500 text-white font-medium transition-colors"
           >
             Subscribe to Pro
-          </a>
+          </button>
         )}
         <button
           onClick={() => setShowKeyInput((v) => !v)}
