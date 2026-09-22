@@ -3,6 +3,13 @@
 Local web UI for managing dbt projects. No auth, single user, runs on localhost only.
 Backend on `:8001`, frontend on `:5173`.
 
+This repo is the public/free product. Column-level lineage's actual tracing
+algorithm lives in a separate private repo (`dbt-ui-pro`, expected as a
+sibling checkout), and the marketing site lives in another separate private
+repo (`lamphere-labs`). See
+[.claude/rules/related-repos.md](.claude/rules/related-repos.md) before
+working on Pro features or updating screenshots/gallery content.
+
 ## Stack
 
 | Layer | Tech |

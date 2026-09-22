@@ -59,6 +59,15 @@ Before marking work complete:
 
 Only update what changed. Do not rewrite whole sections for minor additions — add a row, line, or paragraph. Keep docs accurate and concise.
 
+## Screenshots and the Gallery
+
+Screenshot/gallery changes (new image in `img/`, a rename, a deletion) are
+**not** covered by this repo's own doc checks — they also require updating
+the separate `lamphere-labs` repo's `product-dbt-ui/index.html` gallery and
+its resized `assets/img/` copies. See
+[related-repos.md](./related-repos.md) for the filename mapping between the
+two repos (they don't always match) and the full three-repo picture.
+
 ## On-demand: use `/update-docs`
 
 To trigger a full doc audit and update based on the current git diff, run `/update-docs`. This invokes the `update-docs` skill which reads the diff, identifies affected docs, and updates them.
