@@ -48,7 +48,12 @@ task package:app
 
 This produces `dbt-ui.app` and `dbt-ui_<version>_<arch>.dmg` under `src-tauri/target/release/bundle/`. The app needs `dbt` and `git` to already be reachable — `dbt` gets installed into an isolated venv (created automatically via your system Python) the first time you run **Run global setup** from the app; `git` must already be on `PATH`.
 
-**The build is ad-hoc signed, not notarized** — there's no paid Apple Developer ID behind it yet (Windows/Linux packaging isn't set up either). Because the DMG is downloaded via a browser, macOS quarantines it and Gatekeeper will say **"dbt-ui.app is from an unidentified developer."** To run it: right-click (or Control-click) `dbt-ui.app` in `/Applications` → **Open** → **Open** again in the confirmation dialog. This only needs to be done once per machine, per download.
+**The build is ad-hoc signed, not notarized** — there's no paid Apple Developer ID behind it yet (Windows/Linux packaging isn't set up either). Because the DMG is downloaded via a browser, macOS quarantines it, and opening it takes two steps instead of one on current macOS (Sonoma/Sequoia):
+
+1. Right-click (or Control-click) `dbt-ui.app` in `/Applications` → **Open**. You'll get a dialog titled **"dbt-ui" Not Opened** with only a **Done** button — click Done. (This step alone does *not* launch the app, despite feeling like it should.)
+2. Open **System Settings → Privacy & Security**, scroll to the **Security** section, and you'll see *"'dbt-ui' was blocked from use because it is not from an identified developer."* Click **Open Anyway**, then confirm once more (Touch ID or password).
+
+After that, `dbt-ui.app` launches normally from Launchpad/Spotlight/Applications going forward. This only needs to be done once per machine, per download.
 
 If you instead see **"dbt-ui is damaged and can't be opened"** (this happens on a build from before ad-hoc signing was added, or if you built it yourself without `signingIdentity` set), that message means Gatekeeper is rejecting a fully unsigned binary — right-click → Open won't help in that case. Clear the quarantine attribute manually instead:
 
