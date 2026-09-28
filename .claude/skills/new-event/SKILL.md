@@ -1,12 +1,14 @@
 ---
 name: new-event
 description: Wire up a new SSE event type end-to-end in dbt-ui — backend bus.publish(), sse.ts listener registration, frontend cache invalidation, and rule file update.
+argument-hint: "<event_type> [topic] [emitter file] [payload fields]"
 ---
 
-<command-instructions>
 You are wiring up a new SSE event type in the dbt-ui project end-to-end. This touches the backend event bus, the frontend SSE hook, and the project rules.
 
 ## Parse the Arguments
+
+Arguments: `$ARGUMENTS`
 
 Extract from the user's args:
 - **Event type**: the string name (e.g. `model_archived`, `profile_synced`)
@@ -85,4 +87,3 @@ Summarize:
 - That `sse.ts` was updated
 - Which component handles it and what it invalidates
 - That rule files were updated
-</command-instructions>

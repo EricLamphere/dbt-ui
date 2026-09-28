@@ -1,12 +1,14 @@
 ---
 name: new-endpoint
 description: Scaffold a new FastAPI endpoint for dbt-ui — creates the router function, Pydantic DTOs, migration (if needed), and api.ts typed helper following project conventions.
+argument-hint: "<METHOD> <path> — <what it does>"
 ---
 
-<command-instructions>
 You are scaffolding a new FastAPI endpoint in the dbt-ui project. Follow these steps precisely.
 
 ## Parse the Arguments
+
+Arguments: `$ARGUMENTS`
 
 The user invoked this skill with args describing the endpoint. Extract:
 - **Resource**: what entity is being operated on (e.g. "profile", "model", "run")
@@ -111,4 +113,3 @@ Summarize what was created:
 - DTO names
 - api.ts helper signature
 - Any migrations added
-</command-instructions>
