@@ -107,9 +107,9 @@ export default function Pricing() {
           <Sparkles size={12} />
           dbt-ui Pro
         </div>
-        <h1 className="text-xl font-semibold text-gray-100">Simple, one-time upgrade</h1>
+        <h1 className="text-xl font-semibold text-gray-100">{isPro ? "You're on Pro" : 'Upgrade to Pro'}</h1>
         <p className="text-xs text-gray-500 max-w-md">
-          dbt-ui is free and open-source. Pro unlocks column-level lineage tracing and supports continued development.
+          dbt-ui is free and open-source. Pro is a monthly subscription that unlocks advanced features and supports continued development.
         </p>
       </div>
 
