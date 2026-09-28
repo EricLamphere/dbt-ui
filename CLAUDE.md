@@ -364,6 +364,7 @@ task test:backend    # pytest --cov=app -q (run from backend/)
 task test            # pytest + tsc build
 task lint            # ruff check app tests
 task db:reset        # delete data/dbt_ui.sqlite
+task release         # GitHub release from the package:production dmg; also uploads dbt-ui_aarch64.dmg (stable name the lamphere-labs site's Download buttons link to)
 ```
 
 Single test file: `cd backend && .venv/bin/pytest tests/test_x.py -xvs`

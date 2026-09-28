@@ -338,3 +338,24 @@ tasks:
       - task: _package:build-with-env
         vars:
           ENV_FILE: "{{.BACKEND_DIR}}/.env.production"
+
+  # Publishes the dmg built by package:production as a GitHub release. The dmg
+  # is uploaded twice: once with its versioned name, and once as
+  # dbt-ui_aarch64.dmg so the marketing site can link to the stable URL
+  # https://github.com/EricLamphere/dbt-ui/releases/latest/download/dbt-ui_aarch64.dmg
+  # and start the download directly.
+  release:
+    desc: Create GitHub release v<version> from the built dmg (run package:production first)
+    vars:
+      VERSION:
+        sh: python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])"
+      DMG: src-tauri/target/release/bundle/dmg/dbt-ui_{{.VERSION}}_aarch64.dmg
+      STABLE_DMG: src-tauri/target/release/bundle/dmg/dbt-ui_aarch64.dmg
+    preconditions:
+      - sh: test -f "{{.DMG}}"
+        msg: "{{.DMG}} not found — run `task package:production` first."
+      - sh: "! gh release view v{{.VERSION}} >/dev/null 2>&1"
+        msg: "Release v{{.VERSION}} already exists — bump the version first."
+    cmds:
+      - cp "{{.DMG}}" "{{.STABLE_DMG}}"
+      - gh release create "v{{.VERSION}}" "{{.DMG}}" "{{.STABLE_DMG}}" --title "dbt-ui v{{.VERSION}}" --generate-notes
