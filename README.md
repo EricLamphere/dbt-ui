@@ -4,7 +4,7 @@ A local-first desktop app for [dbt-core](https://github.com/dbt-labs/dbt-core): 
 
 ![dbt-ui dependency graph with live execution logs](img/dag_view.png)
 
-## Download
+## Getting Started
 
 **[Download dbt-ui from lampherelabs.com](https://lampherelabs.com/tools/dbt-ui)**
 
@@ -15,6 +15,11 @@ A local-first desktop app for [dbt-core](https://github.com/dbt-labs/dbt-core): 
 The app is signed and notarized by Apple, so it opens like any other Mac app. You'll need `git` on your `PATH`. dbt itself is installed for you: the app creates an isolated Python environment the first time you run **Run global setup**.
 
 dbt-ui is free and open source. [dbt-ui Pro](https://lampherelabs.com/tools/dbt-ui#pricing) is an optional subscription that adds advanced features and supports continued development. You can upgrade from **Upgrade to Pro** in the app's header.
+
+Don't feel like downloading the app or paying for pro? Run it for free in your browser instead:
+```sh
+task start
+```
 
 ## Features
 
