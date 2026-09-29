@@ -60,8 +60,8 @@ Static site (plain HTML/CSS/JS, no build step, no framework) for
 lampherelabs.com, deployed via Cloudflare Pages Git integration (push to
 `main` → live in ~1-2 minutes, no CI/CD workflow file).
 
-- `product-dbt-ui/index.html` is dbt-ui's product page
-  (lampherelabs.com/product-dbt-ui) — hero shots, feature grid, screenshot
+- `tools/dbt-ui/index.html` is dbt-ui's product page
+  (lampherelabs.com/tools/dbt-ui) — hero shots, feature grid, screenshot
   gallery with a click-to-enlarge/arrow-key-navigable lightbox, pricing,
   install steps.
 - `assets/img/` holds resized copies of screenshots sourced from this repo's
@@ -71,13 +71,13 @@ lampherelabs.com, deployed via Cloudflare Pages Git integration (push to
   2400px (`*_2400.png`, the gallery items' `data-full`).
 - **This repo's `img/*.png` files are the source of truth for screenshots.**
   When updating one, also refresh the corresponding resized copy in
-  `lamphere-labs/assets/img/` and check whether `product-dbt-ui/index.html`
+  `lamphere-labs/assets/img/` and check whether `tools/dbt-ui/index.html`
   references it by name — the two repos' filenames don't always match
   (e.g. this repo's `home.png` → the site's `homepage_1200.png` /
   `homepage_2400.png`, `dag_view.png` → the hero shot `dag_logs_2560.png`,
   `file_explorer.png` → the hero shot `files_model_exec_dag_2560.png`).
 - When this repo's `img/` screenshots change (new screenshot, rename,
-  deletion), check whether `lamphere-labs/product-dbt-ui/index.html`'s
+  deletion), check whether `lamphere-labs/tools/dbt-ui/index.html`'s
   gallery grid needs the same update. This repo's README only shows
   `img/dag_view.png` (under the intro); the full gallery lives on the site.
   See
