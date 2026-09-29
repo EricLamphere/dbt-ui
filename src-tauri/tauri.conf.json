@@ -32,9 +32,12 @@
       "icons/128x128@2x.png",
       "icons/icon.icns"
     ],
-    "resources": ["binaries/frontend_dist/**/*", "binaries/dbt-ui-backend/**/*"],
+    "resources": ["binaries/frontend_dist/**/*"],
     "macOS": {
-      "exceptionDomain": "127.0.0.1"
+      "exceptionDomain": "127.0.0.1",
+      "files": {
+        "Resources/binaries/dbt-ui-backend": "./binaries/dbt-ui-backend"
+      }
     }
   }
 }

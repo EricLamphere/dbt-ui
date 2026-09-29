@@ -9,7 +9,7 @@ Thanks for helping out. This guide covers setting up a dev environment, the proj
 ```bash
 task install                    # create backend/.venv, pip install, npm install
 task install PYTHON=python3.12  # or pin a specific Python interpreter
-task start                      # backend on :8001 + Vite on :5173, hot reload, logs in the terminal
+task start                      # backend on :8001 + Vite on :5173, hot reload; auto-installs missing/stale deps
 ```
 
 Open [http://localhost:5173](http://localhost:5173). Vite proxies `/api` to the backend on `:8001`.

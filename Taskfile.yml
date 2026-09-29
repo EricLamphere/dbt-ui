@@ -31,9 +31,31 @@ tasks:
       DBT_UI_DATA_DIR: "{{.ROOT_DIR}}/data"
       DBT_UI_FRONTEND_DIST: "{{.ROOT_DIR}}/frontend/dist"
 
+  ensure:frontend:
+    desc: Install Node dependencies if node_modules is missing or older than package.json / package-lock.json
+    dir: "{{.FRONTEND_DIR}}"
+    preconditions:
+      - sh: command -v npm >/dev/null 2>&1
+        msg: "npm not found on PATH — install Node.js 18+ (https://nodejs.org) and re-run."
+    # Skipped when every check passes. npm writes node_modules/.package-lock.json
+    # on install, so it doubles as an "installed at" marker; a `git pull` that
+    # changes package.json or the lockfile gives them a newer mtime than it.
+    status:
+      - test -f node_modules/.package-lock.json
+      - test node_modules/.package-lock.json -nt package.json
+      - test node_modules/.package-lock.json -nt package-lock.json
+    cmds:
+      - echo "Frontend dependencies missing or out of date — running npm install..."
+      - npm install
+      # npm leaves the marker untouched when nothing changed; bump it so the
+      # status check passes next time instead of reinstalling on every start.
+      - touch node_modules/.package-lock.json
+
   dev:frontend:
     desc: Start the Vite dev server
     dir: "{{.FRONTEND_DIR}}"
+    deps:
+      - task: ensure:frontend
     cmds:
       - npm run dev
 

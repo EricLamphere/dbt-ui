@@ -46,7 +46,7 @@ task install    # set up the Python venv and npm packages
 task start      # run the app in your browser at http://localhost:5173
 ```
 
-`task start` runs the backend and frontend dev servers with hot reload. It's the fastest way to work on dbt-ui.
+`task start` runs the backend and frontend dev servers with hot reload, installing (or updating) Python and npm dependencies first if needed — so on a fresh clone or after a `git pull`, it works on its own. It's the fastest way to work on dbt-ui.
 
 To test your changes in the desktop app itself:
 
