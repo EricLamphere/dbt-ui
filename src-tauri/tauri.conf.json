@@ -34,8 +34,7 @@
     ],
     "resources": ["binaries/frontend_dist/**/*", "binaries/dbt-ui-backend/**/*"],
     "macOS": {
-      "exceptionDomain": "127.0.0.1",
-      "signingIdentity": "-"
+      "exceptionDomain": "127.0.0.1"
     }
   }
 }

@@ -44,6 +44,7 @@ Thumbs.db
 .env.local
 .env.*.local
 .env.sandbox
+.env.signing
 
 # dbt project workspaces (user data, not source)
 dbt_projects/

@@ -240,14 +240,59 @@ tasks:
       - npm run build
 
   _package:app:
-    desc: "Internal: assemble the Tauri desktop app (backend resource + frontend + native shell) from the last backend/frontend builds."
+    desc: |
+      Internal: assemble the Tauri desktop app (backend resource + frontend +
+      native shell) from the last backend/frontend builds. ENV_FILE, when set,
+      is baked into the bundle next to the backend binary (where config.py's
+      frozen env_file resolution looks) BEFORE the build, so it ships inside
+      the .app/.dmg and is covered by the code signature. When
+      APPLE_SIGNING_IDENTITY is set in the environment (release builds), the
+      backend is Developer-ID signed first and Tauri signs + notarizes the app
+      with it; otherwise everything stays ad-hoc signed as before.
     internal: true
     cmds:
       - rm -rf src-tauri/binaries/frontend_dist src-tauri/binaries/dbt-ui-backend
       - mkdir -p src-tauri/binaries
       - cp -r frontend/dist src-tauri/binaries/frontend_dist
       - cp -r backend/dist/dbt-ui-backend src-tauri/binaries/dbt-ui-backend
-      - cd src-tauri && cargo tauri build
+      - |
+        {{if .ENV_FILE}}cp "{{.ENV_FILE}}" src-tauri/binaries/dbt-ui-backend/.env
+        echo "Bundled {{.ENV_FILE}} into the app."{{end}}
+      - task: _package:sign-backend
+      # "-" = ad-hoc signing (local builds); release sets a Developer ID identity.
+      - cd src-tauri && APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:--}" cargo tauri build
+
+  _package:sign-backend:
+    desc: |
+      Internal: Developer-ID sign every Mach-O file in the PyInstaller backend
+      with the hardened runtime + a secure timestamp, which notarization
+      requires. Tauri only signs the main executable and the outer bundle, not
+      binaries shipped as plain resources, so this must run before
+      `cargo tauri build`. The backend executable itself is signed last, since
+      it loads everything under _internal/. No-op unless APPLE_SIGNING_IDENTITY
+      is set in the environment (local sandbox builds stay ad-hoc signed).
+    internal: true
+    dir: src-tauri/binaries/dbt-ui-backend
+    cmds:
+      - |
+        set -euo pipefail
+        if [ -z "${APPLE_SIGNING_IDENTITY:-}" ] || [ "$APPLE_SIGNING_IDENTITY" = "-" ]; then
+          echo "APPLE_SIGNING_IDENTITY not set — leaving the backend ad-hoc signed."
+          exit 0
+        fi
+        sign() {
+          codesign --force --timestamp --options runtime \
+            --entitlements ../../entitlements/backend.plist \
+            --sign "$APPLE_SIGNING_IDENTITY" "$1"
+        }
+        find _internal -type f | while IFS= read -r f; do
+          if file -b "$f" | grep -q "Mach-O"; then
+            sign "$f"
+          fi
+        done
+        sign dbt-ui-backend
+        codesign --verify --strict --verbose=1 dbt-ui-backend
+        echo "Signed the backend with $APPLE_SIGNING_IDENTITY."
 
   _package:install:
     desc: "Internal: install the last-built app bundle to /Applications (macOS)."
@@ -268,15 +313,12 @@ tasks:
 
   _package:build-with-env:
     desc: |
-      Internal: build + install the app, then copy ENV_FILE next to the
-      INSTALLED binary (not backend/.env — PyInstaller never bundles
-      backend/.env into the binary; config.py's _is_frozen() env_file
-      resolution reads it from beside the installed executable at runtime,
-      which only exists after _package:install has placed it in
-      /Applications). This is the same manual step package:install:sandbox
-      used to do by hand — see today's session for why the two paths
-      (build-time backend/.env vs. the installed app's own directory) are
-      not interchangeable.
+      Internal: build + install the app with ENV_FILE baked into the bundle
+      (next to the backend binary, where config.py's frozen env_file
+      resolution reads it — PyInstaller never bundles backend/.env itself).
+      It is placed before the Tauri build so it ships inside the .dmg and is
+      covered by the code signature; copying it into the installed app
+      afterwards would leave downloads without it and break the signature.
     internal: true
     requires:
       vars: [ENV_FILE]
@@ -289,10 +331,9 @@ tasks:
       - task: _package:backend
       - task: _package:frontend
       - task: _package:app
+        vars:
+          ENV_FILE: "{{.ENV_FILE}}"
       - task: _package:install
-      - |
-        cp "{{.ENV_FILE}}" "/Applications/dbt-ui.app/Contents/Resources/binaries/dbt-ui-backend/.env"
-        echo "Copied {{.ENV_FILE}} into the installed app."
 
   package:sandbox:pro:
     desc: Build + install the app with Pro features enabled, talking to Polar SANDBOX. For testing paid features locally.
@@ -339,29 +380,52 @@ tasks:
         vars:
           ENV_FILE: "{{.BACKEND_DIR}}/.env.production"
 
-  # Builds the production app (package:production) and publishes it as a
-  # GitHub release. The dmg is uploaded twice: once with its versioned name,
-  # and once as dbt-ui_aarch64.dmg so the marketing site can link to the
-  # stable URL
+  # Builds the production app (package:production), Developer-ID signed and
+  # notarized, and publishes it as a GitHub release. Apple credentials come
+  # from .env.signing (gitignored — see .env.signing.example):
+  #   APPLE_SIGNING_IDENTITY  "Developer ID Application: Your Name (TEAMID)"
+  #   APPLE_ID                your Apple Account email
+  #   APPLE_PASSWORD          an app-specific password (appleid.apple.com)
+  #   APPLE_TEAM_ID           your 10-character Team ID
+  # Tauri reads these to sign + notarize the .app; the backend binaries are
+  # signed by _package:sign-backend, and the .dmg is notarized + stapled here.
+  # The dmg is uploaded twice: once with its versioned name, and once as
+  # dbt-ui_aarch64.dmg so the marketing site can link to the stable URL
   # https://github.com/EricLamphere/dbt-ui/releases/latest/download/dbt-ui_aarch64.dmg
   # and start the download directly.
   release:
-    desc: Build the production app and publish it as GitHub release v<version>
+    desc: Build, sign, notarize, and publish the production app as GitHub release v<version>
+    dotenv: ['.env.signing']
     vars:
       VERSION:
         sh: python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])"
       DMG: src-tauri/target/release/bundle/dmg/dbt-ui_{{.VERSION}}_aarch64.dmg
       STABLE_DMG: src-tauri/target/release/bundle/dmg/dbt-ui_aarch64.dmg
+      APP: src-tauri/target/release/bundle/macos/dbt-ui.app
     preconditions:
-      # Checked before the (slow) build so a forgotten version bump fails fast.
+      # Everything here is checked before the (slow) build so mistakes fail fast.
       - sh: "! gh release view v{{.VERSION}} >/dev/null 2>&1"
         msg: "Release v{{.VERSION}} already exists — bump the version first."
+      - sh: test -f .env.signing
+        msg: ".env.signing not found — copy .env.signing.example to .env.signing and fill in your Apple credentials."
+      - sh: '[ -n "$APPLE_SIGNING_IDENTITY" ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]'
+        msg: ".env.signing must set APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID."
+      - sh: security find-identity -v -p codesigning | grep -qF "$APPLE_SIGNING_IDENTITY"
+        msg: "Signing identity not found in your keychain — install your Developer ID Application certificate (check with: security find-identity -v -p codesigning)."
     cmds:
-      - task: package:production
+      # A subprocess, not `task:`, so the .env.signing variables reach the build.
+      - task package:production
       - |
         if [ ! -f "{{.DMG}}" ]; then
           echo "Build finished but {{.DMG}} was not found." >&2
           exit 1
         fi
+      - codesign --verify --deep --strict --verbose=1 "{{.APP}}"
+      - xcrun notarytool submit "{{.DMG}}" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+      # Stapling fails unless Apple accepted the submission, so it doubles as the check.
+      # If it fails, see why with: xcrun notarytool log <submission-id> --apple-id … --password … --team-id …
+      - xcrun stapler staple "{{.DMG}}"
+      - spctl --assess --type execute --verbose "{{.APP}}"
+      - spctl --assess --type open --context context:primary-signature --verbose "{{.DMG}}"
       - cp "{{.DMG}}" "{{.STABLE_DMG}}"
       - gh release create "v{{.VERSION}}" "{{.DMG}}" "{{.STABLE_DMG}}" --title "dbt-ui v{{.VERSION}}" --generate-notes

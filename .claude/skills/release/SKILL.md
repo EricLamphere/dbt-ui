@@ -15,6 +15,8 @@ Invoking this skill is the user's go-ahead to publish. Do not commit or push any
 Run these and stop with a clear message if any fail:
 
 - `gh auth status` — must be logged in (the release is created with `gh`).
+- `.env.signing` must exist at the repo root with `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` set (template: `.env.signing.example`). Check that the keys are non-empty without printing their values — never echo the password.
+- `security find-identity -v -p codesigning` must list the `APPLE_SIGNING_IDENTITY` value (the Developer ID Application certificate is installed).
 - Read the current version from `src-tauri/tauri.conf.json` (`"version"`). This is the source of truth.
 - Compute the new version from the argument (semver: `patch` → X.Y.Z+1, `minor` → X.Y+1.0, `major` → X+1.0.0; an explicit version must be valid semver and greater than the current one).
 - `gh release view v<new>` must fail (no existing release with that tag).
@@ -55,8 +57,9 @@ If any file doesn't show the new version, fix it before continuing.
 Run `task release` from the repo root **in the background** (`run_in_background: true`) — the production build takes several minutes, well past the foreground timeout. It:
 
 1. refuses if a release for this version already exists,
-2. runs `task package:production` (builds the Pro + Polar-production app and installs it to `/Applications`),
-3. creates GitHub release `v<new>` with both `dbt-ui_<new>_aarch64.dmg` and `dbt-ui_aarch64.dmg` (the stable name the lamphere-labs site's Download buttons link to).
+2. runs `task package:production` (builds the Pro + Polar-production app, Developer-ID signed — backend binaries included — and notarized by Tauri, and installs it to `/Applications`),
+3. notarizes and staples the `.dmg`, then checks both with `spctl` — if notarization is rejected, get the reason with `xcrun notarytool log <submission-id>` (credentials from `.env.signing`),
+4. creates GitHub release `v<new>` with both `dbt-ui_<new>_aarch64.dmg` and `dbt-ui_aarch64.dmg` (the stable name the lamphere-labs site's Download buttons link to).
 
 Wait for the completion notification; don't poll. If it fails, show the relevant tail of the output, diagnose, and do not retry blindly — a failure after the release was created must not create a second one.
 
