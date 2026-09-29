@@ -17,11 +17,11 @@ For each changed file, determine which docs are affected using the maps below.
 |---|---|
 | `backend/app/db/models.py` | `CLAUDE.md` → Database Tables; `docs/architecture.md` → Database Schema |
 | `backend/app/api/*.py` | `docs/architecture.md` → API Routes |
-| `backend/app/api/settings.py` | `docs/architecture.md` → Configuration; `README.md` → Environment Variables |
+| `backend/app/api/settings.py` | `docs/architecture.md` → Configuration; `CONTRIBUTING.md` → Configuration |
 | `backend/app/api/init.py` | `CLAUDE.md` → Init Pipeline System; `docs/architecture.md` → Key Flows |
 | `backend/app/api/global_profiles.py` | `docs/architecture.md` → API Routes; `CLAUDE.md` → Global Settings |
 | `frontend/src/routes/*.tsx` | `README.md` → Features (if user-facing) |
-| `backend/app/config.py` | `docs/architecture.md` → Configuration; `README.md` → Environment Variables |
+| `backend/app/config.py` | `docs/architecture.md` → Configuration; `CONTRIBUTING.md` → Configuration |
 
 ## Step 3: How-to doc trigger map
 
@@ -62,7 +62,8 @@ Open `docs/architecture.md`. Update:
 
 Open `README.md`. Update:
 - **Features** list — add a bullet for any user-visible feature
-- **Environment Variables** table — add any new variables that users may want to set
+
+The env var tables live in `CONTRIBUTING.md` → Configuration, not the README — add new variables there.
 
 ## Step 7: Update how-to guides
 
@@ -78,7 +79,7 @@ Keep how-to docs step-oriented and user-focused. Describe what the user does, no
 
 Cross-check:
 - All tables in `backend/app/db/models.py` appear in `CLAUDE.md` Database Tables and `docs/architecture.md` Database Schema
-- All env vars in `backend/app/api/settings.py` SettingsDto appear in `README.md` env table and `docs/architecture.md` Configuration
+- All env vars in `backend/app/api/settings.py` SettingsDto appear in `CONTRIBUTING.md` Configuration table and `docs/architecture.md` Configuration
 - The API routes section in `docs/architecture.md` matches all routes registered in `backend/app/main.py`
 - `docs/how-to/README.md` index matches the actual files in `docs/how-to/`
 

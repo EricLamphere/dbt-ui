@@ -22,7 +22,7 @@ Changes that require doc updates:
 |---------|--------|
 | New API endpoint | `docs/architecture.md` → API Routes section |
 | New DB table/column | `docs/architecture.md` → Database Schema section; `CLAUDE.md` → Database Tables section |
-| New env var or setting | `docs/architecture.md` → Configuration table; `README.md` → Environment Variables table; `CLAUDE.md` → Global Settings section |
+| New env var or setting | `docs/architecture.md` → Configuration table; `CONTRIBUTING.md` → Configuration table; `CLAUDE.md` → Global Settings section |
 | New feature with user-facing impact | `README.md` → Features list |
 | New key flow or architectural pattern | `docs/architecture.md` → Key Flows or Design Decisions |
 | New init step type | `docs/architecture.md` → Init Pipeline section; `CLAUDE.md` → Init Pipeline System |
@@ -50,7 +50,7 @@ Before marking work complete:
 - [ ] `CLAUDE.md` database tables section matches `backend/app/db/models.py`
 - [ ] `docs/architecture.md` API routes match actual FastAPI routers
 - [ ] `docs/architecture.md` Configuration table includes all env vars from `backend/app/config.py`
-- [ ] `README.md` env var table matches above
+- [ ] `CONTRIBUTING.md` Configuration table matches above
 - [ ] `README.md` Features list mentions the new feature (if user-facing)
 - [ ] Relevant `docs/how-to/` guide updated if a user-facing flow changed
 - [ ] `docs/how-to/README.md` index updated if a new how-to was created

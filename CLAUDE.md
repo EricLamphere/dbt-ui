@@ -364,6 +364,7 @@ task test:backend    # pytest --cov=app -q (run from backend/)
 task test            # pytest + tsc build
 task lint            # ruff check app tests
 task db:reset        # delete data/dbt_ui.sqlite
+task package:app     # build + install the free desktop app (no dbt-ui-pro, no .env needed)
 task release         # runs package:production signed with the Developer ID in .env.signing (gitignored; see .env.signing.example), notarizes, then creates the GitHub release; also uploads dbt-ui_aarch64.dmg (stable name the lamphere-labs site's Download buttons link to)
 ```
 
@@ -390,7 +391,7 @@ Single test file: `cd backend && .venv/bin/pytest tests/test_x.py -xvs`
 - [ ] Return `configured` flag if it affects workspace visibility (Home page)
 - [ ] Call `_effective_workspace()` in `projects/service.py` to resolve final workspace path
 - [ ] Update frontend `api.settings.get()` type if response shape changed
-- [ ] Update `docs/architecture.md` → Configuration table and `README.md` → Environment Variables table
+- [ ] Update `docs/architecture.md` → Configuration table and `CONTRIBUTING.md` → Configuration table
 - [ ] Update `docs/how-to/configure-environment.md` → Global settings section
 
 ## Checklist: Adding a New Terminal Feature
@@ -418,7 +419,7 @@ Run `/update-docs` after any session with code changes. Manual checklist:
 - [ ] `CLAUDE.md` Database Tables matches `backend/app/db/models.py`
 - [ ] `docs/architecture.md` API Routes match `backend/app/main.py` router registrations
 - [ ] `docs/architecture.md` Configuration table matches `backend/app/config.py`
-- [ ] `README.md` Environment Variables table matches above
+- [ ] `CONTRIBUTING.md` Configuration table matches above
 - [ ] `README.md` Features list covers new user-facing features
 - [ ] Relevant `docs/how-to/` guide updated if a user-facing flow changed
 - [ ] `docs/how-to/README.md` index updated if a new guide was added

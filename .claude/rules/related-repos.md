@@ -47,9 +47,10 @@ package or git submodule.
   `dbt_ui_pro` at runtime). See `Taskfile.yml`'s `package:pro` /
   `_package:pro-check` / `package:sandbox:pro` / `package:sandbox:base`
   tasks for the full build matrix (pro vs. base × sandbox vs. production).
-- Contributors without access to `dbt-ui-pro` build and test against
-  `package:sandbox:base` — column lineage is simply unavailable, identical
-  to the entitlement-gated experience a non-Pro user sees.
+- Contributors without access to `dbt-ui-pro` build and test with
+  `task package:app` (no Pro package and no `backend/.env.*` file needed) —
+  column lineage is simply unavailable, identical to the entitlement-gated
+  experience a non-Pro user sees.
 - If asked to work on the actual lineage tracing algorithm, that code lives
   in `dbt-ui-pro`, not here — this repo only has the shim.
 
@@ -64,21 +65,22 @@ lampherelabs.com, deployed via Cloudflare Pages Git integration (push to
   gallery with a click-to-enlarge/arrow-key-navigable lightbox, pricing,
   install steps.
 - `assets/img/` holds resized copies of screenshots sourced from this repo's
-  `img/` directory (hero shots at 1600px wide, gallery tiles at 1200px —
-  resized with `sips --resampleWidth`, not committed at full source
-  resolution).
+  `img/` directory, resized with `sips --resampleWidth` (not committed at
+  full source resolution): hero shots at 2560px (`*_2560.png`), gallery
+  thumbnails at 1200px (`*_1200.png`), and lightbox full-size images at
+  2400px (`*_2400.png`, the gallery items' `data-full`).
 - **This repo's `img/*.png` files are the source of truth for screenshots.**
   When updating one, also refresh the corresponding resized copy in
   `lamphere-labs/assets/img/` and check whether `product-dbt-ui/index.html`
   references it by name — the two repos' filenames don't always match
-  (e.g. this repo's `home.png` → the site's `homepage_1200.png`,
-  `settings.png` → `settings_1200.png`, `dag_view.png` → the hero shot
-  `dag_logs_1600.png`, `file_explorer.png` → the hero shot
-  `files_model_exec_dag_1600.png`).
-- When this repo's `img/` gallery changes (new screenshot, rename, deletion),
-  check whether `lamphere-labs/product-dbt-ui/index.html`'s gallery grid and
-  README.md's Gallery section need the same update — keep all three in sync
-  rather than letting the site or README drift stale. See
+  (e.g. this repo's `home.png` → the site's `homepage_1200.png` /
+  `homepage_2400.png`, `dag_view.png` → the hero shot `dag_logs_2560.png`,
+  `file_explorer.png` → the hero shot `files_model_exec_dag_2560.png`).
+- When this repo's `img/` screenshots change (new screenshot, rename,
+  deletion), check whether `lamphere-labs/product-dbt-ui/index.html`'s
+  gallery grid needs the same update. This repo's README only shows
+  `img/dag_view.png` (under the intro); the full gallery lives on the site.
+  See
   [doc-update.md](./doc-update.md) for this repo's own doc-sync rules;
   lamphere-labs isn't covered by that checklist since it's a separate repo,
   so treat gallery/screenshot changes as needing a manual cross-check here.

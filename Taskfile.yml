@@ -348,6 +348,22 @@ tasks:
         vars:
           ENV_FILE: "{{.BACKEND_DIR}}/.env.sandbox"
 
+  package:app:
+    desc: |
+      Build + install the free desktop app (no Pro features, no licensing
+      config) to /Applications. The contributor-friendly packaging path: it
+      needs neither the private dbt-ui-pro repo nor a backend/.env.* file.
+      Uninstalls dbt_ui_pro from the shared backend/.venv first if present,
+      same as package:sandbox:base.
+    deps:
+      - task: ensure:backend
+    cmds:
+      - "{{.BACKEND_DIR}}/.venv/bin/pip uninstall -y dbt_ui_pro -q 2>/dev/null || true"
+      - task: _package:backend
+      - task: _package:frontend
+      - task: _package:app
+      - task: _package:install
+
   package:sandbox:base:
     desc: |
       Build + install the app WITHOUT Pro features, talking to Polar SANDBOX.
