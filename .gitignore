@@ -19,6 +19,11 @@ dist/
 *.log
 *.log.*
 
+# Packaging (Tauri + PyInstaller build outputs)
+backend/build/
+src-tauri/target/
+src-tauri/binaries/
+
 # App data (runtime-generated, never committed)
 data/
 *.sqlite
@@ -38,6 +43,8 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+.env.sandbox
+.env.signing
 
 # dbt project workspaces (user data, not source)
 dbt_projects/

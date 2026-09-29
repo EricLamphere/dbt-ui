@@ -51,6 +51,15 @@ export default {
       fontFamily: {
         sans: ['Inter', 'system-ui', 'sans-serif'],
       },
+      keyframes: {
+        'pro-shimmer': {
+          '0%': { backgroundPosition: '200% 0' },
+          '100%': { backgroundPosition: '-200% 0' },
+        },
+      },
+      animation: {
+        'pro-shimmer': 'pro-shimmer 3s linear infinite',
+      },
     },
   },
   plugins: [],

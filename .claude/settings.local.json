@@ -22,7 +22,16 @@
       "Bash(.venv/bin/ruff check *)",
       "Bash(curl -s \"https://primer.style/foundations/color/overview\")",
       "Read(//Users/ericlamphere/Projects/dbt_projects/duckdb_dbt/**)",
-      "Bash(dbt show *)"
+      "Bash(dbt show *)",
+      "Bash(.venv/bin/python *)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/pip list *)",
+      "Bash(.venv/bin/pip uninstall *)",
+      "Bash(python3.12 -m venv /tmp/test_venv_pip)",
+      "Bash(/tmp/test_venv_pip/bin/pip install *)",
+      "Bash(python3 *)",
+      "Bash(curl -s http://localhost:8001/api/init/global-setup/status)",
+      "Bash(curl -s -X POST http://localhost:8001/api/init/global-setup)"
     ]
   }
 }

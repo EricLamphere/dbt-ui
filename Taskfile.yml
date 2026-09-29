@@ -7,9 +7,24 @@ vars:
 tasks:
   # ---- Development ----
 
+  ensure:backend:
+    desc: Ensure .venv exists and all requirements are installed
+    dir: "{{.BACKEND_DIR}}"
+    vars:
+      PYTHON: '{{.PYTHON | default "python3"}}'
+    cmds:
+      - |
+        if [ ! -d ".venv" ]; then
+          echo "Creating virtual environment..."
+          {{.PYTHON}} -m venv .venv
+        fi
+      - .venv/bin/pip install -q -e ".[dev]"
+
   dev:backend:
     desc: Start the FastAPI backend in dev mode (hot reload)
     dir: "{{.BACKEND_DIR}}"
+    deps:
+      - task: ensure:backend
     cmds:
       - .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
     env:
@@ -123,3 +138,294 @@ tasks:
     cmds:
       - rm -f data/dbt_ui.sqlite
       - echo "Database reset."
+
+  reset:
+    desc: Full reset for testing — wipe DB, delete backend venv, reinstall with python3.12
+    cmds:
+      - task: db:reset
+      - rm -rf backend/.venv
+      - task: install
+        vars:
+          PYTHON: python3.12
+
+  # ---- Package (Tauri desktop app) ----
+  #
+  # Three build scenarios, each a single top-level task that builds AND
+  # installs to /Applications:
+  #
+  #   task package:sandbox:pro    — pro features + Polar sandbox (dev testing of Pro)
+  #   task package:sandbox:base   — no pro features + Polar sandbox (dev testing of free tier)
+  #   task package:production     — pro features + Polar production (the real release build)
+  #
+  # Polar config is selected via backend/.env.sandbox (gitignored — holds
+  # your real sandbox API key) or backend/.env.production (checked in —
+  # public checkout_url + org_id only; the shipped app never needs an API
+  # key, since license validate/activate are unauthenticated Polar endpoints
+  # by design — see app/licensing/polar_client.py). The chosen file is
+  # copied into the INSTALLED app's bundle directory after install (NOT
+  # backend/.env, which PyInstaller never bundles — config.py's
+  # _is_frozen() env_file resolution reads from beside the installed
+  # binary at runtime). backend/.env itself is never touched by these
+  # tasks and never committed.
+  #
+  # NOTE: package:production still relies on a real .env sitting next to
+  # the shipped binary, same as the sandbox scenarios. The more robust fix
+  # — baking public production Polar values as compiled defaults in
+  # config.py so the shipped app needs no .env file at all — is a known
+  # follow-up, not yet done.
+
+  _package:pro-check:
+    desc: "Internal: fail loudly if dbt_ui_pro isn't importable in the venv (silent staleness was today's actual bug)."
+    dir: "{{.BACKEND_DIR}}"
+    internal: true
+    deps:
+      - task: ensure:backend
+    cmds:
+      - |
+        if ! .venv/bin/python -c "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('dbt_ui_pro') else 1)"; then
+          echo "dbt_ui_pro is not installed in backend/.venv — run 'task package:pro' first (or pass PRO_DIR=<path> to it if dbt-ui-pro isn't a sibling checkout)."
+          exit 1
+        fi
+
+  package:pro:
+    desc: |
+      Maintainer-only. Install the private dbt-ui-pro package (column-lineage
+      algorithm) from a sibling checkout into the backend venv, so it gets
+      bundled into the next pro build. Contributors without access to
+      dbt-ui-pro can skip this and use `package:sandbox:base` instead —
+      column lineage is simply unavailable, same as the entitlement-gated
+      behavior for non-Pro users.
+    dir: "{{.BACKEND_DIR}}"
+    vars:
+      # dbt-ui-pro is a sibling of dbt-ui/ itself (../.. from backend/, which
+      # is where this task's dir: puts its cwd) — NOT a sibling of backend/.
+      # A previous "../dbt-ui-pro" default silently failed this check on
+      # every real run; it only ever appeared to work when dbt_ui_pro had
+      # been pip installed into the venv by some other means beforehand.
+      PRO_DIR: '{{.PRO_DIR | default "../../dbt-ui-pro"}}'
+    deps:
+      - task: ensure:backend
+    cmds:
+      - |
+        if [ ! -d "{{.PRO_DIR}}" ]; then
+          echo "dbt-ui-pro not found at {{.PRO_DIR}} — clone it as a sibling of dbt-ui/, or pass PRO_DIR=<path>."
+          exit 1
+        fi
+        # NOT -e (editable): PEP 660 editable installs resolve dbt_ui_pro at
+        # runtime via a generated import finder, not real files under
+        # site-packages/dbt_ui_pro/ — PyInstaller's static Analysis can't see
+        # through that indirection, so hiddenimports lists the module but the
+        # bundle silently ends up without it ("missing module named
+        # dbt_ui_pro" in build/dbt_ui/warn-dbt_ui.txt). A plain install
+        # copies real files PyInstaller can actually find.
+        .venv/bin/pip install -q "{{.PRO_DIR}}"
+        echo "dbt-ui-pro installed — the next pro build (package:sandbox:pro / package:production) will bundle it."
+
+  _package:backend:
+    desc: "Internal: bundle the FastAPI backend via PyInstaller, using whichever backend/.env is in place at call time."
+    dir: "{{.BACKEND_DIR}}"
+    internal: true
+    deps:
+      - task: ensure:backend
+    cmds:
+      - .venv/bin/pip install -q -e ".[packaging]"
+      - rm -rf dist build
+      - .venv/bin/pyinstaller packaging/dbt_ui.spec --distpath dist --workpath build --noconfirm
+
+  _package:frontend:
+    desc: "Internal: build the frontend for embedding in the packaged app."
+    dir: "{{.FRONTEND_DIR}}"
+    internal: true
+    cmds:
+      - npm run build
+
+  _package:app:
+    desc: |
+      Internal: assemble the Tauri desktop app (backend resource + frontend +
+      native shell) from the last backend/frontend builds. ENV_FILE, when set,
+      is baked into the bundle next to the backend binary (where config.py's
+      frozen env_file resolution looks) BEFORE the build, so it ships inside
+      the .app/.dmg and is covered by the code signature. When
+      APPLE_SIGNING_IDENTITY is set in the environment (release builds), the
+      backend is Developer-ID signed first and Tauri signs + notarizes the app
+      with it; otherwise everything stays ad-hoc signed as before.
+    internal: true
+    cmds:
+      - rm -rf src-tauri/binaries/frontend_dist src-tauri/binaries/dbt-ui-backend
+      - mkdir -p src-tauri/binaries
+      - cp -r frontend/dist src-tauri/binaries/frontend_dist
+      - cp -r backend/dist/dbt-ui-backend src-tauri/binaries/dbt-ui-backend
+      - |
+        {{if .ENV_FILE}}cp "{{.ENV_FILE}}" src-tauri/binaries/dbt-ui-backend/.env
+        echo "Bundled {{.ENV_FILE}} into the app."{{end}}
+      - task: _package:sign-backend
+      # "-" = ad-hoc signing (local builds); release sets a Developer ID identity.
+      - cd src-tauri && APPLE_SIGNING_IDENTITY="${APPLE_SIGNING_IDENTITY:--}" cargo tauri build
+
+  _package:sign-backend:
+    desc: |
+      Internal: Developer-ID sign every Mach-O file in the PyInstaller backend
+      with the hardened runtime + a secure timestamp, which notarization
+      requires. Tauri only signs the main executable and the outer bundle, not
+      binaries shipped as plain resources, so this must run before
+      `cargo tauri build`. The backend executable itself is signed last, since
+      it loads everything under _internal/. No-op unless APPLE_SIGNING_IDENTITY
+      is set in the environment (local sandbox builds stay ad-hoc signed).
+    internal: true
+    dir: src-tauri/binaries/dbt-ui-backend
+    cmds:
+      - |
+        set -euo pipefail
+        if [ -z "${APPLE_SIGNING_IDENTITY:-}" ] || [ "$APPLE_SIGNING_IDENTITY" = "-" ]; then
+          echo "APPLE_SIGNING_IDENTITY not set — leaving the backend ad-hoc signed."
+          exit 0
+        fi
+        sign() {
+          codesign --force --timestamp --options runtime \
+            --entitlements ../../entitlements/backend.plist \
+            --sign "$APPLE_SIGNING_IDENTITY" "$1"
+        }
+        find _internal -type f | while IFS= read -r f; do
+          if file -b "$f" | grep -q "Mach-O"; then
+            sign "$f"
+          fi
+        done
+        sign dbt-ui-backend
+        codesign --verify --strict --verbose=1 dbt-ui-backend
+        echo "Signed the backend with $APPLE_SIGNING_IDENTITY."
+
+  _package:install:
+    desc: "Internal: install the last-built app bundle to /Applications (macOS)."
+    internal: true
+    cmds:
+      - |
+        BUNDLE="src-tauri/target/release/bundle/macos/dbt-ui.app"
+        if [ ! -d "$BUNDLE" ]; then
+          echo "No build found at $BUNDLE — the app build step must have failed."
+          exit 1
+        fi
+        pkill -9 -f dbt-ui-backend 2>/dev/null || true
+        pkill -9 -f "dbt-ui.app" 2>/dev/null || true
+        sleep 1
+        rm -rf /Applications/dbt-ui.app
+        cp -r "$BUNDLE" /Applications/dbt-ui.app
+        echo "Installed to /Applications/dbt-ui.app"
+
+  _package:build-with-env:
+    desc: |
+      Internal: build + install the app with ENV_FILE baked into the bundle
+      (next to the backend binary, where config.py's frozen env_file
+      resolution reads it — PyInstaller never bundles backend/.env itself).
+      It is placed before the Tauri build so it ships inside the .dmg and is
+      covered by the code signature; copying it into the installed app
+      afterwards would leave downloads without it and break the signature.
+    internal: true
+    requires:
+      vars: [ENV_FILE]
+    cmds:
+      - |
+        if [ ! -f "{{.ENV_FILE}}" ]; then
+          echo "{{.ENV_FILE}} not found."
+          exit 1
+        fi
+      - task: _package:backend
+      - task: _package:frontend
+      - task: _package:app
+        vars:
+          ENV_FILE: "{{.ENV_FILE}}"
+      - task: _package:install
+
+  package:sandbox:pro:
+    desc: Build + install the app with Pro features enabled, talking to Polar SANDBOX. For testing paid features locally.
+    cmds:
+      # Sequential, not deps: — package:pro and _package:pro-check both
+      # depend on ensure:backend, and Task runs deps concurrently by
+      # default, which races two `pip install -e` calls against the same
+      # venv (observed: OSError on the editable-install .pth file).
+      - task: package:pro
+      - task: _package:pro-check
+      - task: _package:build-with-env
+        vars:
+          ENV_FILE: "{{.BACKEND_DIR}}/.env.sandbox"
+
+  package:sandbox:base:
+    desc: |
+      Build + install the app WITHOUT Pro features, talking to Polar SANDBOX.
+      For testing the free-tier experience. Uninstalls dbt_ui_pro from the
+      shared backend/.venv first if present — pro and base builds share one
+      venv, and PyInstaller bundles dbt_ui_pro whenever it's importable
+      regardless of which scenario you're building, so it must actually be
+      absent, not just unused. Run `task package:pro` again afterward before
+      building a pro scenario.
+    deps:
+      - task: ensure:backend
+    cmds:
+      - "{{.BACKEND_DIR}}/.venv/bin/pip uninstall -y dbt_ui_pro -q 2>/dev/null || true"
+      - task: _package:build-with-env
+        vars:
+          ENV_FILE: "{{.BACKEND_DIR}}/.env.sandbox"
+
+  package:production:
+    desc: |
+      Build + install the REAL release app — Pro features + Polar PRODUCTION.
+      This is what actually gets distributed. backend/.env.production must
+      have real POLAR_PRODUCTION_ORGANIZATION_ID / POLAR_PRODUCTION_CHECKOUT_URL
+      values (both public, safe to commit) before running this — it never
+      needs POLAR_PRODUCTION_API_KEY, and that key must never be added to
+      backend/.env.production.
+    cmds:
+      - task: package:pro
+      - task: _package:pro-check
+      - task: _package:build-with-env
+        vars:
+          ENV_FILE: "{{.BACKEND_DIR}}/.env.production"
+
+  # Builds the production app (package:production), Developer-ID signed and
+  # notarized, and publishes it as a GitHub release. Apple credentials come
+  # from .env.signing (gitignored — see .env.signing.example):
+  #   APPLE_SIGNING_IDENTITY  "Developer ID Application: Your Name (TEAMID)"
+  #   APPLE_ID                your Apple Account email
+  #   APPLE_PASSWORD          an app-specific password (appleid.apple.com)
+  #   APPLE_TEAM_ID           your 10-character Team ID
+  # Tauri reads these to sign + notarize the .app; the backend binaries are
+  # signed by _package:sign-backend, and the .dmg is notarized + stapled here.
+  # The dmg is uploaded twice: once with its versioned name, and once as
+  # dbt-ui_aarch64.dmg so the marketing site can link to the stable URL
+  # https://github.com/EricLamphere/dbt-ui/releases/latest/download/dbt-ui_aarch64.dmg
+  # and start the download directly.
+  release:
+    desc: Build, sign, notarize, and publish the production app as GitHub release v<version>
+    dotenv: ['.env.signing']
+    vars:
+      VERSION:
+        sh: python3 -c "import json; print(json.load(open('src-tauri/tauri.conf.json'))['version'])"
+      DMG: src-tauri/target/release/bundle/dmg/dbt-ui_{{.VERSION}}_aarch64.dmg
+      STABLE_DMG: src-tauri/target/release/bundle/dmg/dbt-ui_aarch64.dmg
+      APP: src-tauri/target/release/bundle/macos/dbt-ui.app
+    preconditions:
+      # Everything here is checked before the (slow) build so mistakes fail fast.
+      - sh: "! gh release view v{{.VERSION}} >/dev/null 2>&1"
+        msg: "Release v{{.VERSION}} already exists — bump the version first."
+      - sh: test -f .env.signing
+        msg: ".env.signing not found — copy .env.signing.example to .env.signing and fill in your Apple credentials."
+      - sh: '[ -n "$APPLE_SIGNING_IDENTITY" ] && [ -n "$APPLE_ID" ] && [ -n "$APPLE_PASSWORD" ] && [ -n "$APPLE_TEAM_ID" ]'
+        msg: ".env.signing must set APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD, and APPLE_TEAM_ID."
+      - sh: security find-identity -v -p codesigning | grep -qF "$APPLE_SIGNING_IDENTITY"
+        msg: "Signing identity not found in your keychain — install your Developer ID Application certificate (check with: security find-identity -v -p codesigning)."
+    cmds:
+      # A subprocess, not `task:`, so the .env.signing variables reach the build.
+      - task package:production
+      - |
+        if [ ! -f "{{.DMG}}" ]; then
+          echo "Build finished but {{.DMG}} was not found." >&2
+          exit 1
+        fi
+      - codesign --verify --deep --strict --verbose=1 "{{.APP}}"
+      - xcrun notarytool submit "{{.DMG}}" --apple-id "$APPLE_ID" --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+      # Stapling fails unless Apple accepted the submission, so it doubles as the check.
+      # If it fails, see why with: xcrun notarytool log <submission-id> --apple-id … --password … --team-id …
+      - xcrun stapler staple "{{.DMG}}"
+      - spctl --assess --type execute --verbose "{{.APP}}"
+      - spctl --assess --type open --context context:primary-signature --verbose "{{.DMG}}"
+      - cp "{{.DMG}}" "{{.STABLE_DMG}}"
+      - gh release create "v{{.VERSION}}" "{{.DMG}}" "{{.STABLE_DMG}}" --title "dbt-ui v{{.VERSION}}" --generate-notes

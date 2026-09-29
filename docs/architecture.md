@@ -9,7 +9,7 @@ dbt-ui is a local-first web UI that wraps dbt-core. It runs as a local dev serve
 | Layer | Technology | Why |
 |---|---|---|
 | Backend | FastAPI (Python 3.11+) | Async, native SSE/streaming, simple subprocess management |
-| dbt execution | `subprocess` calling the venv `dbt` binary | Safe — avoids dbt Python API global state issues; one process per invocation; always uses `backend/.venv/bin/dbt` |
+| dbt execution | `subprocess` calling the venv `dbt` binary | Safe — avoids dbt Python API global state issues; one process per invocation; always uses the isolated dbt venv (`backend/.venv` in dev, OS user-data dir in the packaged app — see `dbt_venv_dir` in Configuration) |
 | Manifest parsing | Custom JSON parser over `manifest.json` | Direct, version-agnostic parsing of dbt's output artifacts |
 | File watching | `watchfiles` (Rust-backed) | Low-overhead, async-friendly, debounced |
 | Live push | Server-Sent Events (SSE) via `sse-starlette` | One-way server→client is sufficient; simpler than WebSockets; built-in browser reconnect |
@@ -60,7 +60,7 @@ dbt-ui/
 │   │   │   ├── run_results.py       # Parse target/run_results.json → statuses
 │   │   │   ├── runner.py            # DbtRunner singleton; subprocess + asyncio.Lock per project; .run() for silent invocations
 │   │   │   ├── select.py            # Build --select strings (only/upstream/downstream/full)
-│   │   │   ├── venv.py              # venv_dbt/venv_pip/venv_python — resolve binaries in backend/.venv/bin/
+│   │   │   ├── venv.py              # venv_dbt/venv_pip/venv_python — resolve binaries in settings.dbt_venv_dir; self-provisions the venv via system python3 on first use
 │   │   │   ├── init_scripts.py      # Read/write init/*.sh custom scripts
 │   │   │   ├── debug_parser.py      # Parse dbt debug stdout → structured DebugResult with per-check status
 │   │   │   ├── drift.py             # diff_columns / is_eligible_for_drift_check — column drift helpers
@@ -90,9 +90,10 @@ dbt-ui/
 │   │   │   └── sse.ts               # useProjectEvents, useInitSessionEvents, useTerminalEvents
 │   │   ├── components/
 │   │   │   ├── Header.tsx           # Persistent nav; Profile + Target dropdowns on project pages (reads projectId from pathname)
+│   │   │   ├── HomeCommandPalette.tsx # ⌘K palette for Home.tsx — open project by name, new project, rescan, global settings
 │   │   │   └── StatusBadge.tsx      # Status color chip
 │   │   └── routes/
-│   │       ├── Home.tsx             # Project list, search, rescan, new project modal, global settings modal
+│   │       ├── Home.tsx             # Project list, search, rescan, new project modal, global settings modal; own ⌘K listener → HomeCommandPalette
 │   │       └── Project/
 │   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet overflow-auto>); global ⌘K listener; CommandPaletteContext
 │   │           ├── lib/
@@ -260,6 +261,18 @@ column_lineage_snapshots
   manifest_mtime  REAL       -- mtime of target/manifest.json this snapshot was computed from;
                              -- used to short-circuit a re-scan when the manifest hasn't changed
   -- Interrupted snapshots (status='running') are reset to 'error' on server restart
+
+license_state
+  id              INTEGER PK  -- always 1, single-row cache for this installation
+  license_key     TEXT (nullable)   -- Polar license key, or null if unset
+  activation_id   TEXT(64) (nullable)  -- Polar device activation id for this install
+  device_id       TEXT(64)          -- stable per-install device id (uuid4 hex), generated once
+  entitled        BOOLEAN default false
+  status          TEXT(32) default 'unset'  -- unset | granted | not_entitled | ... (mirrors Polar's status)
+  checked_at      DATETIME (nullable)  -- last time entitlement was checked against Polar
+  customer_id     TEXT (nullable)  -- Polar customer id, captured from validate(); required to cancel a subscription
+  license_key_id  TEXT (nullable)  -- Polar's internal id for this key (not the key string), captured from validate(); required to look up activation count
+  limit_activations INTEGER (nullable)  -- max devices allowed on this key (from Polar's "Limit Activations" benefit); null means unlimited
 ```
 
 ---
@@ -290,9 +303,15 @@ POST   /api/projects/{id}/models/{unique_id}/show        run dbt show, return ro
 POST   /api/projects/{id}/models/{unique_id}/profile    run dbt show (full table), return column profile stats
 GET    /api/projects/{id}/models/{unique_id}/sql
 PUT    /api/projects/{id}/models/{unique_id}/sql
-POST   /api/projects/{id}/column-lineage/start            start async column lineage scan (202, or 200 if a fresh snapshot already exists); returns ColumnLineageSnapshot
-GET    /api/projects/{id}/column-lineage                 get the latest ColumnLineageSnapshot for a project
-GET    /api/projects/{id}/column-lineage/{snapshot_id}   get a specific ColumnLineageSnapshot by id
+POST   /api/projects/{id}/column-lineage/start            start async column lineage scan (202, or 200 if a fresh snapshot already exists); returns ColumnLineageSnapshot — Pro feature, 403 if not entitled
+GET    /api/projects/{id}/column-lineage                 get the latest ColumnLineageSnapshot for a project — Pro feature, 403 if not entitled
+GET    /api/projects/{id}/column-lineage/{snapshot_id}   get a specific ColumnLineageSnapshot by id — Pro feature, 403 if not entitled
+
+GET    /api/license                                      current cached entitlement status (does not force a fresh Polar check); includes the plaintext license_key and can_cancel
+PUT    /api/license                                       set (or clear, if license_key is null) the license key; immediately checks it against Polar
+POST   /api/license/recheck                               force an immediate Polar check, bypassing the recheck interval
+POST   /api/license/cancel                                cancel the active subscription at period end via Polar; 502 if no customer_id on record or the Polar call fails
+GET    /api/license/activations                          live count of devices currently activated against this license key (not cached); 502 if no license_key_id on record or the Polar call fails
 
 POST   /api/projects/{id}/debug                          run dbt debug, return structured check results + raw log
 GET    /api/projects/{id}/debug/last                     get result of the most recent debug run (from cache)
@@ -554,7 +573,11 @@ DAG filtering (`dagFilter.ts`) is purely client-side — no backend involvement:
 5. Publishes `docs_generated {ok, generated_at}`
 6. Frontend invalidates `['docs-status', projectId]`; the native docs browser (`Docs.tsx`) re-fetches `GET /api/projects/{id}/docs/data`
 
-### 10. Column-Level Lineage
+### 10. Column-Level Lineage (dbt-ui Pro)
+
+Column-level lineage is the first paid ("Pro") feature — all three routes (`start`, latest, and by-snapshot-id) call `_require_pro(session)` (`api/column_lineage.py`), which raises `403 {"error": "pro_feature_required", "reason": <Entitlement.reason>}` when `entitlements.check_entitlement()` returns not-entitled. Both GET routes are gated too, not just `start`, because an already-computed snapshot persists in the DB indefinitely and would otherwise keep serving results forever after a subscription lapses. See "Licensing (dbt-ui Pro)" below for the entitlement system itself.
+
+**Open-core split:** the actual sqlglot-based tracing algorithm (`prepare_lineage_jobs`, `trace_job`, `build_column_lineage`, and their private helpers) lives in a separate private repo, `dbt-ui-pro` (not in this repo) — all licensing/entitlement enforcement stays in this public repo, since that code must run inside the distributed app regardless of who can read the source. `backend/app/dbt/column_lineage.py` in *this* repo is a thin public shim: it defines the real, always-importable `ColumnRef`/`LineageJob` dataclasses (required at server-startup import time by `api/column_lineage.py`, so they can't be `TYPE_CHECKING`-only) and lazily imports `dbt_ui_pro.column_lineage` inside each function, raising `ColumnLineageUnavailable` if the private package isn't installed. The public repo therefore builds and runs completely standalone for contributors; only maintainer/release builds of the packaged desktop app install `dbt-ui-pro`: run `task package:pro` (installs `dbt-ui-pro` from a sibling checkout, editable) before `task package:backend`/`task package:app`. `packaging/dbt_ui.spec` detects whether `dbt_ui_pro` is importable at build time (`importlib.util.find_spec`) and only adds it to PyInstaller's `hiddenimports` when present — required because it's imported lazily at call time, which PyInstaller's static analysis can't discover on its own. Skipping `package:pro` produces a normal public build with lineage unavailable; nothing else in the packaging flow changes.
 
 Column lineage is computed **SQL-first**: `dbt/column_lineage.py` derives each model's column list by parsing the compiled SQL's outer `SELECT` with sqlglot (`named_selects`) — no yml `columns:` documentation is required. yml-documented columns are used only as a fallback when the SQL parse can't determine an explicit column list (a top-level `SELECT *`, or missing `compiled_code` because `dbt compile` hasn't run).
 
@@ -575,10 +598,29 @@ In the frontend (`Models.tsx`):
 - Toggling "Load column lineage" calls `POST .../column-lineage/start` (ignoring 409 — a run already in flight is fine) and keeps `useQuery(['column-lineage', id])` (`GET .../column-lineage`) as the source of truth for rendered data.
 - A `useProjectEvents` handler invalidates `['column-lineage', id]` on `column_lineage_progress`/`column_lineage_finished`, and tracks `{checked, total}` from `column_lineage_progress` for an optimistic progress indicator (mirrors `DriftPanel.tsx`).
 - `DagFilterBar` shows `Column lineage: {checked}/{total}…` while a scan is running.
+- If `columnLineage`'s query error or the `start` call's rejection is a 403 with `{"error": "pro_feature_required"}` (detected via `isProFeatureRequiredError()` in `lib/api.ts`), the lineage button renders locked (`Lock` icon, "Column lineage (Pro)") and clicking it opens `UpgradeModal` instead of starting a scan. `UpgradeModal` reads `GET /api/license` for status/reason copy and a Polar checkout link (`checkout_url`, from `POLAR_*_CHECKOUT_URL`), and lets the user paste + activate a license key inline (`PUT /api/license`) or force a recheck (`POST /api/license/recheck`).
 - Expanding a model node in the DAG reveals its columns; clicking a column toggles it in `activeColumnSels`
 - `traceColumn()` walks the lineage map bidirectionally (upstream via `reverseLineageIndex`, downstream via forward traversal) to collect all `{node, column}` pairs in the trace
 - Highlighted `{node, column}` pairs are passed as props into each `ModelNode`; nodes and edges outside the trace are dimmed
 - None of this blocks other queries/interactions — the scan runs fully server-side in background worker processes; the frontend only ever does small polling GETs and SSE-driven invalidation.
+
+### 10a. Licensing (dbt-ui Pro entitlement)
+
+Entitlement resolution (`app/licensing/entitlements.py`) wraps a thin async Polar client (`app/licensing/polar_client.py`, `httpx`-based) with a persistent grace-period cache (`license_state` table, single row, id=1) so Pro features keep working through brief offline periods:
+
+1. `check_entitlement(session, force=False)`: if no `license_key` is set → `not_licensed`. If checked within `RECHECK_INTERVAL` (6h) and not forced, trusts the cache.
+2. If due for a check: activates this device against the key if no `activation_id` is cached yet (`POST .../license-keys/activate`), then validates (`POST .../license-keys/validate`).
+3. `LicenseKeyNotEntitled` (Polar's real-world shape for a canceled subscription — confirmed via live sandbox testing to be a 404 from validate or a 403 with "no longer active" from activate) is **always trusted immediately**, regardless of the grace period — caches `entitled=False, reason="not_entitled"`.
+4. `ActivationLimitReached` (403 from activate, seat limit) returns `reason="activation_limit_reached"` **without** caching, so a retry after freeing a seat re-attempts activation instead of waiting out `RECHECK_INTERVAL`.
+5. Any other `PolarError` (network failure, unexpected response) falls back to `_grace_period_result()`: if the last cached result was `entitled=True` and within `GRACE_PERIOD` (7 days) of `checked_at`, returns `reason="grace_period"` (still entitled); otherwise `reason="unreachable"` (not entitled).
+
+`api/license.py` exposes this as `GET/PUT /api/license` + `POST /api/license/recheck` + `POST /api/license/cancel` + `GET /api/license/activations` (see API Routes). `polar_use_sandbox` / the `polar_organization_id` / `polar_api_key` / `polar_api_base` properties on `Settings` (`config.py`) pick sandbox vs. production Polar credentials and API base URL.
+
+**Cancellation** (`entitlements.cancel_subscription()`) is a separate flow from entitlement checking, since Polar's license-key validate/activate endpoints are unauthenticated and don't expose subscription management. It uses the organization API key (`polar_api_key`, server-side only, never sent to the frontend) to mint a short-lived customer session token (`POST /v1/customer-sessions/`, keyed on the `customer_id` captured from a prior `validate()` call), then lists and cancels the customer's active subscription(s) via the customer-portal subscriptions API (`GET`/`DELETE /v1/customer-portal/subscriptions/...`). Cancellation is **at period end** — Polar keeps the subscription (and Pro access) active until the current billing period ends; `cancel_subscription()` deliberately does not clear local license state, so the normal `RECHECK_INTERVAL` polling picks up the eventual `not_entitled` result from Polar on its own once the period actually ends.
+
+**Activation visibility** (`entitlements.get_activation_count()`) exists because a license key is a bare shared secret — Polar's activation-limit benefit (`limit_activations`, currently 2 devices per key, configured in the Polar dashboard) is the only thing stopping a key from being shared/leaked and used by strangers; nothing else in this system detects or prevents it. This function surfaces how many devices are *currently* activated (via the org-authenticated `GET /v1/license-keys/{license_key_id}`, whose `activations` array is counted) so a legitimate user can notice unexpected activity — e.g. more devices than they own — and go deactivate the extra one from their Polar customer portal. It's a live, uncached look-up (not baked into `check_entitlement()`'s cache) since it's only fetched on demand when the Subscription UI is open, not on every entitlement check.
+
+The Global Settings modal's "Subscription" tab (`components/SubscriptionSection.tsx`, wired into `components/GlobalSettingsModal.tsx`) is the UI for all of this — installation-wide, not per-project, matching where the license itself lives. It shows the license key (masked by default, revealed via an eye-icon toggle — `GET /api/license` now returns the plaintext key for this purpose, with copy warning the user not to share it), subscription status, a live "X of Y devices activated" row (when `can_view_activations` is true) with a manual refresh button, and a confirm-before-cancel "Cancel subscription" button when `can_cancel` is true; when no key is set, shows a "Subscribe" link (to `checkout_url`) and an inline key-activation input.
 
 ### 11. SQL Workspace
 
@@ -674,7 +716,10 @@ Session state (`sessionStorage`) persists open file path, expanded tree nodes, a
 
 ### 16. Command Palette
 
-`ProjectLayout.tsx` listens for ⌘K / Ctrl+K globally and opens `CommandPalette.tsx` (portal-rendered at z-[60]). The palette provides:
+Two separate palettes, since the homepage sits outside `ProjectLayout` and has no project context to build project-scoped commands from:
+
+- **Homepage** (`Home.tsx` + `components/HomeCommandPalette.tsx`) — its own ⌘K / Ctrl+K listener opens `HomeCommandPalette`, offering "Open [project name]" for every non-ignored project plus New project / Rescan projects / Global settings actions.
+- **Inside a project** — `ProjectLayout.tsx` listens for ⌘K / Ctrl+K globally and opens `CommandPalette.tsx` (portal-rendered at z-[60]). The palette provides:
 
 **Navigation commands** (always visible when query is empty):
 - Go to [page name] for each project route (DAG, Files, Docs, Workspace, Git, Environment, Init, Health)
@@ -708,9 +753,19 @@ Behavior:
 | Variable | Default | Description |
 |---|---|---|
 | `DBT_UI_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects; overridable via Global Settings UI |
-| `DBT_UI_DATA_DIR` | `data/` | Directory for SQLite database |
+| `DBT_UI_DATA_DIR` | `data/` (dev) / OS user-data dir (packaged app, via `platformdirs`) | Directory for SQLite database, logs, and (packaged app only) the dbt venv |
 | `DBT_UI_DATABASE_URL` | _(derived from DATA_DIR)_ | Override SQLite path |
 | `DBT_UI_LOG_LEVEL` | `INFO` | structlog level |
+| `DBT_UI_FRONTEND_DIST` | `frontend/dist` (dev) / resolved next to the packaged binary | Directory the SPA is served from — see `_mount_spa()` |
+| `POLAR_USE_SANDBOX` | `true` | Which Polar environment to validate license keys against — sandbox or production |
+| `POLAR_SANDBOX_ORGANIZATION_ID` | _(none)_ | Polar sandbox org id (not a secret) |
+| `POLAR_SANDBOX_API_KEY` | _(none)_ | Polar sandbox API key — secret, `backend/.env` only, never committed |
+| `POLAR_PRODUCTION_ORGANIZATION_ID` | _(none)_ | Polar production org id (not a secret) |
+| `POLAR_PRODUCTION_API_KEY` | _(none)_ | Polar production API key — secret, `backend/.env` only, never committed |
+| `POLAR_SANDBOX_CHECKOUT_URL` | _(none)_ | Polar sandbox checkout link, surfaced in the frontend upgrade modal |
+| `POLAR_PRODUCTION_CHECKOUT_URL` | _(none)_ | Polar production checkout link, surfaced in the frontend upgrade modal |
+
+`dbt_venv_dir` (`Settings`, not an env var): the isolated venv `dbt` runs from — `backend/.venv` in dev (created once by `task install:backend`), or `<data_dir>/dbt-venv` in the packaged app, self-created via the system's `python3` on first use of `venv_dbt()`/`venv_pip()`/`venv_python()` (see `app/dbt/venv.py`). `venv.create()` is never run from the app's own (possibly frozen) interpreter — doing so from a PyInstaller-frozen binary causes `ensurepip` to recursively re-exec the whole app.
 
 Global settings (stored in `app_settings` table, set via UI):
 
@@ -789,7 +844,7 @@ task install PYTHON=python3.12
 
 **dbt debug result cached in memory** — `dbt debug` is quick (~1s) but re-running it on every page load is unnecessary. The last result is stored in `_cache[project_id]` and served by `GET /debug/last` until explicitly re-triggered. The cache is process-local (no persistence across restarts).
 
-**All dbt commands use the venv binary** — `venv_dbt()` / `venv_pip()` / `venv_python()` in `dbt/venv.py` resolve binaries relative to `backend/.venv/bin/`. This ensures adapter packages installed during setup (e.g. `dbt-snowflake`) are available to every dbt invocation regardless of what's on `$PATH`.
+**All dbt commands use the venv binary** — `venv_dbt()` / `venv_pip()` / `venv_python()` in `dbt/venv.py` resolve binaries relative to `settings.dbt_venv_dir` (`backend/.venv` in dev; `<data_dir>/dbt-venv` in the packaged app, created on first use). This ensures adapter packages installed during setup (e.g. `dbt-snowflake`) are available to every dbt invocation regardless of what's on `$PATH`.
 
 **Docs generation bypasses `runner.stream()`** — `dbt compile --write-catalog` and `dbt docs generate` are invoked directly (not via `DbtRunner`) so they emit `compile_started`/`compile_finished` or `docs_generating`/`docs_generated` events but never `run_started`. This prevents the frontend from switching to the Run tab when docs are generated.
 

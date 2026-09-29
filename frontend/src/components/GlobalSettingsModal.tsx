@@ -3,17 +3,19 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { api, type GlobalProfileDto } from '../lib/api';
 import { THEME_CHANGE_EVENT } from '../lib/useTheme';
+import { SubscriptionSection } from './SubscriptionSection';
 
-type ModalTab = 'settings' | 'profiles' | 'requirements' | 'theme';
+type ModalTab = 'settings' | 'profiles' | 'requirements' | 'theme' | 'subscription';
 
-export function GlobalSettingsModal({ onClose }: { onClose: () => void }) {
-  const [activeTab, setActiveTab] = useState<ModalTab>('settings');
+export function GlobalSettingsModal({ onClose, initialTab = 'settings' }: { onClose: () => void; initialTab?: ModalTab }) {
+  const [activeTab, setActiveTab] = useState<ModalTab>(initialTab);
 
   const tabs: { id: ModalTab; label: string }[] = [
     { id: 'settings', label: 'Settings' },
     { id: 'profiles', label: 'Profiles' },
     { id: 'requirements', label: 'Requirements.txt' },
     { id: 'theme', label: 'Theme' },
+    { id: 'subscription', label: 'Subscription' },
   ];
 
   return (
@@ -50,6 +52,7 @@ export function GlobalSettingsModal({ onClose }: { onClose: () => void }) {
           {activeTab === 'profiles' && <GlobalProfilesSection />}
           {activeTab === 'requirements' && <RequirementsTab />}
           {activeTab === 'theme' && <ThemeTab />}
+          {activeTab === 'subscription' && <SubscriptionSection />}
         </div>
 
         <div className="flex justify-end px-5 py-4 border-t border-gray-800 shrink-0">

@@ -22,6 +22,7 @@ import { CSS } from '@dnd-kit/utilities';
 import { api, type Project } from '../lib/api';
 import NewProjectModal from './Project/components/NewProjectModal';
 import { GlobalSettingsModal } from '../components/GlobalSettingsModal';
+import { HomeCommandPalette } from '../components/HomeCommandPalette';
 
 // ── Platform config ───────────────────────────────────────────────────────────
 
@@ -446,6 +447,8 @@ export default function Home() {
   const [ignoredOpen, setIgnoredOpen] = useState(false);
   const [cardMenu, setCardMenu] = useState<CardMenuState | null>(null);
   const [focusedIdx, setFocusedIdx] = useState<number | null>(null);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteQuery, setPaletteQuery] = useState('');
   const cardRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const { data: appSettings } = useQuery({
@@ -504,6 +507,22 @@ export default function Home() {
     window.addEventListener('dbt-ui:new-project', handler);
     return () => window.removeEventListener('dbt-ui:new-project', handler);
   }, [isConfigured]);
+
+  // Global ⌘K listener — mirrors ProjectLayout's, since this page sits
+  // outside ProjectLayout and never mounts its project-scoped CommandPalette.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen((open) => {
+          setPaletteQuery('');
+          return !open;
+        });
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, []);
 
   const activeProjects = projects.filter((p) => !p.ignored);
   const ignoredProjects = projects.filter((p) => p.ignored);
@@ -595,6 +614,7 @@ export default function Home() {
   // Number key shortcuts: 1–9 navigate directly to that card
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (paletteOpen) return; // palette owns the keyboard while it's open
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       const n = parseInt(e.key, 10);
       if (n >= 1 && n <= 9) {
@@ -604,11 +624,15 @@ export default function Home() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [allVisible, navigate]);
+  }, [allVisible, navigate, paletteOpen]);
 
   // Arrow key navigation: bootstrap focus onto the grid when no card is currently focused
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (paletteOpen) return; // palette owns the keyboard while it's open — without
+      // this, its search input isn't a project card, so the "already focused" check
+      // below never matched, and this handler stole every arrow keypress meant for
+      // the palette's own list navigation, force-focusing a card underneath it.
       if (allVisible.length === 0) return;
       const isArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight';
       if (!isArrow) return;
@@ -622,7 +646,7 @@ export default function Home() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [allVisible]);
+  }, [allVisible, paletteOpen]);
 
   // Arrow key navigation + Enter to open
   const makeCardKeyDown = useCallback((idx: number): ((e: React.KeyboardEvent<HTMLButtonElement>) => void) => {
@@ -899,6 +923,19 @@ export default function Home() {
 
       {globalSettingsOpen && (
         <GlobalSettingsModal onClose={() => setGlobalSettingsOpen(false)} />
+      )}
+
+      {paletteOpen && (
+        <HomeCommandPalette
+          projects={projects}
+          onNavigateToProject={(p) => navigate(`/projects/${p.id}`)}
+          onNewProject={() => (isConfigured ? setNewProjectOpen(true) : setGlobalSettingsOpen(true))}
+          onRescan={handleRescan}
+          onOpenGlobalSettings={() => setGlobalSettingsOpen(true)}
+          query={paletteQuery}
+          onQueryChange={setPaletteQuery}
+          onClose={() => { setPaletteOpen(false); setPaletteQuery(''); }}
+        />
       )}
     </div>
   );

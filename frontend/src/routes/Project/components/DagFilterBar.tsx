@@ -1,7 +1,8 @@
 import { useMemo, useRef, useState, useEffect } from 'react';
-import { X, ChevronDown, FlaskConical } from 'lucide-react';
+import { X, ChevronDown, FlaskConical, Lock } from 'lucide-react';
 import type { GraphDto } from '../../../lib/api';
 import { type FilterState, emptyFilter, isFilterActive, getAvailableFilters } from '../lib/dagFilter';
+import { ProFeatureButton } from '../../../components/ProFeatureButton';
 
 interface FilterDropdownProps {
   label: string;
@@ -93,8 +94,12 @@ interface DagFilterBarProps {
   onToggleCoverage?: () => void;
   columnLineageLoaded: boolean;
   columnLineageLoading: boolean;
+  columnLineageCompiling?: boolean;
   columnLineageProgress?: { checked: number; total: number } | null;
   onLoadColumnLineage: () => void;
+  /** When true, column lineage is a locked Pro feature — clicking opens the upgrade modal instead. */
+  columnLineageLocked?: boolean;
+  onColumnLineageLockedClick?: () => void;
 }
 
 export default function DagFilterBar({
@@ -110,8 +115,11 @@ export default function DagFilterBar({
   onToggleCoverage,
   columnLineageLoaded,
   columnLineageLoading,
+  columnLineageCompiling = false,
   columnLineageProgress,
   onLoadColumnLineage,
+  columnLineageLocked = false,
+  onColumnLineageLockedClick,
 }: DagFilterBarProps) {
   const available = useMemo(
     () => (graph ? getAvailableFilters(graph) : { resourceTypes: [], materializations: [], tags: [], statuses: [] }),
@@ -206,17 +214,22 @@ export default function DagFilterBar({
       )}
 
       {/* Action buttons */}
-      <button
-        onClick={onLoadColumnLineage}
-        disabled={columnLineageLoading}
-        className="px-3 py-1.5 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-400 disabled:opacity-50 transition-colors shrink-0"
+      <ProFeatureButton
+        onClick={columnLineageLocked ? onColumnLineageLockedClick! : onLoadColumnLineage}
+        disabled={!columnLineageLocked && columnLineageLoading}
+        title={columnLineageLocked ? 'Column-level lineage is a dbt-ui Pro feature' : undefined}
       >
-        {columnLineageLoading
-          ? (columnLineageProgress
-              ? `Column lineage: ${columnLineageProgress.checked}/${columnLineageProgress.total}…`
-              : 'Column lineage loading…')
-          : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
-      </button>
+        {columnLineageLocked && <Lock size={12} />}
+        {columnLineageLocked
+          ? 'Column lineage (Pro)'
+          : columnLineageCompiling
+            ? 'Compiling…'
+            : columnLineageLoading
+              ? (columnLineageProgress
+                  ? `Column lineage: ${columnLineageProgress.checked}/${columnLineageProgress.total}…`
+                  : 'Loading column lineage…')
+              : columnLineageLoaded ? 'Refresh column lineage' : 'Load column lineage'}
+      </ProFeatureButton>
       <button
         onClick={onRefresh}
         disabled={compiling}

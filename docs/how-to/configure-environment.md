@@ -10,6 +10,8 @@ Navigate to a project and click **Environment** in the project nav. The page is 
 - **Profiles** — named sets of env vars you can activate as a group
 - **Settings** — project-specific and global settings
 
+> dbt-ui Pro subscription management (license key, cancellation) lives in the **Global Settings** modal, not here — see below.
+
 ---
 
 ## Environment Variables
@@ -97,6 +99,21 @@ Global settings are shown for reference but can only be edited in the Global Set
 - **DBT_UI_LOG_LEVEL** — logging verbosity
 
 To change these, click the lock icon area or open Global Settings from the Home page.
+
+---
+
+## Subscription
+
+Click the gear icon on the Home page to open **Global Settings**, then the **Subscription** tab. This shows the status of your dbt-ui Pro license and lets you manage it without leaving the app. It's installation-wide, not per-project — the same license covers every project you open.
+
+**If you have an active subscription:**
+- Your license key is shown masked (`••••••••…`) by default. Click the eye icon to reveal it, and again to hide it. **Don't share this key** — anyone who has it can activate their own device on it, using up your device slots (and there's no other protection against this).
+- A **Devices** row shows how many devices are currently activated against your key (e.g. "1 of 2 devices activated"). If you see more devices than you own, your key may have been shared or leaked — deactivate the extra device from your Polar customer portal (linked from your purchase receipt email). Click the refresh icon to re-check the count.
+- Click **Cancel subscription** to cancel. You'll be asked to confirm — cancelling takes effect at the end of your current billing period, so Pro features keep working until then. There's no separate "resubscribe" step needed if you change your mind before the period ends; use your Polar customer portal (linked from your purchase receipt email) to undo a pending cancellation.
+
+**If you don't have an active subscription:**
+- Click **Subscribe to Pro** to open the checkout page.
+- If you already have a license key (e.g. from a previous install or another device), click **Have a license key?** and paste it in, then click **Activate**.
 
 ---
 

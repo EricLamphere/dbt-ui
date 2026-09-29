@@ -190,6 +190,21 @@ DELETE endpoints return 204 (empty body) — type them as `Promise<void>`.
 
 ---
 
+## Repo Boundary — Pro Features Live Elsewhere
+
+This repo only contains the public shim for column-level lineage
+(`backend/app/dbt/column_lineage.py` — shared dataclasses + lazy delegation).
+The actual sqlglot-based tracing algorithm is in the private `dbt-ui-pro`
+repo, a sibling checkout at `../dbt-ui-pro`. If asked to change how lineage
+tracing itself works (not the shim, not the API endpoint, not the frontend),
+that work belongs in `dbt-ui-pro`, not here — say so rather than trying to
+implement it in this repo. See
+[.claude/rules/related-repos.md](../rules/related-repos.md) for the full
+three-repo picture (this repo, `dbt-ui-pro`, and the `lamphere-labs`
+marketing site).
+
+---
+
 ## Key File Map
 
 ```

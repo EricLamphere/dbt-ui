@@ -605,7 +605,11 @@ async def _compile_model(project_id: int, project_path: str, model_name: str) ->
         await bus.publish(Event(topic=topic, type="graph_changed", data={}))
 
 
-async def _compile_project(project_id: int, project_path: str) -> None:
+async def _compile_project(project_id: int, project_path: str) -> bool:
+    """Run `dbt compile` for a project, publishing compile_started/compile_finished
+    (and graph_changed on success) to the event bus. Returns whether it succeeded —
+    callers that need to await a real compile (e.g. column lineage auto-compiling a
+    stale manifest) can act on this; fire-and-forget callers just ignore it."""
     from app.events.bus import Event, bus
     from app.api.init import load_project_env
     from app.dbt.venv import venv_dbt
@@ -639,3 +643,4 @@ async def _compile_project(project_id: int, project_path: str) -> None:
     await bus.publish(Event(topic=topic, type="compile_finished", data={"ok": ok}))
     if ok:
         await bus.publish(Event(topic=topic, type="graph_changed", data={}))
+    return ok
