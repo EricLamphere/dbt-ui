@@ -1,129 +1,19 @@
-import { useEffect, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
-import { api } from '../lib/api';
+import { GlobalSetupOutput } from './globalSetup/GlobalSetupOutput';
+import { useGlobalSetupRun } from './globalSetup/useGlobalSetupRun';
 
 interface Props {
   onClose: () => void;
 }
 
-type SetupState = 'starting' | 'running' | 'done' | 'error';
-
 export function GlobalSetupModal({ onClose }: Props) {
-  const qc = useQueryClient();
-  const [state, setState] = useState<SetupState>('starting');
-  const [lines, setLines] = useState<string[]>([]);
-  const [silentSecs, setSilentSecs] = useState(0);
-  const [returnCode, setReturnCode] = useState<number | null>(null);
-  const [startError, setStartError] = useState<string | null>(null);
-  const outputRef = useRef<HTMLPreElement>(null);
-  const esRef = useRef<EventSource | null>(null);
-  const stateRef = useRef<SetupState>('starting');
-  const startedRef = useRef(false);
-  const lastOutputRef = useRef(Date.now());
-
-  useEffect(() => {
-    stateRef.current = state;
-  }, [state]);
-
-  useEffect(() => {
-    const es = new EventSource('/api/init/global-setup/events');
-    esRef.current = es;
-
-    es.addEventListener('global_setup_started', () => {
-      setState('running');
-    });
-
-    es.addEventListener('global_setup_output', (e) => {
-      const data = JSON.parse(e.data) as { data: string };
-      // Heartbeat dots from the backend — don't add to log, just reset the timer
-      if (data.data === '.') {
-        lastOutputRef.current = Date.now();
-        return;
-      }
-      lastOutputRef.current = Date.now();
-      setSilentSecs(0);
-      setLines((prev) => [...prev, data.data]);
-    });
-
-    es.addEventListener('global_setup_finished', (e) => {
-      const data = JSON.parse(e.data) as { return_code: number };
-      setReturnCode(data.return_code);
-      setSilentSecs(0);
-      setState(data.return_code === 0 ? 'done' : 'error');
-      if (data.return_code === 0) {
-        qc.invalidateQueries({ queryKey: ['dbt-core-status'] });
-      }
-      es.close();
-    });
-
-    es.onerror = () => {
-      // Only surface the error if we haven't received any events yet.
-      // Mid-run disconnects are normal — the browser will auto-reconnect.
-      if (stateRef.current === 'starting') {
-        setState('error');
-        es.close();
-      }
-    };
-
-    if (!startedRef.current) {
-      startedRef.current = true;
-      api.init.runGlobalSetup().catch((e) => {
-        setStartError(String(e));
-        setState('error');
-        es.close();
-      });
-    }
-
-    return () => {
-      es.close();
-    };
-  }, []);
-
-  // Tick silent-seconds counter while running so user sees "still working".
-  // Also poll the status endpoint every 3s to catch a missed global_setup_finished SSE event.
-  useEffect(() => {
-    if (state !== 'running') return;
-    const id = setInterval(async () => {
-      setSilentSecs(Math.round((Date.now() - lastOutputRef.current) / 1000));
-      try {
-        const status = await api.init.globalSetupStatus();
-        if (!status.running && status.return_code !== null && stateRef.current === 'running') {
-          setReturnCode(status.return_code);
-          setSilentSecs(0);
-          setState(status.return_code === 0 ? 'done' : 'error');
-          if (status.return_code === 0) {
-            qc.invalidateQueries({ queryKey: ['dbt-core-status'] });
-          }
-        }
-      } catch {
-        // best-effort — SSE is the primary signal
-      }
-    }, 3000);
-    return () => clearInterval(id);
-  }, [state]);
-
-  // Auto-scroll output
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight;
-    }
-  }, [lines]);
-
-  // Show the "still working" banner after 15s of silence (heartbeat resets every 5s,
-  // so this only fires if the process is genuinely stalled or the connection dropped)
-  const showWaiting = state === 'running' && silentSecs >= 15;
+  const run = useGlobalSetupRun();
+  const { state, returnCode } = run;
 
   const handleCancel = async () => {
-    esRef.current?.close();
-    try {
-      await api.init.cancelGlobalSetup();
-    } catch {
-      // best-effort
-    }
+    await run.cancel();
     onClose();
   };
 
-  const outputText = lines.join('');
   const isFinished = state === 'done' || state === 'error';
   const isRunning = state === 'running' || state === 'starting';
 
@@ -163,24 +53,7 @@ export function GlobalSetupModal({ onClose }: Props) {
           </div>
         </div>
 
-        {/* Output */}
-        <pre
-          ref={outputRef}
-          className="flex-1 min-h-0 overflow-auto p-4 text-xs font-mono text-gray-300 bg-gray-950 whitespace-pre-wrap"
-        >
-          {startError
-            ? <span className="text-red-400">Error: {startError}</span>
-            : outputText || <span className="text-gray-600">Waiting for output…</span>
-          }
-        </pre>
-        {showWaiting && (
-          <div className="px-4 py-2 bg-gray-900 border-t border-gray-800 shrink-0 flex items-center gap-2">
-            <span className="text-yellow-500 animate-pulse text-xs">●</span>
-            <span className="text-xs text-gray-400">
-              Still installing… pip may be writing files to disk. This is normal for large requirement sets and can take several minutes.
-            </span>
-          </div>
-        )}
+        <GlobalSetupOutput run={run} />
 
         {/* Footer */}
         {isFinished && (

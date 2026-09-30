@@ -18,6 +18,8 @@ class LicenseStatusDto(BaseModel):
     status: str
     checked_at: str | None
     checkout_url: str | None
+    # Polar customer portal: lost license keys, device seats, billing.
+    portal_url: str | None
     can_cancel: bool
     limit_activations: int | None
     can_view_activations: bool
@@ -46,6 +48,7 @@ def _to_dto(state, entitlement: entitlements.Entitlement) -> LicenseStatusDto:
         status=state.status,
         checked_at=state.checked_at.isoformat() if state.checked_at else None,
         checkout_url=settings.polar_checkout_url,
+        portal_url=settings.polar_portal_url,
         can_cancel=bool(state.customer_id),
         limit_activations=state.limit_activations,
         can_view_activations=bool(state.license_key_id),

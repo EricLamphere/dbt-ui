@@ -1,11 +1,13 @@
 import asyncio
 import os
+import shlex
 import shutil
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.dbt.interactive import _pty_read_executor, manager as init_manager
+from app.dbt.venv import venv_activate_script
 from app.events.sse import sse_response_with_replay
 from app.logging_setup import get_logger
 
@@ -70,11 +72,14 @@ async def start_terminal(dto: TerminalStartDto) -> TerminalSessionDto:
             init_manager._reader(session)  # noqa: SLF001
         )
         log.info("terminal_started", session_id=session.session_id, shell=shell, cwd=str(cwd))
-        # Activate the backend venv so dbt and project tools are on PATH
-        venv_activate = Path(__file__).resolve().parents[2] / ".venv" / "bin" / "activate"
-        if venv_activate.exists():
+        # Activate the dbt venv so dbt and adapters are on PATH. Resolved via
+        # settings.dbt_venv_dir, not relative to this file: in the packaged app
+        # this file lives in PyInstaller's extraction dir, with no venv beside
+        # it. Quoted because that venv's path contains "Application Support".
+        venv_activate = venv_activate_script()
+        if venv_activate is not None:
             await asyncio.sleep(0.3)  # let the shell finish its init before sending input
-            proc.write(f"source {venv_activate}\n".encode())
+            proc.write(f"source {shlex.quote(str(venv_activate))}\n".encode())
 
     asyncio.create_task(_start())
     return TerminalSessionDto(session_id=session.session_id)

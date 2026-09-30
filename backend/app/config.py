@@ -47,9 +47,13 @@ def _default_frontend_dist() -> Path:
 
 def _default_dbt_venv_dir() -> Path:
     if not _is_frozen():
-        # Dev mode: the venv `task install:backend` creates at backend/.venv,
-        # already on PATH-equivalent footing with the rest of the checkout.
-        return Path(__file__).resolve().parent.parent / ".venv"
+        # Dev mode: <repo>/data/dbt-venv — the same dir `task dev:backend` uses
+        # as DBT_UI_DATA_DIR (gitignored, and outside backend/ so uvicorn
+        # --reload doesn't watch it). Deliberately NOT backend/.venv: dbt gets
+        # its own venv, as in the packaged app, so its interpreter can be
+        # switched via the python_path setting without touching the venv the
+        # backend itself runs from, and dbt adapters never clash with backend deps.
+        return Path(__file__).resolve().parents[2] / "data" / "dbt-venv"
     # Packaged app: _MEIPASS (and the app bundle itself) is recreated/read-only
     # per launch, so the dbt venv — which "Run global setup" pip-installs
     # dbt-core + an adapter into — needs a real, persistent, writable location
@@ -97,10 +101,25 @@ class Settings(BaseSettings):
     polar_production_api_key: str | None = Field(default=None, alias="POLAR_PRODUCTION_API_KEY")
     polar_sandbox_checkout_url: str | None = Field(default=None, alias="POLAR_SANDBOX_CHECKOUT_URL")
     polar_production_checkout_url: str | None = Field(default=None, alias="POLAR_PRODUCTION_CHECKOUT_URL")
+    # Org slugs are public (they're in every customer-facing Polar URL), so unlike
+    # the API keys they're safe to default here. They build the customer portal
+    # link, where users recover a lost license key and free up device seats.
+    # Set to "" to hide the portal link.
+    polar_sandbox_organization_slug: str = Field(default="lamphere-labs", alias="POLAR_SANDBOX_ORGANIZATION_SLUG")
+    polar_production_organization_slug: str = Field(default="lamphere-labs", alias="POLAR_PRODUCTION_ORGANIZATION_SLUG")
 
     @property
     def polar_checkout_url(self) -> str | None:
         return self.polar_sandbox_checkout_url if self.polar_use_sandbox else self.polar_production_checkout_url
+
+    @property
+    def polar_portal_url(self) -> str | None:
+        if self.polar_use_sandbox:
+            slug, host = self.polar_sandbox_organization_slug, "sandbox.polar.sh"
+        else:
+            slug, host = self.polar_production_organization_slug, "polar.sh"
+        slug = slug.strip()
+        return f"https://{host}/{slug}/portal" if slug else None
 
     @property
     def polar_organization_id(self) -> str | None:

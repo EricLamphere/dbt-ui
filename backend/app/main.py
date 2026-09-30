@@ -24,6 +24,7 @@ from app.api import models as models_api
 from app.api import projects as projects_api
 from app.api import runs as runs_api
 from app.api import settings as settings_api
+from app.api import setup as setup_api
 from app.api import sql as sql_api
 from app.api import git as git_api
 from app.api import terminal as terminal_api
@@ -31,6 +32,7 @@ from app.api import workspace as workspace_api
 from app.config import settings
 from app.db.engine import SessionLocal
 from app.db.migrations import init_db
+from app.dbt.python_env import load_python_setting
 from app.logs.api_logger import append_api_log, configure_api_log
 from app.logging_setup import configure_logging, get_logger
 from app.projects.service import rescan_projects
@@ -46,6 +48,8 @@ async def lifespan(app: FastAPI):
     await init_db()
     async with SessionLocal() as session:
         await rescan_projects(session)
+        await load_python_setting(session)
+        await setup_api.seed_setup_completed(session)
     log.info("startup", workspace=str(settings.dbt_projects_path), db=settings.resolved_database_url())
     await watcher_manager.start()
     try:
@@ -67,6 +71,7 @@ app.add_middleware(
 
 app.include_router(health_api.router)
 app.include_router(settings_api.router)
+app.include_router(setup_api.router)
 app.include_router(projects_api.router)
 app.include_router(models_api.router)
 app.include_router(debug_api.router)

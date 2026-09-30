@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { Eye, EyeOff, CheckCircle2, AlertTriangle, Monitor, RefreshCw } from 'lucide-react';
 import { api, ApiError, type LicenseStatusDto } from '../lib/api';
+import { LicenseKeyHelp, PolarPortalLink } from './PolarPortalLink';
 
 const REASON_COPY: Record<string, string> = {
   not_entitled: 'Your subscription is no longer active. Renew or enter a new license key below.',
@@ -93,6 +94,12 @@ function SubscribedView({ license, qc }: { license: LicenseStatusDto; qc: Return
           Anyone with this key can activate a device on it — don't share it. If you see more devices below than you
           recognize, someone else may have your key.
         </p>
+        {license.portal_url && (
+          <p className="text-[11px] text-gray-500">
+            Manage devices, billing, and your key in the{' '}
+            <PolarPortalLink url={license.portal_url}>customer portal</PolarPortalLink>.
+          </p>
+        )}
       </div>
 
       {license.can_view_activations && <ActivationsRow limit={license.limit_activations} />}
@@ -235,6 +242,7 @@ function UnsubscribedView({ qc }: { qc: ReturnType<typeof useQueryClient> }) {
             className="bg-surface-elevated border border-gray-700 rounded px-3 py-1.5 text-xs font-mono text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
           {error && <p className="text-xs text-red-400">{error}</p>}
+          <LicenseKeyHelp portalUrl={license?.portal_url} />
           <button
             onClick={() => {
               setError(null);

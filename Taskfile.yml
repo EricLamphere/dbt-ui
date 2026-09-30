@@ -162,10 +162,10 @@ tasks:
       - echo "Database reset."
 
   reset:
-    desc: Full reset for testing — wipe DB, delete backend venv, reinstall with python3.12
+    desc: Full reset for testing — wipe DB, delete backend + dbt venvs, reinstall with python3.12
     cmds:
       - task: db:reset
-      - rm -rf backend/.venv
+      - rm -rf backend/.venv data/dbt-venv
       - task: install
         vars:
           PYTHON: python3.12

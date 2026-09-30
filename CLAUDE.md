@@ -112,7 +112,7 @@ All 13 in `backend/app/db/models.py`:
 - `env_profiles` — named environment profiles per project
 - `profile_env_vars` — key/value vars belonging to a profile
 - `project_env_vars` — project-level env vars (not profile-scoped); includes `dbt_target` for active target; `REQUIREMENTS_PATH` for per-project requirements; `WORKSPACE_PATH` for SQL workspace dir (default `dbtui/workspace`)
-- `app_settings` — global app config (key/value); keys: `dbt_projects_path`, `global_requirements_path`, `data_dir`, `log_level`
+- `app_settings` — global app config (key/value); keys: `dbt_projects_path`, `global_requirements_path`, `data_dir`, `log_level`, `theme`, `python_path`, `setup_completed`
 - `global_profiles` — named env var sets shared across all projects
 - `global_profile_vars` — key/value vars belonging to a global profile
 - `drift_snapshots` — schema drift scan results per project; stores status (running/done/error), progress counters, and results_json (array of per-model column diffs)
@@ -297,8 +297,12 @@ useInitSessionEvents(sessionId, onEvent, useCallback(() => { /* on close */ }, [
 ### Global Settings
 
 - `AppSetting` table stores key/value pairs for global config
-- `GET /api/settings` returns `{ dbt_projects_path, global_requirements_path, data_dir, log_level, configured }`
+- `GET /api/settings` returns `{ dbt_projects_path, global_requirements_path, data_dir, log_level, theme, python_path, python_path_editable, configured }`
 - `PUT /api/settings` updates any subset of the above keys
+- `python_path` (`DBT_UI_PYTHON_PATH`) is the interpreter the dbt venv is built from. Seeded at startup by `load_python_setting()` (`dbt/python_env.py`) from whatever the existing venv was built from, else `find_system_python()`. The UI is a dropdown fed by `GET /api/settings/python-interpreters` (`venv.list_pythons()` — 3.11+ installs found on PATH, Homebrew, `~/.pyenv/versions/*/bin`, python.org frameworks; deduped by realpath, virtualenv interpreters excluded). Changing it validates (3.11+, not inside a virtualenv), rebuilds the venv via `venv.rebuild_venv()` (skipped when the new path is a symlink to the current interpreter) and only then saves; empty input re-detects; returns 409 while a dbt run, global setup, or init pipeline is in flight. Mirrored into `app.dbt.venv` via `set_configured_python()` because venv resolution is sync. The venv records its interpreter in `<venv>/.dbt-ui-python`, and `ensure_venv()` rebuilds on mismatch. The dbt venv is `data/dbt-venv` in dev (not `backend/.venv` — dbt is kept out of the backend's own venv so its Python can be switched) and `<data_dir>/dbt-venv` in the packaged app. `python_path_editable` is false only if `DBT_UI_DBT_VENV_DIR` points at the backend's own venv, which is never rebuilt
+- **First-run setup wizard**: `SetupGate` (`frontend/src/components/setup/`, wraps the whole app in `App.tsx`) shows a full-screen `LoadingScreen` until the first `GET /api/settings` succeeds (retrying every 250ms — the backend may still be booting), then `SetupWizard` *instead of* the app while `setup_completed` is false, or on the `dbt-ui:open-setup` window event (Global Settings → Run setup again). It saves everything via `POST /api/setup/complete` (`api/setup.py`), which validates paths first, then `change_python_path()`, then creates the requirements file if `create_requirements_file` (seeded with `dbt-core`; the wizard defaults the path to `<projects folder>/requirements.txt`), then commits and rescans; field errors come back as `400 {field, code, message}`, and the wizard jumps to that step. The last step streams global setup via the shared `useGlobalSetupRun()` hook (also used by `GlobalSetupModal`). `seed_setup_completed()` runs at startup and marks installs that predate the wizard (projects path already set in the DB or env) as complete
+- Status checks (`/api/init/dbt-core-status`, `/api/init/package-info`) use `venv.existing_bin()` and never create the dbt venv — creating it blocks the event loop ~1s and would build it before the wizard's Python choice
+- Global setup (`POST /api/init/global-setup`) installs the global requirements file if set, else `pip install --upgrade dbt-core` (`_global_setup_install_args()`)
 - `configured: bool` indicates whether `DBT_UI_PROJECTS_PATH` is meaningfully set (mandatory to show project list)
 - Home page shows blocking banner if `configured: false`
 - Workspace is resolved from `app_settings` table (key `dbt_projects_path`) with fallback to env var `DBT_UI_PROJECTS_PATH`

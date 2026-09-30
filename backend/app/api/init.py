@@ -15,7 +15,7 @@ from app.db.engine import get_session
 from app.db.models import GlobalProfile, InitStep, Project, ProjectEnvVar
 from app.dbt.init_scripts import BASE_STEPS, INIT_DIR_NAME, delete_script, list_scripts, save_script
 from app.dbt.interactive import manager as init_manager
-from app.dbt.venv import venv_dbt, venv_pip, venv_python
+from app.dbt.venv import existing_bin, venv_dbt, venv_pip, venv_python
 from app.events.bus import Event, bus
 from app.events.sse import sse_response_with_output_replay
 from app.logging_setup import get_logger
@@ -35,6 +35,11 @@ def _init_lock_for(project_id: int) -> asyncio.Lock:
         lock = asyncio.Lock()
         _init_locks[project_id] = lock
     return lock
+
+
+def init_pipeline_running() -> bool:
+    """True while any project's init pipeline is in flight."""
+    return any(lock.locked() for lock in _init_locks.values())
 
 
 class InitStepDto(BaseModel):
@@ -668,13 +673,14 @@ async def _run_init_steps_locked(project_id: int, project_path: str, steps: list
                 log_lines = []
                 ok = True
                 return_code = 0
-                for label, req_path in [("global", global_req), ("project", project_req)]:
-                    if not req_path:
+                for label, raw_req in [("global", global_req), ("project", project_req)]:
+                    if not raw_req or not raw_req.strip():
                         continue
-                    if not Path(req_path).exists():
+                    req_path = _resolve_requirements_path(raw_req, project_path)
+                    if not req_path.is_file():
                         raise FileNotFoundError(f"{label} requirements path '{req_path}' not found")
                     rc, lines = await _exec_and_capture(
-                        [str(venv_pip()), "install", "-r", req_path, "--progress-bar", "off",
+                        [str(venv_pip()), "install", "-r", str(req_path), "--progress-bar", "off",
                          "--no-input", "-v", "--keyring-provider", "disabled"],
                         project_path, {**env, "PYTHONUNBUFFERED": "1",
                                        "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
@@ -911,14 +917,27 @@ class InitInputDto(BaseModel):
 
 
 
-async def _get_global_requirements_path() -> str | None:
+def _resolve_requirements_path(raw: str, project_path: str | Path) -> Path:
+    """Resolve a requirements path the way users write it: `~` expanded, and a
+    relative path taken from the project root (like WORKSPACE_PATH) — not the
+    backend process's cwd, which is backend/ in dev and arbitrary when packaged."""
+    p = Path(raw.strip()).expanduser()
+    return p if p.is_absolute() else Path(project_path) / p
+
+
+async def _get_global_requirements_path(session: AsyncSession | None = None) -> str | None:
+    """Pass the request's session from endpoints (so DI overrides apply); the
+    background init pipeline has none and opens its own."""
+    from app.config import settings
     from app.db.engine import SessionLocal
     from app.db.models import AppSetting
-    async with SessionLocal() as session:
-        row = await session.get(AppSetting, "global_requirements_path")
-        if row is not None:
-            return row.value.strip() or None
-    from app.config import settings
+
+    if session is None:
+        async with SessionLocal() as own_session:
+            return await _get_global_requirements_path(own_session)
+    row = await session.get(AppSetting, "global_requirements_path")
+    if row is not None:
+        return row.value.strip() or None
     return str(settings.global_requirements_path) if settings.global_requirements_path else None
 
 
@@ -1074,7 +1093,9 @@ class AppendRequirementDto(BaseModel):
 @global_router.get("/package-info", response_model=PackageInfoDto)
 async def get_package_info(package: str) -> PackageInfoDto:
     """Check if a package is installed in dbt's Python environment."""
-    python = venv_python()
+    python = existing_bin("python")
+    if python is None:
+        return PackageInfoDto(package=package, installed_version=None)
     proc = await asyncio.create_subprocess_exec(
         str(python), "-m", "pip", "show", package,
         stdout=asyncio.subprocess.PIPE,
@@ -1092,12 +1113,14 @@ async def get_package_info(package: str) -> PackageInfoDto:
 @global_router.get("/dbt-core-status", response_model=DbtCoreStatusDto)
 async def get_dbt_core_status() -> DbtCoreStatusDto:
     """Check if dbt binary is available in the backend venv and return its version."""
-    try:
-        dbt = str(venv_dbt())
-    except RuntimeError:
+    # existing_bin, not venv_dbt(): a status check must never create the venv —
+    # that blocks the event loop for ~1s and would build it before the setup
+    # wizard has let the user choose a Python.
+    dbt = existing_bin("dbt")
+    if dbt is None:
         return DbtCoreStatusDto(installed=False, version=None)
     proc = await asyncio.create_subprocess_exec(
-        dbt, "--version",
+        str(dbt), "--version",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
     )
@@ -1135,7 +1158,7 @@ _global_setup_replay: list[str] = []
 _global_output_queue: _queue.Queue[str | None] = _queue.Queue()
 
 
-def _global_setup_running() -> bool:
+def global_setup_running() -> bool:
     return _global_setup_thread is not None and _global_setup_thread.is_alive()
 
 
@@ -1149,7 +1172,15 @@ def _dbg(msg: str) -> None:
         _f.flush()
 
 
-def _run_pip_in_thread(pip: Path, req_path: Path, pip_env: dict) -> None:
+def _global_setup_install_args(req_path: Path | None) -> list[str]:
+    """What global setup pip-installs: the global requirements file when one is
+    configured, otherwise the latest dbt-core — so there's always something to install."""
+    if req_path is None:
+        return ["--upgrade", "dbt-core"]
+    return ["-r", str(req_path)]
+
+
+def _run_pip_in_thread(pip: Path, install_args: list[str], pip_env: dict) -> None:
     """Pure-thread pip runner.
 
     Root cause: uvicorn holds a multiprocessing.managers TCP server socket at fd 3
@@ -1182,7 +1213,7 @@ def _run_pip_in_thread(pip: Path, req_path: Path, pip_env: dict) -> None:
         # "~/Library/Application Support/dbt-ui/...", which contains a space —
         # unquoted interpolation gets word-split by bash into a bogus command.
         cmd = (
-            f"exec {shlex.quote(str(pip))} install -r {shlex.quote(str(req_path))}"
+            f"exec {shlex.quote(str(pip))} install {shlex.join(install_args)}"
             " --progress-bar off --no-input -v --keyring-provider disabled"
             f" >> {shlex.quote(log_path)} 2>&1"
         )
@@ -1255,17 +1286,16 @@ def _run_pip_in_thread(pip: Path, req_path: Path, pip_env: dict) -> None:
 
 
 @global_router.post("/global-setup")
-async def run_global_setup() -> dict[str, bool]:
-    """Install global requirements.txt into the backend venv."""
+async def run_global_setup(session: AsyncSession = Depends(get_session)) -> dict[str, bool]:
+    """Install the global requirements.txt into the dbt venv — or, when none is
+    configured, the latest dbt-core."""
     global _global_setup_thread, _global_setup_return_code, _global_setup_replay
     _dbg(f"main: run_global_setup")
-    path_str = await _get_global_requirements_path()
-    if not path_str:
-        raise HTTPException(status_code=400, detail="DBT_UI_GLOBAL_REQUIREMENTS_PATH is not configured")
-    req_path = Path(path_str)
-    if not req_path.exists():
+    path_str = await _get_global_requirements_path(session)
+    req_path = Path(path_str).expanduser() if path_str and path_str.strip() else None
+    if req_path is not None and not req_path.is_file():
         raise HTTPException(status_code=404, detail=f"Requirements file not found: {path_str}")
-    if _global_setup_running():
+    if global_setup_running():
         return {"ok": True}  # already running — idempotent
     try:
         # venv_pip() creates the dbt venv on first call (packaged app: there's
@@ -1286,7 +1316,9 @@ async def run_global_setup() -> dict[str, bool]:
     pip_env = {**os.environ, "PYTHONUNBUFFERED": "1",
                "PYTHON_KEYRING_BACKEND": "keyring.backends.null.Keyring"}
     _global_setup_thread = _threading.Thread(
-        target=_run_pip_in_thread, args=(pip, req_path, pip_env), daemon=True
+        target=_run_pip_in_thread,
+        args=(pip, _global_setup_install_args(req_path), pip_env),
+        daemon=True,
     )
     _global_setup_thread.start()
     # Publish started event from the event loop (fine — this is a fast, non-blocking publish)
@@ -1332,7 +1364,7 @@ async def cancel_global_setup() -> dict[str, bool]:
 
 @global_router.get("/global-setup/events")
 async def global_setup_events():
-    running = _global_setup_running()
+    running = global_setup_running()
     finished = not running and _global_setup_return_code is not None
     return sse_response_with_output_replay(
         topic="global-setup",
@@ -1348,5 +1380,5 @@ async def global_setup_events():
 @global_router.get("/global-setup/status")
 async def global_setup_status() -> dict:
     """Return whether a setup is running and the last return code."""
-    return {"running": _global_setup_running(), "return_code": _global_setup_return_code}
+    return {"running": global_setup_running(), "return_code": _global_setup_return_code}
 

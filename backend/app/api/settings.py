@@ -1,14 +1,25 @@
+import asyncio
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.init import global_setup_running, init_pipeline_running
 from app.config import settings
 from app.db.engine import get_session
 from app.db.models import AppSetting
+from app.dbt import venv
+from app.dbt.python_env import PYTHON_PATH_KEY
+from app.dbt.runner import runner
+from app.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+# "true" once the first-run setup wizard has been completed (see api/setup.py).
+SETUP_COMPLETED_KEY = "setup_completed"
 
 
 class SettingsUpdateDto(BaseModel):
@@ -17,6 +28,7 @@ class SettingsUpdateDto(BaseModel):
     log_level: str | None = None
     global_requirements_path: str | None = None
     theme: str | None = None
+    python_path: str | None = None
 
 
 class SettingsDto(BaseModel):
@@ -25,7 +37,12 @@ class SettingsDto(BaseModel):
     log_level: str | None
     global_requirements_path: str | None
     theme: str | None
+    python_path: str | None
+    # False only when DBT_UI_DBT_VENV_DIR points at the venv the backend itself
+    # runs from — rebuilding that would take the server down with it.
+    python_path_editable: bool
     configured: bool
+    setup_completed: bool
 
 
 async def _get_override(session: AsyncSession, key: str) -> str | None:
@@ -62,6 +79,8 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> Settings
 
     global_requirements_path = await _get_override(session, "global_requirements_path")
     theme = await _get_override(session, "theme")
+    python_path = await _get_override(session, PYTHON_PATH_KEY)
+    setup_completed = await _get_override(session, SETUP_COMPLETED_KEY) == "true"
 
     return SettingsDto(
         dbt_projects_path=dbt_projects_path,
@@ -70,7 +89,61 @@ async def get_settings(session: AsyncSession = Depends(get_session)) -> Settings
         log_level=log_level,
         global_requirements_path=global_requirements_path,
         theme=theme,
+        python_path=python_path or None,
+        python_path_editable=not venv.is_own_venv(),
+        setup_completed=setup_completed,
     )
+
+
+def _python_env_busy_reason() -> str | None:
+    """Why the dbt venv can't be rebuilt right now, if anything is using it."""
+    if runner.is_busy():
+        return "a dbt command is running"
+    if global_setup_running():
+        return "global setup is running"
+    if init_pipeline_running():
+        return "a project init pipeline is running"
+    return None
+
+
+async def change_python_path(session: AsyncSession, raw: str) -> None:
+    """Validate the interpreter, rebuild the dbt venv from it, then save.
+
+    Empty input re-runs auto-detection. The setting is only saved once the new
+    venv exists, so a failed rebuild leaves the previous value in place.
+    """
+    if venv.is_own_venv():
+        raise HTTPException(
+            status_code=400,
+            detail="DBT_UI_DBT_VENV_DIR points at the venv dbt-ui itself runs from, "
+            "which can't be rebuilt — point it at a separate directory to switch Python.",
+        )
+    loop = asyncio.get_running_loop()
+    try:
+        if raw.strip():
+            python = venv.validate_python(raw)
+        else:
+            python = await loop.run_in_executor(None, venv.find_system_python)
+    except (venv.InvalidPythonError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    venv_exists = (settings.dbt_venv_dir / "bin" / "python3").exists()
+    if not (venv_exists and venv.same_interpreter(venv.venv_built_from(), python)):
+        busy = _python_env_busy_reason()
+        if busy:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Can't switch Python while {busy} — try again once it finishes.",
+            )
+        try:
+            await loop.run_in_executor(None, venv.rebuild_venv, python)
+        except RuntimeError as exc:
+            log.error("python_path_rebuild_failed", python=python, error=str(exc))
+            raise HTTPException(status_code=500, detail=str(exc))
+        log.info("python_path_changed", python=python)
+
+    await _upsert(session, PYTHON_PATH_KEY, python)
+    venv.set_configured_python(python)
 
 
 @router.put("", response_model=SettingsDto)
@@ -88,8 +161,25 @@ async def put_settings(
         await _upsert(session, "global_requirements_path", dto.global_requirements_path.strip())
     if dto.theme is not None:
         await _upsert(session, "theme", dto.theme)
+    if dto.python_path is not None:
+        await change_python_path(session, dto.python_path)
     await session.commit()
     return await get_settings(session)
+
+
+class PythonInterpreterDto(BaseModel):
+    path: str
+    version: str
+
+
+@router.get("/python-interpreters", response_model=list[PythonInterpreterDto])
+async def list_python_interpreters(
+    session: AsyncSession = Depends(get_session),
+) -> list[PythonInterpreterDto]:
+    """Python 3.11+ interpreters on this machine, for the DBT_UI_PYTHON_PATH picker."""
+    current = await _get_override(session, PYTHON_PATH_KEY)
+    found = await asyncio.get_running_loop().run_in_executor(None, venv.list_pythons, current)
+    return [PythonInterpreterDto(path=p.path, version=p.version) for p in found]
 
 
 class RequirementsFileDto(BaseModel):

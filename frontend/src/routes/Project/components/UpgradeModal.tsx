@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { Lock } from 'lucide-react';
 import { api, ApiError } from '../../../lib/api';
+import { LicenseKeyHelp } from '../../../components/PolarPortalLink';
 
 interface UpgradeModalProps {
   onClose: () => void;
@@ -100,6 +101,7 @@ export function UpgradeModal({ onClose, feature = 'Column-level lineage' }: Upgr
               className="bg-surface-elevated border border-gray-700 rounded px-3 py-1.5 text-xs font-mono text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
             {error && <p className="text-xs text-red-400">{error}</p>}
+            <LicenseKeyHelp portalUrl={license?.portal_url} />
             <div className="flex items-center gap-2 justify-end">
               {license?.has_key && (
                 <button

@@ -49,5 +49,6 @@ All settings must appear in one of two places in the Environment page (`frontend
 |---|---|---|
 | `DBT_UI_PROJECTS_PATH` | `dbt_projects_path` | `/home/user/dbt-projects` |
 | `DBT_UI_GLOBAL_REQUIREMENTS_PATH` | `global_requirements_path` | `/home/user/dbt-projects/requirements.txt` |
+| `DBT_UI_PYTHON_PATH` | `python_path` | `/opt/homebrew/bin/python3.12` |
 | `DBT_UI_DATA_DIR` | `data_dir` | `data/` |
 | `DBT_UI_LOG_LEVEL` | `log_level` | `INFO` |

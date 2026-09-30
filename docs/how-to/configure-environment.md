@@ -83,7 +83,7 @@ Use global profiles for credentials or env vars that apply to multiple projects 
 
 **INIT_SCRIPT_PATH** — the subdirectory within the project where init scripts are stored. Defaults to `init/`. Click the value to edit.
 
-**REQUIREMENTS_PATH** — an absolute path to a `requirements.txt` file. When set, this file is pip-installed into the dbt venv during every project open (the `base: pip install` init step). Click the value to edit; clear it to remove.
+**REQUIREMENTS_PATH** — path to a `requirements.txt` file: absolute, `~/…`, or relative to the project root (e.g. `requirements.txt`). When set, this file is pip-installed into the dbt venv during every project open (the `base: pip install` init step). Click the value to edit; clear it to remove.
 
 **WORKSPACE_PATH** — the subdirectory within the project where SQL Workspace files are stored. Defaults to `workspace/`. The directory is created automatically if it does not exist. Click the value to edit; clear it to reset to the default.
 
@@ -97,8 +97,19 @@ Global settings are shown for reference but can only be edited in the Global Set
 - **DBT_UI_GLOBAL_REQUIREMENTS_PATH** — a global `requirements.txt` installed for every project
 - **DBT_UI_DATA_DIR** — where the SQLite database is stored
 - **DBT_UI_LOG_LEVEL** — logging verbosity
+- **DBT_UI_PYTHON_PATH** — the Python interpreter dbt runs on (see below)
 
 To change these, click the lock icon area or open Global Settings from the Home page.
+
+### Choosing the Python version dbt runs on
+
+dbt runs in its own virtual environment, built from a Python interpreter on your machine. On first launch dbt-ui picks one automatically (the newest of `python3.13`, `python3.12`, `python3.11` it can find, including Homebrew and pyenv locations), and shows it as **DBT_UI_PYTHON_PATH** in Global Settings → Settings.
+
+To switch, pick another interpreter from the dropdown. It lists every Python 3.11+ install dbt-ui can find: PATH, Homebrew, pyenv's `~/.pyenv/versions/*`, and python.org installs under `/Library/Frameworks`. Symlinks to the same binary appear once, and interpreters inside a virtualenv are excluded. Installed a new Python? Click the rescan button next to the dropdown. You'll be asked to confirm, because switching rebuilds dbt's environment.
+
+Switching rebuilds dbt's environment from scratch, so dbt-core and your adapters are removed. dbt-ui then offers a **Run global setup** button to reinstall them from your global `requirements.txt`. Re-open any project that installs its own `REQUIREMENTS_PATH`. You can't switch while a dbt command, global setup, or init pipeline is running.
+
+This works the same when running from a source checkout (`task start`): dbt gets its own venv at `data/dbt-venv`, separate from the backend's `backend/.venv`. The backend's Python is still chosen with `task install PYTHON=python3.12`.
 
 ---
 
@@ -108,7 +119,8 @@ Click the gear icon on the Home page to open **Global Settings**, then the **Sub
 
 **If you have an active subscription:**
 - Your license key is shown masked (`••••••••…`) by default. Click the eye icon to reveal it, and again to hide it. **Don't share this key** — anyone who has it can activate their own device on it, using up your device slots (and there's no other protection against this).
-- A **Devices** row shows how many devices are currently activated against your key (e.g. "1 of 2 devices activated"). If you see more devices than you own, your key may have been shared or leaked — deactivate the extra device from your Polar customer portal (linked from your purchase receipt email). Click the refresh icon to re-check the count.
+- **Lost your license key?** Every license key box (Settings → Subscription, the Pricing page, and the upgrade prompt) links to the Polar customer portal. Sign in there with the email you purchased with to see your key, free up a device, or manage billing.
+- A **Devices** row shows how many devices are currently activated against your key (e.g. "1 of 2 devices activated"). If you see more devices than you own, your key may have been shared or leaked — deactivate the extra device from your Polar customer portal (use the **customer portal** link in this section, then sign in with your purchase email). Click the refresh icon to re-check the count.
 - Click **Cancel subscription** to cancel. You'll be asked to confirm — cancelling takes effect at the end of your current billing period, so Pro features keep working until then. There's no separate "resubscribe" step needed if you change your mind before the period ends; use your Polar customer portal (linked from your purchase receipt email) to undo a pending cancellation.
 
 **If you don't have an active subscription:**

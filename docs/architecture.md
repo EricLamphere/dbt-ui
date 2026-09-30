@@ -9,7 +9,7 @@ dbt-ui is a local-first web UI that wraps dbt-core. It runs as a local dev serve
 | Layer | Technology | Why |
 |---|---|---|
 | Backend | FastAPI (Python 3.11+) | Async, native SSE/streaming, simple subprocess management |
-| dbt execution | `subprocess` calling the venv `dbt` binary | Safe — avoids dbt Python API global state issues; one process per invocation; always uses the isolated dbt venv (`backend/.venv` in dev, OS user-data dir in the packaged app — see `dbt_venv_dir` in Configuration) |
+| dbt execution | `subprocess` calling the venv `dbt` binary | Safe — avoids dbt Python API global state issues; one process per invocation; always uses the isolated dbt venv (`data/dbt-venv` in dev, OS user-data dir in the packaged app — see `dbt_venv_dir` in Configuration) |
 | Manifest parsing | Custom JSON parser over `manifest.json` | Direct, version-agnostic parsing of dbt's output artifacts |
 | File watching | `watchfiles` (Rust-backed) | Low-overhead, async-friendly, debounced |
 | Live push | Server-Sent Events (SSE) via `sse-starlette` | One-way server→client is sufficient; simpler than WebSockets; built-in browser reconnect |
@@ -44,7 +44,8 @@ dbt-ui/
 │   │   │   ├── init.py              # /api/projects/{id}/init — steps, pipeline, PTY session
 │   │   │   ├── workspace.py         # /api/projects/{id}/workspace — SQL scratchpad compile/run/path
 │   │   │   ├── terminal.py          # /api/terminal — integrated bash PTY sessions
-│   │   │   ├── settings.py          # /api/settings — global app config (dbt_projects_path)
+│   │   │   ├── settings.py          # /api/settings — global app config (dbt_projects_path, python_path, …)
+│   │   │   ├── setup.py             # /api/setup — first-run wizard save + seed_setup_completed() for pre-wizard installs
 │   │   │   ├── events.py            # /api/projects/{id}/events — SSE endpoint
 │   │   │   ├── debug.py             # /api/projects/{id}/debug — runs dbt debug, parses output into structured checks
 │   │   │   ├── drift.py             # /api/projects/{id}/drift — schema drift check (dbt show per model vs manifest columns)
@@ -60,7 +61,8 @@ dbt-ui/
 │   │   │   ├── run_results.py       # Parse target/run_results.json → statuses
 │   │   │   ├── runner.py            # DbtRunner singleton; subprocess + asyncio.Lock per project; .run() for silent invocations
 │   │   │   ├── select.py            # Build --select strings (only/upstream/downstream/full)
-│   │   │   ├── venv.py              # venv_dbt/venv_pip/venv_python — resolve binaries in settings.dbt_venv_dir; self-provisions the venv via system python3 on first use
+│   │   │   ├── venv.py              # venv_dbt/venv_pip/venv_python — resolve binaries in settings.dbt_venv_dir; self-provisions the venv from the python_path setting on first use; rebuilds when it changes
+│   │   │   ├── python_env.py        # python_path global setting — seeded at startup, mirrored into venv.py
 │   │   │   ├── init_scripts.py      # Read/write init/*.sh custom scripts
 │   │   │   ├── debug_parser.py      # Parse dbt debug stdout → structured DebugResult with per-check status
 │   │   │   ├── drift.py             # diff_columns / is_eligible_for_drift_check — column drift helpers
@@ -284,6 +286,8 @@ GET    /api/health
 
 GET    /api/settings
 PUT    /api/settings
+POST   /api/setup/complete                               first-run wizard: validate + save projects path, python, requirements, theme; mark setup_completed
+GET    /api/settings/python-interpreters                 list Python 3.11+ installs for the DBT_UI_PYTHON_PATH dropdown
 
 GET    /api/projects
 POST   /api/projects/rescan
@@ -342,7 +346,7 @@ POST   /api/projects/{id}/init/steps
 DELETE /api/projects/{id}/init/steps/{name}
 POST   /api/projects/{id}/init/reorder
 
-POST   /api/init/global-setup                            run global pip install (global_requirements_path)
+POST   /api/init/global-setup                            run global pip install (global_requirements_path, else latest dbt-core)
 POST   /api/init/global-setup/cancel                     cancel a running global setup
 GET    /api/init/global-setup/events                     SSE stream for global setup output
 
@@ -764,8 +768,9 @@ Behavior:
 | `POLAR_PRODUCTION_API_KEY` | _(none)_ | Polar production API key — secret, `backend/.env` only, never committed |
 | `POLAR_SANDBOX_CHECKOUT_URL` | _(none)_ | Polar sandbox checkout link, surfaced in the frontend upgrade modal |
 | `POLAR_PRODUCTION_CHECKOUT_URL` | _(none)_ | Polar production checkout link, surfaced in the frontend upgrade modal |
+| `POLAR_SANDBOX_ORGANIZATION_SLUG` / `POLAR_PRODUCTION_ORGANIZATION_SLUG` | `lamphere-labs` | Public org slug → `settings.polar_portal_url` (`https://polar.sh/<slug>/portal`, or `sandbox.polar.sh` when `POLAR_USE_SANDBOX`), returned as `portal_url` by `GET /api/license`. Shown under every license key input ("Lost your key…") and in Settings → Subscription. Empty string hides it |
 
-`dbt_venv_dir` (`Settings`, not an env var): the isolated venv `dbt` runs from — `backend/.venv` in dev (created once by `task install:backend`), or `<data_dir>/dbt-venv` in the packaged app, self-created via the system's `python3` on first use of `venv_dbt()`/`venv_pip()`/`venv_python()` (see `app/dbt/venv.py`). `venv.create()` is never run from the app's own (possibly frozen) interpreter — doing so from a PyInstaller-frozen binary causes `ensurepip` to recursively re-exec the whole app.
+`dbt_venv_dir` (`Settings`, not an env var): the isolated venv `dbt` runs from — `<repo>/data/dbt-venv` in dev (kept separate from the backend's own `backend/.venv`), or `<data_dir>/dbt-venv` in the packaged app; overridable with `DBT_UI_DBT_VENV_DIR`. Self-created on first use of `venv_dbt()`/`venv_pip()`/`venv_python()` from the `python_path` global setting (auto-detected on first launch: the interpreter an existing venv was built from, else the first Python 3.11+ found — see `app/dbt/venv.py` and `app/dbt/python_env.py`). Changing `python_path` rebuilds the venv, so dbt and adapters must be reinstalled via global setup. `venv.create()` is never run from the app's own (possibly frozen) interpreter — doing so from a PyInstaller-frozen binary causes `ensurepip` to recursively re-exec the whole app.
 
 Global settings (stored in `app_settings` table, set via UI):
 
@@ -775,6 +780,7 @@ Global settings (stored in `app_settings` table, set via UI):
 | `global_requirements_path` | Absolute path to a `requirements.txt` installed into the dbt venv on every project open |
 | `data_dir` | Overrides `DBT_UI_DATA_DIR` |
 | `log_level` | Overrides `DBT_UI_LOG_LEVEL` |
+| `python_path` | Python 3.11+ interpreter the dbt venv is built from (UI label `DBT_UI_PYTHON_PATH`). Auto-detected on first launch; changing it rebuilds the venv. Not editable in a source checkout |
 
 Per-project env vars (stored in `project_env_vars`, injected into every dbt subprocess via `load_project_env()`):
 
@@ -844,7 +850,7 @@ task install PYTHON=python3.12
 
 **dbt debug result cached in memory** — `dbt debug` is quick (~1s) but re-running it on every page load is unnecessary. The last result is stored in `_cache[project_id]` and served by `GET /debug/last` until explicitly re-triggered. The cache is process-local (no persistence across restarts).
 
-**All dbt commands use the venv binary** — `venv_dbt()` / `venv_pip()` / `venv_python()` in `dbt/venv.py` resolve binaries relative to `settings.dbt_venv_dir` (`backend/.venv` in dev; `<data_dir>/dbt-venv` in the packaged app, created on first use). This ensures adapter packages installed during setup (e.g. `dbt-snowflake`) are available to every dbt invocation regardless of what's on `$PATH`.
+**All dbt commands use the venv binary** — `venv_dbt()` / `venv_pip()` / `venv_python()` in `dbt/venv.py` resolve binaries relative to `settings.dbt_venv_dir` (`data/dbt-venv` in dev; `<data_dir>/dbt-venv` in the packaged app, created on first use). This ensures adapter packages installed during setup (e.g. `dbt-snowflake`) are available to every dbt invocation regardless of what's on `$PATH`.
 
 **Docs generation bypasses `runner.stream()`** — `dbt compile --write-catalog` and `dbt docs generate` are invoked directly (not via `DbtRunner`) so they emit `compile_started`/`compile_finished` or `docs_generating`/`docs_generated` events but never `run_started`. This prevents the frontend from switching to the Run tab when docs are generated.
 

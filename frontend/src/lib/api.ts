@@ -296,6 +296,8 @@ export interface LicenseStatusDto {
   status: string;
   checked_at: string | null;
   checkout_url: string | null;
+  /** Polar customer portal — lost license keys, device seats, billing. */
+  portal_url: string | null;
   can_cancel: boolean;
   limit_activations: number | null;
   can_view_activations: boolean;
@@ -518,6 +520,58 @@ export interface GitCommitLogDto {
 
 export interface GitAcceptedDto {
   accepted: boolean;
+}
+
+export interface SettingsDto {
+  dbt_projects_path: string | null;
+  data_dir: string | null;
+  log_level: string | null;
+  global_requirements_path: string | null;
+  theme: string | null;
+  python_path: string | null;
+  python_path_editable: boolean;
+  configured: boolean;
+  setup_completed: boolean;
+}
+
+export interface SetupDto {
+  dbt_projects_path: string;
+  create_projects_dir?: boolean;
+  /** Empty → auto-detect. */
+  python_path: string;
+  /** Empty → global setup installs the latest dbt-core. */
+  global_requirements_path: string;
+  create_requirements_file?: boolean;
+  theme: 'dark' | 'light';
+}
+
+export interface SetupFieldError {
+  field: 'dbt_projects_path' | 'python_path' | 'global_requirements_path';
+  code: 'required' | 'invalid' | 'not_found';
+  message: string;
+}
+
+/** The field-level error POST /setup/complete returns as a 400 `detail`, if that's what `err` is. */
+export function setupFieldError(err: unknown): SetupFieldError | null {
+  if (!(err instanceof ApiError) || err.status !== 400) return null;
+  const body = err.body as Partial<SetupFieldError> | null;
+  return body && typeof body.field === 'string' && typeof body.message === 'string'
+    ? (body as SetupFieldError)
+    : null;
+}
+
+export interface PythonInterpreterDto {
+  path: string;
+  version: string;
+}
+
+export interface SettingsUpdateDto {
+  dbt_projects_path?: string;
+  data_dir?: string;
+  log_level?: string;
+  global_requirements_path?: string;
+  theme?: string;
+  python_path?: string;
 }
 
 export const api = {
@@ -757,9 +811,12 @@ export const api = {
       ),
   },
   settings: {
-    get: () => get<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; theme: string | null; configured: boolean }>('/settings'),
-    update: (body: { dbt_projects_path?: string; data_dir?: string; log_level?: string; global_requirements_path?: string; theme?: string }) =>
-      put<{ dbt_projects_path: string | null; data_dir: string | null; log_level: string | null; global_requirements_path: string | null; theme: string | null; configured: boolean }>('/settings', body),
+    get: () => get<SettingsDto>('/settings'),
+    update: (body: SettingsUpdateDto) => put<SettingsDto>('/settings', body),
+    pythonInterpreters: () => get<PythonInterpreterDto[]>('/settings/python-interpreters'),
+  },
+  setup: {
+    complete: (body: SetupDto) => post<SettingsDto>('/setup/complete', body),
   },
   drift: {
     start: (projectId: number, select?: string[]) =>

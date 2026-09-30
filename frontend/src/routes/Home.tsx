@@ -691,7 +691,7 @@ export default function Home() {
           <div className="flex flex-col gap-0.5">
             <p className="text-sm font-medium text-red-300">dbt is not installed</p>
             <p className="text-xs text-red-500">
-              Add <code className="font-mono">dbt-core</code> and an adapter to your global requirements file, then click Run global setup in the header.
+              Click Run global setup in the header to install it — your global requirements file if one is set, otherwise the latest <code className="font-mono">dbt-core</code>.
             </p>
           </div>
         </div>

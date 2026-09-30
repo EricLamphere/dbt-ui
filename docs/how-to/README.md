@@ -4,6 +4,7 @@ Step-by-step guides for using dbt-ui.
 
 | Guide | What it covers |
 |---|---|
+| [First-run setup](first-run-setup.md) | The setup wizard: projects folder, Python, dbt packages, preferences, and installing dbt |
 | [Create a project](create-project.md) | Run `dbt init` interactively, set up profiles.yml, and open your first project |
 | [Run, build, and test models](run-models.md) | Select models in the DAG, execute runs, and read output from the Run panel |
 | [Configure environment and targets](configure-environment.md) | Set env vars, switch dbt targets, manage profiles, and install requirements |

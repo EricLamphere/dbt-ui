@@ -38,6 +38,10 @@ class DbtRunner:
             self._locks[project_id] = lock
         return lock
 
+    def is_busy(self) -> bool:
+        """True while any project has a dbt command in flight."""
+        return any(lock.locked() for lock in self._locks.values())
+
     def cancel(self, project_id: int) -> bool:
         """Terminate the running dbt process for a project. Returns True if one was running."""
         proc = self._procs.get(project_id)

@@ -161,7 +161,7 @@ export default function Header() {
           <>
             <button
               onClick={() => setGlobalSetupOpen(true)}
-              title="Installs the global requirements.txt file"
+              title="Installs your global requirements.txt, or the latest dbt-core if none is set"
               className="px-3 py-1.5 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-300 hover:text-white transition-colors"
             >
               Run global setup

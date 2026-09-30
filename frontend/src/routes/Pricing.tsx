@@ -5,6 +5,7 @@ import { openUrl } from '@tauri-apps/plugin-opener';
 import { ArrowLeft, Check, Lock, Settings, Sparkles, X } from 'lucide-react';
 import { api, ApiError } from '../lib/api';
 import { GlobalSettingsModal } from '../components/GlobalSettingsModal';
+import { LicenseKeyHelp } from '../components/PolarPortalLink';
 
 const REASON_COPY: Record<string, string> = {
   not_entitled: 'Your subscription is no longer active. Renew or enter a new license key to continue.',
@@ -198,6 +199,7 @@ export default function Pricing() {
             className="bg-surface-elevated border border-gray-700 rounded px-3 py-1.5 text-xs font-mono text-gray-100 placeholder-gray-600 focus:outline-none focus:ring-1 focus:ring-brand-500"
           />
           {error && <p className="text-xs text-red-400">{error}</p>}
+          <LicenseKeyHelp portalUrl={license?.portal_url} />
           <div className="flex items-center gap-2 justify-end">
             {license?.has_key && (
               <button

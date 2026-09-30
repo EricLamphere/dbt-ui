@@ -12,7 +12,7 @@ A local-first desktop app for [dbt-core](https://github.com/dbt-labs/dbt-core): 
 2. Open it and drag **dbt-ui** into **Applications**.
 3. Launch dbt-ui and point it at the folder that holds your dbt projects.
 
-The app is signed and notarized by Apple, so it opens like any other Mac app. You'll need `git` on your `PATH`. dbt itself is installed for you: the app creates an isolated Python environment the first time you run **Run global setup**.
+The app is signed and notarized by Apple, so it opens like any other Mac app. You'll need `git` on your `PATH`. dbt itself is installed for you: on first launch a setup wizard asks where your projects live and which Python to use, then installs dbt into an isolated environment.
 
 dbt-ui is free and open source. [dbt-ui Pro](https://lampherelabs.com/tools/dbt-ui#pricing) is an optional subscription that adds advanced features and supports continued development. You can upgrade from **Upgrade to Pro** in the app's header.
 

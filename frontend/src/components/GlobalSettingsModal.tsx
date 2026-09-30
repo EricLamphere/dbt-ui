@@ -2,7 +2,9 @@ import { useState, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { api, type GlobalProfileDto } from '../lib/api';
-import { THEME_CHANGE_EVENT } from '../lib/useTheme';
+import { applyTheme } from '../lib/useTheme';
+import { PythonInterpreterRow } from './PythonInterpreterRow';
+import { OPEN_SETUP_EVENT } from './setup/SetupGate';
 import { SubscriptionSection } from './SubscriptionSection';
 
 type ModalTab = 'settings' | 'profiles' | 'requirements' | 'theme' | 'subscription';
@@ -104,8 +106,18 @@ function SettingsTab() {
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Settings</h3>
-        <p className="text-xs text-gray-500 mb-3">Configuration shared across all projects.</p>
+        <div className="flex items-start justify-between gap-4 mb-3">
+          <div>
+            <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Settings</h3>
+            <p className="text-xs text-gray-500">Configuration shared across all projects.</p>
+          </div>
+          <button
+            onClick={() => window.dispatchEvent(new CustomEvent(OPEN_SETUP_EVENT))}
+            className="px-3 py-1.5 text-xs rounded bg-surface-elevated hover:bg-gray-700 text-gray-300 shrink-0 transition-colors"
+          >
+            Run setup again
+          </button>
+        </div>
         <div className="flex flex-col gap-1.5">
           {!appSettings && <p className="text-xs text-gray-600">Loading…</p>}
           {rows.map(({ key, label, value, hint, example }) => (
@@ -147,6 +159,7 @@ function SettingsTab() {
               )}
             </div>
           ))}
+          {appSettings && <PythonInterpreterRow appSettings={appSettings} />}
         </div>
       </div>
     </div>
@@ -270,9 +283,7 @@ function ThemeTab() {
   const currentTheme = appSettings?.theme ?? localStorage.getItem('dbt-ui-theme') ?? 'dark';
 
   const handleThemeSelect = async (theme: string) => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem('dbt-ui-theme', theme);
-    window.dispatchEvent(new CustomEvent(THEME_CHANGE_EVENT));
+    applyTheme(theme as 'dark' | 'light');
     try {
       await api.settings.update({ theme });
       qc.invalidateQueries({ queryKey: ['app-settings'] });
