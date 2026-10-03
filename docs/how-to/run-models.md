@@ -53,6 +53,17 @@ Use the **Target** dropdown in the top-right header to switch between targets de
 
 To run all models in the project, click the top node in the DAG (or use the DAG selection bar) to run without a `--select` filter. Alternatively, use the terminal to run `dbt run` directly.
 
+## Running any dbt command
+
+For anything the buttons don't cover (`ls`, `parse`, `source freshness`, `run-operation`, `snapshot`, unusual flags), type the command yourself:
+
+- **Command palette** — press ⌘K, choose **Run custom dbt command…**, type the command (the `dbt` prefix is optional) and press Enter. You can also type `dbt ls -s +orders` straight into the palette search and pick **Run: dbt …**. Recent commands are listed below the input; arrow keys recall them.
+- **Project homepage** — the **dbt Command** row at the bottom of the Quick Run card. Press ↑/↓ in the input to recall recent commands.
+
+The command runs in the project directory with the active env profile, and `--target` is added from the target dropdown unless you pass `--target`/`-t` yourself. Output streams to the Run panel, and the invocation is recorded in Run History, where **Rerun** replays the exact command. Commands that don't write `run_results.json` (e.g. `ls`, `parse`) are marked success/error from dbt's exit code and don't change model statuses.
+
+`dbt init` (interactive; use **New Project**) and `dbt docs serve` (never exits; use the **Docs** page) are rejected. Commands run without a shell, so pipes and `&&` are passed to dbt as literal arguments.
+
 ## Viewing model status after a run
 
 After a run completes, the main DAG tiles update to show the final status:

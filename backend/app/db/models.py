@@ -195,6 +195,8 @@ class RunInvocation(Base):
     log_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # JSON list of user-entered args for custom dbt commands (null for built-in runs); replayed on rerun
+    custom_args: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     node_results: Mapped[list["InvocationModelResult"]] = relationship(
         back_populates="invocation", cascade="all, delete-orphan"

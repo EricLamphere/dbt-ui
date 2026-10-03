@@ -30,6 +30,7 @@ class DbtRunner:
         self._locks: dict[int, asyncio.Lock] = {}
         self._procs: dict[int, asyncio.subprocess.Process] = {}
         self._cancelled: set[int] = set()
+        self._return_codes: dict[int, int] = {}
 
     def _lock_for(self, project_id: int) -> asyncio.Lock:
         lock = self._locks.get(project_id)
@@ -60,6 +61,10 @@ class DbtRunner:
             self._cancelled.discard(project_id)
             return True
         return False
+
+    def pop_return_code(self, project_id: int) -> int | None:
+        """Return and clear the exit code of the project's last stream() run, or None if unknown."""
+        return self._return_codes.pop(project_id, None)
 
     def build_args(self, req: RunRequest) -> list[str]:
         args = [str(venv_dbt()), req.command]
@@ -134,6 +139,7 @@ class DbtRunner:
                     )
                 )
                 append_project_log(str(req.project_path), "ERROR: dbt executable not found on PATH", pid)
+                self._return_codes[pid] = 127
                 yield ("stderr", "dbt executable not found on PATH\n")
                 return
 
@@ -153,6 +159,7 @@ class DbtRunner:
             finally:
                 self._procs.pop(req.project_id, None)
             return_code = await proc.wait()
+            self._return_codes[pid] = return_code
             finished_at = datetime.now(timezone.utc).isoformat()
             await bus.publish(
                 Event(

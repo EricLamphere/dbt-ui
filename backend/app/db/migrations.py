@@ -364,6 +364,12 @@ async def run_migrations() -> None:
             )
             await session.commit()
 
+        if not await _column_exists(session, "run_invocations", "custom_args"):
+            await session.execute(
+                text("ALTER TABLE run_invocations ADD COLUMN custom_args TEXT")
+            )
+            await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()

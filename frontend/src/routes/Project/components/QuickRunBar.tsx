@@ -32,6 +32,8 @@ export interface QuickRunBarProps {
   onCustomRun: (kind: RunKind) => void;
   customExpanded: boolean;
   onToggleCustomExpanded: () => void;
+  /** Extra sections rendered at the bottom of the card (e.g. the free-form dbt command row). */
+  children?: React.ReactNode;
 }
 
 function Spinner() {
@@ -54,6 +56,7 @@ export function QuickRunBar({
   onCustomRun,
   customExpanded,
   onToggleCustomExpanded,
+  children,
 }: QuickRunBarProps) {
   const anyRunning = activeRun !== null || customActiveRun !== null;
 
@@ -79,7 +82,7 @@ export function QuickRunBar({
         </div>
       </div>
 
-      {/* Custom run section */}
+      {/* Templated run section (selector + options + run/build/test/seed) */}
       <div className="border-t border-gray-800">
         <button
           onClick={onToggleCustomExpanded}
@@ -89,7 +92,7 @@ export function QuickRunBar({
             ? <ChevronDown className="w-3.5 h-3.5 text-gray-600 shrink-0" />
             : <ChevronRight className="w-3.5 h-3.5 text-gray-600 shrink-0" />
           }
-          <span className="font-medium">Custom Run</span>
+          <span className="font-medium">Templated Run</span>
           {!customExpanded && customSelector.trim() && (
             <span className="text-gray-600 font-mono truncate max-w-[200px]">{customSelector.trim()}</span>
           )}
@@ -132,6 +135,8 @@ export function QuickRunBar({
           </div>
         )}
       </div>
+
+      {children}
     </div>
   );
 }

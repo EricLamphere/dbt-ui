@@ -79,6 +79,12 @@ export interface RunOpts {
   vars?: Record<string, string> | null;
 }
 
+export interface RunResponseDto {
+  accepted: boolean;
+  command: string;
+  select: string | null;
+}
+
 export interface Project {
   id: number;
   name: string;
@@ -633,6 +639,8 @@ export const api = {
       post(`/projects/${projectId}/test`, { model: model || null, mode, select: select ?? null, ...opts }),
     seed: (projectId: number, model: string, mode: string, opts?: RunOpts, select?: string) =>
       post(`/projects/${projectId}/seed`, { model: model || null, mode, select: select ?? null, ...opts }),
+    custom: (projectId: number, command: string) =>
+      post<RunResponseDto>(`/projects/${projectId}/command`, { command }),
   },
   runHistory: {
     list: (projectId: number, params: { limit?: number; offset?: number; command?: string; status?: string; q?: string } = {}) => {

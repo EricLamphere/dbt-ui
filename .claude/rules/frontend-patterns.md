@@ -50,6 +50,8 @@ When adding a new resource, follow the pattern: `[resource-name, scopeId?]`.
 
 The hooks live in `frontend/src/lib/sse.ts`. They auto-reconnect on disconnect and clean up on unmount.
 
+`useProjectEvents` multiplexes: every subscriber for a project shares **one** `EventSource` (ref-counted in `sse.ts`). Never open a per-component `new EventSource('/api/projects/...')` — browsers cap HTTP/1.1 at 6 connections per host, and once long-lived streams fill those slots every subsequent fetch hangs until reload.
+
 ## SSE Event → Cache Invalidation Map
 
 When handling SSE events, invalidate the relevant query:
@@ -70,7 +72,7 @@ When adding a new event type that signals stale data, add an entry here.
 
 When the backend adds a new event type that the frontend needs to handle:
 
-1. Add the type string to the `types` array in `useProjectEvents` in `frontend/src/lib/sse.ts`
+1. Add the type string to the `PROJECT_EVENT_TYPES` array in `frontend/src/lib/sse.ts`
 2. Handle it in the `useProjectEvents` callback of the relevant route component
 3. Call `qc.invalidateQueries(...)` if it signals stale cached data
 

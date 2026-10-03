@@ -38,10 +38,10 @@ from app.events.bus import bus, Event
 
 ## Step 2: Register in sse.ts
 
-Open `frontend/src/lib/sse.ts`. In `useProjectEvents`, add the new type to the `types` array:
+Open `frontend/src/lib/sse.ts`. Add the new type to the module-level `PROJECT_EVENT_TYPES` array:
 
 ```typescript
-const types = [
+const PROJECT_EVENT_TYPES = [
   'run_started', 'run_log', 'run_finished', 'run_error',
   'statuses_changed', 'graph_changed', 'files_changed',
   'init_pipeline_started', 'init_step', 'init_pipeline_finished',

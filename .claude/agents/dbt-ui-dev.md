@@ -84,7 +84,7 @@ return sse_response(f"project:{project_id}")                          # standard
 return sse_response_with_replay(topic, replay_buffer, finished, rc)   # PTY sessions only
 ```
 
-When adding a new event type, add its string to the `types` array in `frontend/src/lib/sse.ts` → `useProjectEvents`.
+When adding a new event type, add its string to the `PROJECT_EVENT_TYPES` array in `frontend/src/lib/sse.ts`.
 
 ---
 

@@ -39,6 +39,7 @@ backend/app/
     init_scripts.py — Read/write init/{script_path}/*.sh scripts per project
     interactive.py — InteractiveInitManager (ptyprocess PTY sessions; reused for terminal too)
     debug_parser.py — parse_debug_output() → structured DebugResult from dbt debug stdout
+    custom_command.py — parse_custom_command() → ParsedCommand; shlex-tokenizes user-entered dbt commands, blocks `init`/`docs serve`, detects --select/--target/--profiles-dir
     drift.py      — diff_columns() + is_eligible_for_drift_check() — column schema diff helpers
     column_lineage.py — dbt-ui Pro feature (gated via app/licensing). Public shim only: defines the real, always-importable ColumnRef/LineageJob dataclasses (required at import time by api/column_lineage.py) and lazily delegates prepare_lineage_jobs()/trace_job()/build_column_lineage() to the private `dbt_ui_pro` package (separate repo), raising ColumnLineageUnavailable if it isn't installed. The actual sqlglot-based tracing algorithm (case-insensitive matching, UNPIVOT stripping, etc.) lives in dbt-ui-pro, not this repo.
   licensing/
@@ -68,8 +69,10 @@ frontend/src/
       ProjectLayout.tsx  — Shared layout wrapper (outlet + BottomPane; outlet has overflow-auto for scrolling); global ⌘K listener
       lib/
         commandPaletteContext.tsx — React context + useCommandPalette() hook for open/close
+        customCommand.ts — runCustomCommand() (POST /command, returns user-facing error or null) + per-project recent-command history in localStorage
       components/
-        CommandPalette.tsx — VS Code-style palette; nav + project actions + model search
+        CommandPalette.tsx — VS Code-style palette; nav + project actions + model search; "Run custom dbt command…" (or typing `dbt …`) switches to CustomCommandMode.tsx
+        CustomCommandMode.tsx — palette mode: free-form `dbt <command>` input + recent commands (lib/customCommand.ts)
       index.tsx          — Project homepage (README, dbt_project.yml, profiles.yml tabbed viewer)
       Models.tsx         — React Flow DAG page (/projects/:projectId/models); supports ?model=<uid> deep-link; uses SidePane(page="dag"); optional test coverage overlay with toggle in DagFilterBar; persists coverage state per-project in sessionStorage
       Docs.tsx           — Native docs browser (folder tree); MacroDetail includes "Try It" section with arg inputs, editable Jinja call textarea, and inline compile button
@@ -108,7 +111,7 @@ All 13 in `backend/app/db/models.py`:
 - `projects` — discovered dbt projects (includes `init_script_path: str` per-project init dir; `ignored: bool` to hide from list; `last_init_status: str` (idle/running/success/error), `last_init_started_at`, `last_init_finished_at`, `last_init_failed_step` — persisted init pipeline status shown on the homepage and Initialization page)
 - `init_steps` — ordered init pipeline steps per project (includes `script_path` for linked external scripts; `last_status: str` (idle/running/success/error), `last_started_at`, `last_finished_at`, `last_log: str` (capped at 200 lines) — persisted per-step run status)
 - `model_statuses` — per-model run status (idle/pending/running/success/error/warn/stale)
-- `run_invocations` — historical run records
+- `run_invocations` — historical run records; `custom_args` (JSON list, nullable) holds the user-entered args of a custom dbt command so rerun replays them exactly
 - `env_profiles` — named environment profiles per project
 - `profile_env_vars` — key/value vars belonging to a profile
 - `project_env_vars` — project-level env vars (not profile-scoped); includes `dbt_target` for active target; `REQUIREMENTS_PATH` for per-project requirements; `WORKSPACE_PATH` for SQL workspace dir (default `dbtui/workspace`)

@@ -182,12 +182,13 @@ model_statuses
 run_invocations
   id            INTEGER PK
   project_id    INTEGER FK→projects
-  command       TEXT(64)         -- run, build, test
+  command       TEXT(64)         -- run, build, test, or any dbt subcommand (custom commands)
   selector      TEXT(1024)       -- dbt --select string
   status        TEXT(32)         -- pending | success | error
   log_path      TEXT(1024)
   started_at    DATETIME
   finished_at   DATETIME
+  custom_args   TEXT             -- JSON list of user-entered args for custom commands (null otherwise); replayed on rerun
 
 env_profiles
   id            INTEGER PK
@@ -330,6 +331,7 @@ GET    /api/projects/{id}/freshness                      get the latest Freshnes
 POST   /api/projects/{id}/run
 POST   /api/projects/{id}/build
 POST   /api/projects/{id}/test
+POST   /api/projects/{id}/command                        run an arbitrary dbt command ({command: "ls -s +orders"}); 400 if invalid/blocked (init, docs serve)
 
 GET    /api/projects/{id}/docs/status                    timestamp of last generated docs
 POST   /api/projects/{id}/docs/generate                  runs dbt compile --write-catalog (≥1.9) or dbt docs generate

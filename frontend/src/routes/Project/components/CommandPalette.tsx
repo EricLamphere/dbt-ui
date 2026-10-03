@@ -14,10 +14,13 @@ import {
   RefreshCw,
   Search,
   Settings,
+  SquareTerminal,
   Terminal,
   Zap,
 } from 'lucide-react';
 import { api, GraphDto, ModelNode } from '../../../lib/api';
+import { normalizeCommand } from '../lib/customCommand';
+import { CustomCommandMode } from './CustomCommandMode';
 
 // ---- Types ----
 
@@ -30,8 +33,16 @@ interface Command {
   subtitle?: string;
   icon?: React.ReactNode;
   shortcutHint?: string;
+  /** Don't close the palette on execute (e.g. switching to another palette mode). */
+  keepOpen?: boolean;
   onExecute: () => void;
 }
+
+type PaletteMode =
+  | { kind: 'search' }
+  | { kind: 'custom'; initialCommand: string; autoSubmit: boolean };
+
+const DBT_COMMAND_QUERY = /^dbt\s+\S/;
 
 const CATEGORY_LABELS: Record<CommandCategory, string> = {
   navigation: 'Navigation',
@@ -103,9 +114,22 @@ function buildNavCommands(projectId: number, navigate: NavigateFunction): Comman
   ];
 }
 
-function buildProjectCommands(projectId: number, navigate: NavigateFunction): Command[] {
+function buildProjectCommands(
+  projectId: number,
+  navigate: NavigateFunction,
+  onCustomCommand: () => void,
+): Command[] {
   const base = `/projects/${projectId}`;
   return [
+    {
+      id: 'proj-custom-command',
+      category: 'project',
+      title: 'Run custom dbt command…',
+      subtitle: 'Any dbt command, e.g. ls --select my_model+',
+      icon: <SquareTerminal size={14} />,
+      keepOpen: true,
+      onExecute: onCustomCommand,
+    },
     {
       id: 'proj-run-all',
       category: 'project',
@@ -334,15 +358,32 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [mode, setMode] = useState<PaletteMode>({ kind: 'search' });
 
   const allCommands = useMemo<Command[]>(() => {
     const nav = buildNavCommands(projectId, navigate);
-    const proj = buildProjectCommands(projectId, navigate);
+    const proj = buildProjectCommands(projectId, navigate, () =>
+      setMode({ kind: 'custom', initialCommand: '', autoSubmit: false }),
+    );
     const models = graph ? buildModelCommands(graph.nodes, projectId, navigate) : [];
     return [...nav, ...proj, ...models];
   }, [projectId, navigate, graph]);
 
-  const filtered = useMemo(() => filterCommands(allCommands, query), [allCommands, query]);
+  const filtered = useMemo(() => {
+    const matches = filterCommands(allCommands, query);
+    if (!DBT_COMMAND_QUERY.test(query.trim())) return matches;
+    // Typing "dbt <command>" offers to run it directly.
+    const typed = normalizeCommand(query);
+    const runTyped: Command = {
+      id: 'proj-run-typed',
+      category: 'project',
+      title: `Run: dbt ${typed}`,
+      icon: <SquareTerminal size={14} />,
+      keepOpen: true,
+      onExecute: () => setMode({ kind: 'custom', initialCommand: typed, autoSubmit: true }),
+    };
+    return [runTyped, ...matches];
+  }, [allCommands, query]);
 
   // Reset selection when query changes
   useEffect(() => {
@@ -362,7 +403,7 @@ export function CommandPalette({
 
   const execute = useCallback(
     (cmd: Command) => {
-      onClose();
+      if (!cmd.keepOpen) onClose();
       cmd.onExecute();
     },
     [onClose],
@@ -411,11 +452,22 @@ export function CommandPalette({
         className="bg-surface-panel border border-gray-700 rounded-xl shadow-2xl w-[560px] max-h-[60vh] flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
+        {mode.kind === 'custom' ? (
+          <CustomCommandMode
+            projectId={projectId}
+            initialCommand={mode.initialCommand}
+            autoSubmit={mode.autoSubmit}
+            onBack={() => setMode({ kind: 'search' })}
+            onDone={onClose}
+          />
+        ) : (
+        <>
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-800 shrink-0">
           <Search size={14} className="text-gray-500 shrink-0" />
           <input
             ref={inputRef}
+            autoFocus
             value={query}
             onChange={(e) => onQueryChange(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -453,6 +505,8 @@ export function CommandPalette({
             ))
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
   );

@@ -15,6 +15,7 @@ import {
   type RunOptionsState,
 } from './components/SidePane/PropertiesTab';
 import { QuickRunBar, type RunKind } from './components/QuickRunBar';
+import { DbtCommandRow } from './components/DbtCommandRow';
 
 const PLATFORM_ICONS: Record<string, string> = {
   postgres: '🐘', bigquery: '☁️', snowflake: '❄️', redshift: '🔴',
@@ -175,7 +176,7 @@ export default function ProjectHome() {
     }
   };
 
-  // Custom run state — persisted in sessionStorage per project
+  // Templated run state — persisted in sessionStorage per project
   const CUSTOM_RUN_KEY = `custom-run:${id}`;
   const [customSelector, setCustomSelector] = useState<string>(() => {
     try { return JSON.parse(sessionStorage.getItem(CUSTOM_RUN_KEY) ?? '{}').selector ?? ''; } catch { return ''; }
@@ -384,7 +385,9 @@ export default function ProjectHome() {
             onCustomRun={handleCustomRun}
             customExpanded={customExpanded}
             onToggleCustomExpanded={() => setCustomExpanded((v) => !v)}
-          />
+          >
+            <DbtCommandRow projectId={id} />
+          </QuickRunBar>
 
           {/* Recent runs */}
           <RecentRuns

@@ -1,10 +1,13 @@
 import asyncio
+import json
+import shlex
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +19,7 @@ from app.dbt.manifest import load_manifest
 from app.dbt.run_results import load_run_results
 from app.api.init import load_project_env
 from app.api.env import _read_profiles_yml
+from app.dbt.custom_command import CustomCommandError, ParsedCommand, parse_custom_command
 from app.dbt.runner import RunRequest, runner
 from app.dbt.select import SelectMode, build_selector
 from app.events.bus import Event, bus
@@ -26,6 +30,7 @@ log = get_logger(__name__)
 router = APIRouter(prefix="/api/projects", tags=["runs"])
 
 _MAX_HISTORY_PER_NODE = 20  # rows kept in invocation_model_results per (project, unique_id)
+_MAX_CUSTOM_COMMAND_LENGTH = 4096
 
 
 class RunRequestDto(BaseModel):
@@ -37,6 +42,10 @@ class RunRequestDto(BaseModel):
     debug: bool = False
     empty: bool = False
     vars: dict[str, str] | None = None
+
+
+class CustomCommandDto(BaseModel):
+    command: str = Field(max_length=_MAX_CUSTOM_COMMAND_LENGTH)
 
 
 class RunResponseDto(BaseModel):
@@ -239,6 +248,123 @@ async def _load_active_profile_name(project_id: int) -> str | None:
             return None
 
 
+@dataclass(frozen=True)
+class _InvocationSpec:
+    """Everything needed to execute one dbt invocation and record it in run history."""
+    command: str
+    select: str | None
+    extra: tuple[str, ...]
+    cli_command: str
+    target: str | None
+    profile_name: str | None
+    inject_profiles_dir: bool = True
+    custom_args: tuple[str, ...] | None = None
+
+
+def _profiles_default_target(project: Project) -> str | None:
+    profiles = _read_profiles_yml(Path(project.path))
+    profile_data = profiles.get(project.profile or project.name, {})
+    return profile_data.get("target") or None
+
+
+def _run_results_mtime(project_path: Path) -> float | None:
+    try:
+        return (project_path / "target" / "run_results.json").stat().st_mtime
+    except OSError:
+        return None
+
+
+async def _create_invocation(project: Project, spec: _InvocationSpec) -> tuple[int, Path]:
+    async with SessionLocal() as session:
+        inv = RunInvocation(
+            project_id=project.id,
+            command=spec.command,
+            selector=spec.select,
+            cli_command=spec.cli_command,
+            profile=spec.profile_name,
+            target=spec.target,
+            status="running",
+            started_at=datetime.now(timezone.utc),
+            custom_args=json.dumps(list(spec.custom_args)) if spec.custom_args is not None else None,
+        )
+        session.add(inv)
+        await session.commit()
+        await session.refresh(inv)
+        log_path = _invocation_log_path(Path(project.path), inv.id)
+        inv.log_path = str(log_path)
+        await session.commit()
+        return inv.id, log_path
+
+
+def _invocation_status(
+    cancelled: bool, run_error: bool, results_fresh: bool, return_code: int | None, project_path: Path
+) -> str:
+    if cancelled:
+        return "cancelled"
+    if run_error:
+        return "error"
+    if results_fresh:
+        results = load_run_results(project_path / "target" / "run_results.json")
+        return "error" if any(r.status == "error" for r in results) else "success"
+    # Commands like ls/parse/debug don't write run_results.json — trust the exit code.
+    return "success" if return_code == 0 else "error"
+
+
+async def _finalize_invocation(project: Project, invocation_id: int, status: str) -> None:
+    try:
+        async with SessionLocal() as session:
+            inv_row = await session.get(RunInvocation, invocation_id)
+            if inv_row is not None:
+                inv_row.status = status
+                inv_row.finished_at = datetime.now(timezone.utc)
+                await session.commit()
+    except Exception:
+        log.exception("invocation_status_update_failed", project_id=project.id, invocation_id=invocation_id)
+    await bus.publish(Event(
+        topic=f"project:{project.id}",
+        type="run_history_changed",
+        data={"invocation_id": invocation_id},
+    ))
+
+
+async def _run_invocation(project: Project, spec: _InvocationSpec, env: dict[str, str]) -> None:
+    """Record a RunInvocation, stream dbt through the runner, then persist results and status."""
+    project_path = Path(project.path)
+    invocation_id, log_path = await _create_invocation(project, spec)
+    req = RunRequest(
+        project_id=project.id,
+        project_path=project_path,
+        command=spec.command,
+        select=spec.select if spec.custom_args is None else None,
+        extra=spec.extra,
+        env=env,
+        inject_profiles_dir=spec.inject_profiles_dir,
+    )
+    results_mtime_before = _run_results_mtime(project_path)
+    run_error = False
+    try:
+        with log_path.open("a", encoding="utf-8") as lf:
+            async for _kind, line in runner.stream(req):
+                lf.write(line + "\n")
+    except Exception:
+        log.exception("dbt_invocation_failed", project_id=project.id, invocation_id=invocation_id)
+        run_error = True
+    finally:
+        return_code = runner.pop_return_code(project.id)
+        cancelled = runner.pop_cancel_flag(project.id)
+        results_mtime_after = _run_results_mtime(project_path)
+        # Only persist run_results.json if this invocation rewrote it; otherwise
+        # we would re-record a previous run's results as this one's.
+        results_fresh = results_mtime_after is not None and results_mtime_after != results_mtime_before
+        if results_fresh:
+            try:
+                await _persist_results_after_run(project, invocation_id)
+            except Exception:
+                log.exception("persist_results_failed", project_id=project.id, invocation_id=invocation_id)
+        status = _invocation_status(cancelled, run_error, results_fresh, return_code, project_path)
+        await _finalize_invocation(project, invocation_id, status)
+
+
 async def _run_dbt_and_persist(
     project: Project,
     command: str,
@@ -249,16 +375,10 @@ async def _run_dbt_and_persist(
     empty: bool = False,
     vars: dict[str, str] | None = None,
 ) -> None:
-    import json
     env = await load_project_env(project.id)
-    target = await _load_active_target(project.id)
+    active_target = await _load_active_target(project.id)
     profile_name = await _load_active_profile_name(project.id)
-    extra: tuple[str, ...] = ("--target", target) if target else ()
-    if target is None:
-        profiles = _read_profiles_yml(Path(project.path))
-        profile_key = project.profile or project.name
-        profile_data = profiles.get(profile_key, {})
-        target = profile_data.get("target") or None
+    extra: tuple[str, ...] = ("--target", active_target) if active_target else ()
     if full_refresh:
         extra += ("--full-refresh",)
     if threads is not None:
@@ -272,75 +392,40 @@ async def _run_dbt_and_persist(
 
     selector_part = f" --select {select}" if select else ""
     extra_part = (" " + " ".join(extra)) if extra else ""
-    cli_command = f"dbt {command}{selector_part}{extra_part}"
-
-    invocation_id: int | None = None
-    async with SessionLocal() as session:
-        inv = RunInvocation(
-            project_id=project.id,
-            command=command,
-            selector=select,
-            cli_command=cli_command,
-            profile=profile_name,
-            target=target,
-            status="running",
-            started_at=datetime.now(timezone.utc),
-        )
-        session.add(inv)
-        await session.commit()
-        await session.refresh(inv)
-        invocation_id = inv.id
-
-    log_path = _invocation_log_path(Path(project.path), invocation_id)
-    async with SessionLocal() as session:
-        inv_row = await session.get(RunInvocation, invocation_id)
-        if inv_row is not None:
-            inv_row.log_path = str(log_path)
-            await session.commit()
-
-    req = RunRequest(
-        project_id=project.id,
-        project_path=Path(project.path),
+    spec = _InvocationSpec(
         command=command,
         select=select,
         extra=extra,
-        env=env,
+        cli_command=f"dbt {command}{selector_part}{extra_part}",
+        target=active_target or _profiles_default_target(project),
+        profile_name=profile_name,
     )
-    run_error = False
-    try:
-        with log_path.open("a", encoding="utf-8") as lf:
-            async for _kind, line in runner.stream(req):
-                lf.write(line + "\n")
-    except Exception:
-        run_error = True
-    finally:
-        cancelled = runner.pop_cancel_flag(project.id)
-        try:
-            await _persist_results_after_run(project, invocation_id)
-        except Exception:
-            log.exception("persist_results_failed", project_id=project.id, invocation_id=invocation_id)
-        try:
-            async with SessionLocal() as session:
-                inv_row = await session.get(RunInvocation, invocation_id)
-                if inv_row is not None:
-                    if cancelled:
-                        inv_row.status = "cancelled"
-                    else:
-                        results = load_run_results(Path(project.path) / "target" / "run_results.json")
-                        if results is None:
-                            inv_row.status = "error"
-                        else:
-                            has_error = run_error or any(r.status == "error" for r in results)
-                            inv_row.status = "error" if has_error else "success"
-                    inv_row.finished_at = datetime.now(timezone.utc)
-                    await session.commit()
-        except Exception:
-            log.exception("invocation_status_update_failed", project_id=project.id, invocation_id=invocation_id)
-        await bus.publish(Event(
-            topic=f"project:{project.id}",
-            type="run_history_changed",
-            data={"invocation_id": invocation_id},
-        ))
+    await _run_invocation(project, spec, env)
+
+
+async def _run_custom_and_persist(project: Project, parsed: ParsedCommand) -> None:
+    """Run a user-entered dbt command, injecting the active target unless the user passed one."""
+    env = await load_project_env(project.id)
+    profile_name = await _load_active_profile_name(project.id)
+    extra = parsed.rest
+    if parsed.has_target:
+        target = parsed.target
+    else:
+        active_target = await _load_active_target(project.id)
+        if active_target:
+            extra += ("--target", active_target)
+        target = active_target or _profiles_default_target(project)
+    spec = _InvocationSpec(
+        command=parsed.subcommand,
+        select=parsed.selector,
+        extra=extra,
+        cli_command="dbt " + shlex.join((parsed.subcommand, *extra)),
+        target=target,
+        profile_name=profile_name,
+        inject_profiles_dir=not parsed.has_profiles_dir,
+        custom_args=parsed.args,
+    )
+    await _run_invocation(project, spec, env)
 
 
 async def _launch(
@@ -354,6 +439,11 @@ async def _launch(
         )
     )
     return RunResponseDto(accepted=True, command=command, select=select)
+
+
+def _launch_custom(project: Project, parsed: ParsedCommand) -> RunResponseDto:
+    asyncio.create_task(_run_custom_and_persist(project, parsed))
+    return RunResponseDto(accepted=True, command=parsed.subcommand, select=parsed.selector)
 
 
 @router.post("/{project_id}/run", response_model=RunResponseDto)
@@ -402,6 +492,22 @@ async def post_test(
     if project is None:
         raise HTTPException(status_code=404, detail="project not found")
     return await _launch(project, "test", dto)
+
+
+@router.post("/{project_id}/command", response_model=RunResponseDto)
+async def post_custom_command(
+    project_id: int,
+    dto: CustomCommandDto,
+    session: AsyncSession = Depends(get_session),
+) -> RunResponseDto:
+    project = await session.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="project not found")
+    try:
+        parsed = parse_custom_command(dto.command)
+    except CustomCommandError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return _launch_custom(project, parsed)
 
 
 def _invocation_to_dto(
@@ -572,6 +678,12 @@ async def post_rerun_invocation(
     inv = await session.get(RunInvocation, invocation_id)
     if inv is None or inv.project_id != project_id:
         raise HTTPException(status_code=404, detail="invocation not found")
+    if inv.custom_args is not None:
+        try:
+            parsed = ParsedCommand.from_args(json.loads(inv.custom_args))
+        except (CustomCommandError, json.JSONDecodeError, TypeError) as exc:
+            raise HTTPException(status_code=400, detail=f"cannot rerun this command: {exc}") from exc
+        return _launch_custom(project, parsed)
     dto = RunRequestDto(select=inv.selector)
     return await _launch(project, inv.command, dto)
 
