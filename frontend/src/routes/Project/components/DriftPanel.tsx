@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { api, type DriftSnapshot, type ModelDriftResult, type ColumnDrift } from '../../../lib/api';
 import { useProjectEvents } from '../../../lib/sse';
+import { OPEN_IN_FILES_HOVER_CLS, OPEN_IN_FILES_TITLE, useOpenInFiles } from '../lib/openInFiles';
 
 interface DriftPanelProps {
   projectId: number;
@@ -52,8 +53,14 @@ function matchesFilter(result: ModelDriftResult, filter: FilterKey): boolean {
   return false;
 }
 
-function ModelDriftRow({ result }: { result: ModelDriftResult }) {
+interface ModelDriftRowProps {
+  result: ModelDriftResult;
+  fileNav: ReturnType<typeof useOpenInFiles>;
+}
+
+function ModelDriftRow({ result, fileNav }: ModelDriftRowProps) {
   const [open, setOpen] = useState(true);
+  const canOpen = fileNav.canOpen(result.unique_id);
 
   const driftCols = result.columns.filter(
     (c) => !c.in_manifest || !c.in_warehouse || c.type_mismatch
@@ -67,7 +74,10 @@ function ModelDriftRow({ result }: { result: ModelDriftResult }) {
     <div className="border border-gray-800/60 rounded-lg overflow-hidden">
       <button
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={(e) => {
+          if (fileNav.handleClick(e, result.unique_id)) return;
+          setOpen((o) => !o);
+        }}
         className="w-full flex items-center gap-2 px-3 py-2 bg-surface-elevated/30 hover:bg-surface-elevated/60 transition-colors text-left"
       >
         {open ? (
@@ -75,7 +85,14 @@ function ModelDriftRow({ result }: { result: ModelDriftResult }) {
         ) : (
           <ChevronRight className="w-3.5 h-3.5 text-gray-600 shrink-0" />
         )}
-        <span className="text-xs font-mono text-gray-300 flex-1 truncate">{result.name}</span>
+        <span className="flex-1 min-w-0 truncate">
+          <span
+            title={canOpen ? OPEN_IN_FILES_TITLE : undefined}
+            className={`text-xs font-mono text-gray-300 ${canOpen ? OPEN_IN_FILES_HOVER_CLS : ''}`}
+          >
+            {result.name}
+          </span>
+        </span>
         <span className={`text-[10px] shrink-0 ${result.error ? 'text-red-400' : 'text-amber-400'}`}>
           {summary}
         </span>
@@ -111,6 +128,7 @@ const FILTER_LABELS: Record<FilterKey, string> = {
 
 export default function DriftPanel({ projectId }: DriftPanelProps) {
   const qc = useQueryClient();
+  const fileNav = useOpenInFiles(projectId);
   const [filter, setFilter] = useState<FilterKey>('all');
   const [optimisticProgress, setOptimisticProgress] = useState<{ checked: number; total: number; current: string } | null>(null);
 
@@ -234,7 +252,7 @@ export default function DriftPanel({ projectId }: DriftPanelProps) {
                   {filteredResults.length === 0 ? (
                     <p className="text-xs text-gray-600">No models match this filter.</p>
                   ) : (
-                    filteredResults.map((r) => <ModelDriftRow key={r.unique_id} result={r} />)
+                    filteredResults.map((r) => <ModelDriftRow key={r.unique_id} result={r} fileNav={fileNav} />)
                   )}
                 </div>
               </>

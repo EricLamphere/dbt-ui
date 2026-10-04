@@ -421,7 +421,7 @@ export function PropertiesTab({
                         }}
                         className={`inline-block text-[10px] px-1.5 py-0.5 rounded font-mono border transition-colors ${
                           n.original_file_path && onNavigateToFile
-                            ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-brand-500 hover:text-brand-300 cursor-default'
+                            ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-brand-500 hover:text-brand-300 cursor-default mod:cursor-pointer'
                             : 'bg-surface-elevated text-gray-500 border-transparent cursor-default'
                         }`}
                       >
@@ -445,7 +445,7 @@ export function PropertiesTab({
                         }}
                         className={`inline-block text-[10px] px-1.5 py-0.5 rounded font-mono border transition-colors ${
                           n.original_file_path && onNavigateToFile
-                            ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-brand-500 hover:text-brand-300 cursor-default'
+                            ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-brand-500 hover:text-brand-300 cursor-default mod:cursor-pointer'
                             : 'bg-surface-elevated text-gray-500 border-transparent cursor-default'
                         }`}
                       >

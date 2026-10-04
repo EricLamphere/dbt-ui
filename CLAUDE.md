@@ -69,6 +69,7 @@ frontend/src/
       ProjectLayout.tsx  — Shared layout wrapper (outlet + BottomPane; outlet has overflow-auto for scrolling); global ⌘K listener
       lib/
         commandPaletteContext.tsx — React context + useCommandPalette() hook for open/close
+        openInFiles.ts — useOpenInFiles(projectId) → { canOpen, open, handleClick }; shared Cmd+click "open node in Files" (used by Health drift/freshness panels and Run History detail pane)
         customCommand.ts — runCustomCommand() (POST /command, returns user-facing error or null) + per-project recent-command history in localStorage
       components/
         CommandPalette.tsx — VS Code-style palette; nav + project actions + model search; "Run custom dbt command…" (or typing `dbt …`) switches to CustomCommandMode.tsx

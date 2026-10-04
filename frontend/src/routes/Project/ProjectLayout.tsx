@@ -3,11 +3,13 @@ import { useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Outlet } from 'react-router-dom';
 import { api } from '../../lib/api';
+import { useModifierKeyClass } from '../../lib/useModifierKeyClass';
 import { BottomPane } from './components/BottomPane';
 import { CommandPalette } from './components/CommandPalette';
 import { CommandPaletteContext } from './lib/commandPaletteContext';
 
 export default function ProjectLayout() {
+  useModifierKeyClass();
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
 

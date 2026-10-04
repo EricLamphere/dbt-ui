@@ -62,9 +62,20 @@ class ModelNode:
 
 
 @dataclass(frozen=True)
+class UnitTestRef:
+    """A dbt 1.8+ unit test. Kept out of `Manifest.nodes` so it never appears in the DAG."""
+
+    unique_id: str
+    name: str
+    model: str | None  # name of the model under test
+    original_file_path: str | None
+
+
+@dataclass(frozen=True)
 class Manifest:
     nodes: tuple[ModelNode, ...]
     parents: dict[str, tuple[str, ...]]  # unique_id -> parent unique_ids
+    unit_tests: tuple[UnitTestRef, ...] = ()
 
     def edges(self) -> list[tuple[str, str]]:
         pairs: list[tuple[str, str]] = []
@@ -119,6 +130,22 @@ def _extract_node(
     )
 
 
+def _extract_unit_tests(raw_unit_tests: Any) -> tuple[UnitTestRef, ...]:
+    if not isinstance(raw_unit_tests, dict):
+        return ()
+    refs: list[UnitTestRef] = []
+    for unique_id, raw in raw_unit_tests.items():
+        if not isinstance(raw, dict):
+            continue
+        refs.append(UnitTestRef(
+            unique_id=unique_id,
+            name=raw.get("name") or unique_id.split(".")[-1],
+            model=raw.get("model"),
+            original_file_path=raw.get("original_file_path"),
+        ))
+    return tuple(refs)
+
+
 def load_manifest(manifest_path: Path) -> Manifest | None:
     if not manifest_path.exists():
         return None
@@ -156,4 +183,8 @@ def load_manifest(manifest_path: Path) -> Manifest | None:
             if isinstance(parent_list, list):
                 parents[child] = tuple(p for p in parent_list if isinstance(p, str))
 
-    return Manifest(nodes=tuple(nodes), parents=parents)
+    return Manifest(
+        nodes=tuple(nodes),
+        parents=parents,
+        unit_tests=_extract_unit_tests(data.get("unit_tests")),
+    )

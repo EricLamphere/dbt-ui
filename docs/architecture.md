@@ -298,7 +298,7 @@ PATCH  /api/projects/{id}/settings
 
 GET    /api/projects/{id}/events                         SSE
 
-GET    /api/projects/{id}/models
+GET    /api/projects/{id}/models                         graph: nodes, edges, unit_tests (dbt 1.8+ unit tests, kept out of nodes)
 POST   /api/projects/{id}/models
 GET    /api/projects/{id}/models/{unique_id}
 DELETE /api/projects/{id}/models/{unique_id}

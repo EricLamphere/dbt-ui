@@ -62,9 +62,17 @@ class EdgeDto(BaseModel):
     target: str
 
 
+class UnitTestDto(BaseModel):
+    unique_id: str
+    name: str
+    model: str | None = None
+    original_file_path: str | None = None
+
+
 class GraphDto(BaseModel):
     nodes: list[ModelDto]
     edges: list[EdgeDto]
+    unit_tests: list[UnitTestDto] = []
 
 
 def _node_to_dto(node: ModelNode, status: ModelStatus | None) -> ModelDto:
@@ -116,7 +124,16 @@ async def get_models(
     statuses = await _load_statuses(session, project_id)
     nodes = [_node_to_dto(n, statuses.get(n.unique_id)) for n in manifest.nodes]
     edges = [EdgeDto(source=s, target=t) for s, t in manifest.edges()]
-    return GraphDto(nodes=nodes, edges=edges)
+    unit_tests = [
+        UnitTestDto(
+            unique_id=u.unique_id,
+            name=u.name,
+            model=u.model,
+            original_file_path=u.original_file_path,
+        )
+        for u in manifest.unit_tests
+    ]
+    return GraphDto(nodes=nodes, edges=edges, unit_tests=unit_tests)
 
 
 @router.get("/{project_id}/models/{unique_id}", response_model=ModelDto)

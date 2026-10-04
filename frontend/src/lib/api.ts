@@ -324,9 +324,19 @@ export interface Edge {
   target: string;
 }
 
+/** dbt 1.8+ unit test — returned alongside the graph, never rendered as a DAG node. */
+export interface UnitTestDto {
+  unique_id: string;
+  name: string;
+  model: string | null;
+  original_file_path: string | null;
+}
+
 export interface GraphDto {
   nodes: ModelNode[];
   edges: Edge[];
+  /** Present on responses from the API; absent on locally derived subgraphs. */
+  unit_tests?: UnitTestDto[];
 }
 
 export interface InitStepDto {

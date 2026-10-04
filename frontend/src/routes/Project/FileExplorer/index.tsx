@@ -327,6 +327,13 @@ export default function FileExplorerPage() {
         openFileNode(node.original_file_path, false, testNode);
         return;
       }
+      // Unit tests aren't graph nodes — open the YAML file that defines them
+      const unitTest = graph.unit_tests?.find((u) => u.unique_id === modelParam);
+      if (unitTest?.original_file_path) {
+        expandToPath(unitTest.original_file_path);
+        openFileNode(unitTest.original_file_path);
+        return;
+      }
     }
 
     // Restore last open file from sessionStorage

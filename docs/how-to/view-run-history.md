@@ -52,6 +52,8 @@ Shows every model and test that executed in the selected run, with:
 
 **Per-node trend:** Click any row to expand a sparkline showing that node's execution time across its last 20 runs. Red dots mark errored runs. The panel also shows the min, max, and average execution time across those runs.
 
+**Open in Files:** **Cmd+click** (Ctrl+click on Windows/Linux) a node name — in the Nodes tab or the Failed Rows tab — to open its file in the File Explorer (unit tests open the YAML file that defines them), same as the Refs/Sources chips in the SidePane. Nodes that are no longer in the manifest aren't linkable.
+
 ### Log tab
 
 Shows the raw stdout captured from dbt for that invocation. Lines containing `OK` or `PASS` are highlighted green; `ERROR` / `FAILED` lines are red; `WARN` lines are amber. This is the same output that appears in the Project Logs tab during a live run.

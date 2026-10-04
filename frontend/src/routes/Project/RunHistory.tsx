@@ -6,6 +6,9 @@ import NavRail from './components/NavRail';
 import { api, ModelTimingDto, NodeTrendPoint, RunInvocationDetailDto, RunInvocationDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 import { DataTable } from '../../components/DataTable';
+import { OPEN_IN_FILES_HOVER_CLS, OPEN_IN_FILES_TITLE, useOpenInFiles } from './lib/openInFiles';
+
+type FileNav = ReturnType<typeof useOpenInFiles>;
 
 export type FailedRowsCache = Map<string, { columns: string[]; rows: unknown[][] }>;
 
@@ -102,8 +105,9 @@ function Sparkline({ points }: { points: NodeTrendPoint[] }) {
 
 // ── TrendRow (single node trend, loaded on demand) ───────────────────────────
 
-function TrendRow({ projectId, node }: { projectId: number; node: ModelTimingDto }) {
+function TrendRow({ projectId, node, fileNav }: { projectId: number; node: ModelTimingDto; fileNav: FileNav }) {
   const [open, setOpen] = useState(false);
+  const canOpen = fileNav.canOpen(node.unique_id);
   const { data: trend } = useQuery<NodeTrendPoint[]>({
     queryKey: ['node-trend', projectId, node.unique_id],
     queryFn: () => api.runHistory.nodeTrend(projectId, node.unique_id),
@@ -125,7 +129,10 @@ function TrendRow({ projectId, node }: { projectId: number; node: ModelTimingDto
     <>
       <tr
         className="border-b border-gray-800/60 hover:bg-surface-elevated cursor-pointer transition-colors"
-        onClick={() => setOpen((o) => !o)}
+        onClick={(e) => {
+          if (fileNav.handleClick(e, node.unique_id)) return;
+          setOpen((o) => !o);
+        }}
       >
         <td className="px-4 py-2 font-mono text-gray-300 flex items-center gap-1.5">
           <svg
@@ -134,7 +141,12 @@ function TrendRow({ projectId, node }: { projectId: number; node: ModelTimingDto
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
           </svg>
-          {node.name}
+          <span
+            title={canOpen ? OPEN_IN_FILES_TITLE : undefined}
+            className={canOpen ? OPEN_IN_FILES_HOVER_CLS : undefined}
+          >
+            {node.name}
+          </span>
           {kindBadge && <span className="ml-1">{kindBadge}</span>}
         </td>
         <td className={`px-4 py-2 text-right tabular-nums font-mono ${node.execution_time !== null && node.execution_time >= 10 ? 'text-amber-500' : 'text-gray-300'}`}>
@@ -177,10 +189,12 @@ interface FailedTestRowProps {
   node: ModelTimingDto;
   failedRowsCache: FailedRowsCache;
   onFailedRowsCached: (uid: string, data: { columns: string[]; rows: unknown[][] }) => void;
+  fileNav: FileNav;
 }
 
-function FailedTestRow({ projectId, node, failedRowsCache, onFailedRowsCached }: FailedTestRowProps) {
+function FailedTestRow({ projectId, node, failedRowsCache, onFailedRowsCached, fileNav }: FailedTestRowProps) {
   const [open, setOpen] = useState(false);
+  const canOpen = fileNav.canOpen(node.unique_id);
   const key = `${projectId}:${node.unique_id}`;
   const cached = failedRowsCache.get(node.unique_id) ?? null;
   const [loading, setLoading] = useState(false);
@@ -202,7 +216,8 @@ function FailedTestRow({ projectId, node, failedRowsCache, onFailedRowsCached }:
     }
   };
 
-  function handleToggle() {
+  function handleToggle(e: React.MouseEvent) {
+    if (fileNav.handleClick(e, node.unique_id)) return;
     const next = !open;
     setOpen(next);
     if (next && !cached && !_failedRowsInflight.has(key)) {
@@ -225,7 +240,14 @@ function FailedTestRow({ projectId, node, failedRowsCache, onFailedRowsCached }:
         <svg className="w-3.5 h-3.5 shrink-0 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
         </svg>
-        <span className="flex-1 font-mono text-xs text-gray-300 truncate">{node.name}</span>
+        <span className="flex-1 min-w-0 truncate">
+          <span
+            title={canOpen ? OPEN_IN_FILES_TITLE : undefined}
+            className={`font-mono text-xs text-gray-300 ${canOpen ? OPEN_IN_FILES_HOVER_CLS : ''}`}
+          >
+            {node.name}
+          </span>
+        </span>
         {cached && (
           <span className="text-[10px] text-gray-500 shrink-0">{cached.rows.length} row{cached.rows.length !== 1 ? 's' : ''}</span>
         )}
@@ -284,6 +306,7 @@ interface DetailPanelProps {
 }
 
 function DetailPanel({ projectId, invocation, onRerun, failedRowsCache, onFailedRowsCached }: DetailPanelProps) {
+  const fileNav = useOpenInFiles(projectId);
   const [tab, setTab] = useState<DetailTab>('nodes');
   const [nodeFilter, setNodeFilter] = useState('');
   const [kindFilter, setKindFilter] = useState<'all' | 'model' | 'test'>('all');
@@ -410,7 +433,7 @@ function DetailPanel({ projectId, invocation, onRerun, failedRowsCache, onFailed
                 </thead>
                 <tbody>
                   {filteredNodes.map((n) => (
-                    <TrendRow key={n.unique_id} projectId={projectId} node={n} />
+                    <TrendRow key={n.unique_id} projectId={projectId} node={n} fileNav={fileNav} />
                   ))}
                 </tbody>
               </table>
@@ -418,7 +441,7 @@ function DetailPanel({ projectId, invocation, onRerun, failedRowsCache, onFailed
           </div>
           {!isLoading && filteredNodes.length > 0 && (
             <p className="shrink-0 px-4 py-1.5 text-[10px] text-gray-500 border-t border-gray-800">
-              Click a row to view the trend for that node across its last {20} runs. ⚠ = slower than 10s.
+              Click a row to view the trend for that node across its last {20} runs. Cmd+click a name to open it in Files. ⚠ = slower than 10s.
             </p>
           )}
         </>
@@ -434,6 +457,7 @@ function DetailPanel({ projectId, invocation, onRerun, failedRowsCache, onFailed
               node={n}
               failedRowsCache={failedRowsCache}
               onFailedRowsCached={onFailedRowsCached}
+              fileNav={fileNav}
             />
           ))}
         </div>

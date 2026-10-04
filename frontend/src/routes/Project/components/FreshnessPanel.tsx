@@ -3,6 +3,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { api, type SourceFreshnessResult } from '../../../lib/api';
 import { useProjectEvents } from '../../../lib/sse';
+import { OPEN_IN_FILES_CURSOR_CLS, OPEN_IN_FILES_HOVER_CLS, OPEN_IN_FILES_TITLE, useOpenInFiles } from '../lib/openInFiles';
+
+type FileNav = ReturnType<typeof useOpenInFiles>;
 
 interface FreshnessPanelProps {
   projectId: number;
@@ -157,17 +160,21 @@ function TableHeader({ widths, onResize }: TableHeaderProps) {
 interface SourceTableRowProps {
   result: SourceFreshnessResult;
   widths: ColWidths;
+  fileNav: FileNav;
 }
 
-function SourceTableRow({ result, widths }: SourceTableRowProps) {
+function SourceTableRow({ result, widths, fileNav }: SourceTableRowProps) {
+  const canOpen = fileNav.canOpen(result.unique_id);
   return (
     <div className="flex items-center border-b border-gray-800/40 last:border-0">
-      <span
-        className="shrink-0 px-4 py-2.5 text-xs font-mono text-gray-300 truncate"
-        style={{ width: widths.table }}
-        title={result.table_name}
-      >
-        {result.table_name}
+      <span className="shrink-0 px-4 py-2.5 truncate" style={{ width: widths.table }}>
+        <span
+          onClick={(e) => fileNav.handleClick(e, result.unique_id)}
+          className={`text-xs font-mono text-gray-300 ${canOpen ? `${OPEN_IN_FILES_HOVER_CLS} ${OPEN_IN_FILES_CURSOR_CLS}` : ''}`}
+          title={canOpen ? `${result.table_name} — ${OPEN_IN_FILES_TITLE}` : result.table_name}
+        >
+          {result.table_name}
+        </span>
       </span>
       <span
         className={`shrink-0 px-2 py-2.5 text-xs tabular-nums ${result.age_seconds !== null && result.age_seconds > 0 ? 'text-gray-300' : 'text-gray-600'}`}
@@ -201,9 +208,10 @@ interface SourceGroupProps {
   results: SourceFreshnessResult[];
   widths: ColWidths;
   onResize: (col: keyof ColWidths, dx: number) => void;
+  fileNav: FileNav;
 }
 
-function SourceGroup({ sourceName, results, widths, onResize }: SourceGroupProps) {
+function SourceGroup({ sourceName, results, widths, onResize, fileNav }: SourceGroupProps) {
   const [open, setOpen] = useState(true);
 
   const worstStatus = results.reduce<string>((worst, r) => {
@@ -234,7 +242,7 @@ function SourceGroup({ sourceName, results, widths, onResize }: SourceGroupProps
           <TableHeader widths={widths} onResize={onResize} />
           <div>
             {results.map((r) => (
-              <SourceTableRow key={r.unique_id} result={r} widths={widths} />
+              <SourceTableRow key={r.unique_id} result={r} widths={widths} fileNav={fileNav} />
             ))}
           </div>
         </>
@@ -245,6 +253,7 @@ function SourceGroup({ sourceName, results, widths, onResize }: SourceGroupProps
 
 export default function FreshnessPanel({ projectId }: FreshnessPanelProps) {
   const qc = useQueryClient();
+  const fileNav = useOpenInFiles(projectId);
   const [filter, setFilter] = useState<FilterKey>('all');
   const [colWidths, setColWidths] = useState<ColWidths>(DEFAULT_COL_WIDTHS);
 
@@ -374,6 +383,7 @@ export default function FreshnessPanel({ projectId }: FreshnessPanelProps) {
                     results={grouped[sourceName]}
                     widths={colWidths}
                     onResize={handleResize}
+                    fileNav={fileNav}
                   />
                 ))}
               </div>

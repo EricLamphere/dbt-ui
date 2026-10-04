@@ -1,5 +1,6 @@
 import type { Config } from 'tailwindcss';
 import colors from 'tailwindcss/colors';
+import plugin from 'tailwindcss/plugin';
 
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
@@ -62,5 +63,8 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // `mod:` — applies while Cmd/Ctrl is held (class toggled by useModifierKeyClass)
+    plugin(({ addVariant }) => addVariant('mod', 'html.mod-held &')),
+  ],
 } satisfies Config;

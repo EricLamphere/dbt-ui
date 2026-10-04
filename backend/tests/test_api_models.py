@@ -50,6 +50,15 @@ def _make_project_with_manifest(root: Path, name: str = "test_project") -> tuple
             },
         },
         "sources": {},
+        "unit_tests": {
+            "unit_test.proj.orders.test_orders_totals": {
+                "unique_id": "unit_test.proj.orders.test_orders_totals",
+                "name": "test_orders_totals",
+                "resource_type": "unit_test",
+                "model": "orders",
+                "original_file_path": "models/_unit_tests.yml",
+            },
+        },
         "parent_map": {
             "model.proj.orders": ["model.proj.customers"],
         },
@@ -68,7 +77,7 @@ async def test_models_no_manifest(
     pid = list_resp.json()[0]["id"]
     resp = await client.get(f"/api/projects/{pid}/models")
     assert resp.status_code == 200
-    assert resp.json() == {"nodes": [], "edges": []}
+    assert resp.json() == {"nodes": [], "edges": [], "unit_tests": []}
 
 
 async def test_models_endpoint_returns_graph(
@@ -88,6 +97,13 @@ async def test_models_endpoint_returns_graph(
     assert len(edges) == 1
     assert edges[0]["source"] == "model.proj.customers"
     assert edges[0]["target"] == "model.proj.orders"
+    assert "test_orders_totals" not in names
+    assert data["unit_tests"] == [{
+        "unique_id": "unit_test.proj.orders.test_orders_totals",
+        "name": "test_orders_totals",
+        "model": "orders",
+        "original_file_path": "models/_unit_tests.yml",
+    }]
 
 
 async def test_models_project_not_found(client: AsyncClient) -> None:
