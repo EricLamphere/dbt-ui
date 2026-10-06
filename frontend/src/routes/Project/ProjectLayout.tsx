@@ -7,6 +7,7 @@ import { useModifierKeyClass } from '../../lib/useModifierKeyClass';
 import { BottomPane } from './components/BottomPane';
 import { CommandPalette } from './components/CommandPalette';
 import { CommandPaletteContext } from './lib/commandPaletteContext';
+import { SelectedNodeContext, SetSelectedNodeContext } from './lib/selectedNodeContext';
 
 export default function ProjectLayout() {
   useModifierKeyClass();
@@ -27,6 +28,7 @@ export default function ProjectLayout() {
     enabled: !!id,
   });
 
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
 
@@ -65,11 +67,18 @@ export default function ProjectLayout() {
 
   return (
     <CommandPaletteContext.Provider value={ctxValue}>
+      <SetSelectedNodeContext.Provider value={setSelectedNodeId}>
+      <SelectedNodeContext.Provider value={selectedNodeId}>
       <div className="flex flex-col h-full overflow-hidden">
         <div className="flex-1 min-h-0 overflow-auto">
           <Outlet />
         </div>
-        <BottomPane projectId={id} graph={graph ?? null} projectPath={project?.path ?? null} />
+        <BottomPane
+          projectId={id}
+          graph={graph ?? null}
+          projectPath={project?.path ?? null}
+          selectedNodeId={selectedNodeId}
+        />
         {paletteOpen && (
           <CommandPalette
             projectId={id}
@@ -80,6 +89,8 @@ export default function ProjectLayout() {
           />
         )}
       </div>
+      </SelectedNodeContext.Provider>
+      </SetSelectedNodeContext.Provider>
     </CommandPaletteContext.Provider>
   );
 }

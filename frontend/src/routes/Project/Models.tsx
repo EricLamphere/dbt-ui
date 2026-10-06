@@ -29,52 +29,8 @@ import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserial
 import { ColumnLineageContext, type ColumnLineageContextValue } from './lib/columnLineageContext';
 import { buildCoverageMap, getModelCoverageStats } from './lib/testCoverage';
 import CoverageLegend from './components/CoverageLegend';
-
-type LiveStatus = 'running' | 'success' | 'error' | 'warn';
-
-function stripAnsi(s: string): string {
-  // eslint-disable-next-line no-control-regex
-  return s.replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '');
-}
-
-function lastName(dotted: string): string {
-  const parts = dotted.split('.');
-  return parts[parts.length - 1];
-}
-
-function parseStartName(raw: string): string | null {
-  const line = stripAnsi(raw).trim();
-  const modelMatch = line.match(/\d+ of \d+ START .+ model (\S+)/);
-  if (modelMatch) return lastName(modelMatch[1]);
-  const testMatch = line.match(/\d+ of \d+ START test (\S+)/);
-  if (testMatch) return lastName(testMatch[1]);
-  return null;
-}
-
-function parseResultEntry(raw: string): { name: string; status: LiveStatus } | null {
-  const line = stripAnsi(raw).trim();
-  const modelMatch = line.match(/\d+ of \d+ (OK|ERROR|WARN) .+ model (\S+)/);
-  if (modelMatch) {
-    const kw = modelMatch[1];
-    const status: LiveStatus = kw === 'ERROR' ? 'error' : kw === 'WARN' ? 'warn' : 'success';
-    return { name: lastName(modelMatch[2]), status };
-  }
-  const testPassMatch = line.match(/\d+ of \d+ PASS \d* *(\S+)/);
-  if (testPassMatch) return { name: lastName(testPassMatch[1]), status: 'success' };
-  const testFailMatch = line.match(/\d+ of \d+ FAIL \d+ +(\S+)/);
-  if (testFailMatch) return { name: lastName(testFailMatch[1]), status: 'error' };
-  return null;
-}
-
-function applyLiveStatuses(graph: GraphDto, liveStatuses: Record<string, LiveStatus>): GraphDto {
-  if (Object.keys(liveStatuses).length === 0) return graph;
-  return {
-    ...graph,
-    nodes: graph.nodes.map((n) =>
-      liveStatuses[n.name] ? { ...n, status: liveStatuses[n.name] } : n,
-    ),
-  };
-}
+import { useReportSelectedNode } from './lib/selectedNodeContext';
+import { useLiveRunStatuses, applyLiveStatuses } from './lib/useLiveRunStatuses';
 
 function FitViewOnFirstLoad({ trigger }: { trigger: unknown }) {
   const { fitView } = useReactFlow();
@@ -144,7 +100,7 @@ export default function ModelsPage() {
     } catch { return new Map(); }
   });
   // Live run status overlay: model name → status, applied on top of cached graph data
-  const [liveStatuses, setLiveStatuses] = useState<Record<string, LiveStatus>>({});
+  const liveStatuses = useLiveRunStatuses(id);
 
   // Column lineage state
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(() => {
@@ -226,6 +182,8 @@ export default function ModelsPage() {
     });
   }, [graph, modelParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  useReportSelectedNode(selectedModel?.unique_id ?? null);
+
   useEffect(() => {
     if (!graph || !selectedModel) return;
     const refreshed = graph.nodes.find((n) => n.unique_id === selectedModel.unique_id);
@@ -238,16 +196,14 @@ export default function ModelsPage() {
 
   // SSE — react to server events
   useProjectEvents(id, useCallback((event) => {
-    if (event.type === 'statuses_changed' || event.type === 'graph_changed') {
-      setLiveStatuses({});
-      if (event.type === 'graph_changed') {
-        setActiveColumnSels(new Set());
-        setExpandedNodes(new Set());
-        try {
-          sessionStorage.setItem(columnSelsKey, '[]');
-          sessionStorage.setItem(expandedNodesKey, '[]');
-        } catch {}
-      }
+    // statuses_changed is refetched by useLiveRunStatuses, which needs to know when it lands.
+    if (event.type === 'graph_changed') {
+      setActiveColumnSels(new Set());
+      setExpandedNodes(new Set());
+      try {
+        sessionStorage.setItem(columnSelsKey, '[]');
+        sessionStorage.setItem(expandedNodesKey, '[]');
+      } catch {}
       qc.invalidateQueries({ queryKey: ['models', id] });
     }
     if (event.type === 'compile_started') setCompiling(true);
@@ -257,18 +213,6 @@ export default function ModelsPage() {
     if (event.type === 'test_failed') {
       const d = event.data as { test_uid: string; model_uid: string | null };
       setFailedTestUid(d.test_uid);
-    }
-    if (event.type === 'run_log') {
-      const line = (event.data as { line: string }).line;
-      const startName = parseStartName(line);
-      if (startName) {
-        setLiveStatuses((prev) => ({ ...prev, [startName]: 'running' }));
-        return;
-      }
-      const result = parseResultEntry(line);
-      if (result) {
-        setLiveStatuses((prev) => ({ ...prev, [result.name]: result.status }));
-      }
     }
     if (event.type === 'column_lineage_compiling') {
       setColumnLineageCompiling(true);

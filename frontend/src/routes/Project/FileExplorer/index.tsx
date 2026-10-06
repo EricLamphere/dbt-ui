@@ -11,6 +11,7 @@ import { TreeItem } from './TreeItem';
 import { ViewPane } from './panes/ViewPane';
 import type { ContextMenuState, RenameState, TreeNode } from './types';
 import { filterTree, updateNode } from './types';
+import { useReportSelectedNode } from '../lib/selectedNodeContext';
 
 export default function FileExplorerPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -76,6 +77,8 @@ export default function FileExplorerPage() {
     queryFn: () => api.models.graph(id),
     refetchInterval: false,
   });
+
+  useReportSelectedNode((selectedTestNode ?? selectedModel)?.unique_id ?? null);
 
   // When graph re-fetches (e.g. after statuses_changed), refresh stale node references
   // so selectedTestNode always has the current status (needed for SidePane tab bar condition)

@@ -177,6 +177,18 @@ function seedsForToken(token: ParsedToken, nodes: ModelNode[]): Set<string> {
   return seeds;
 }
 
+export type DropdownFilters = Pick<FilterState, 'resourceTypes' | 'materializations' | 'statuses'> &
+  Partial<Pick<FilterState, 'tags'>>;
+
+/** Dropdown filters: AND between categories, OR within each; an empty category matches everything. */
+export function matchesDropdownFilters(node: ModelNode, filter: DropdownFilters): boolean {
+  if (filter.resourceTypes.size > 0 && !filter.resourceTypes.has(node.resource_type)) return false;
+  if (filter.materializations.size > 0 && (!node.materialized || !filter.materializations.has(node.materialized))) return false;
+  if (filter.tags && filter.tags.size > 0 && !node.tags.some((t) => filter.tags!.has(t))) return false;
+  if (filter.statuses.size > 0 && !filter.statuses.has(node.status)) return false;
+  return true;
+}
+
 export function applyFilter(graph: GraphDto, filter: FilterState): GraphDto {
   if (!isFilterActive(filter)) return graph;
 
@@ -213,14 +225,7 @@ export function applyFilter(graph: GraphDto, filter: FilterState): GraphDto {
   const filtered = new Set<string>();
   for (const id of candidates) {
     const node = nodeMap.get(id);
-    if (!node) continue;
-
-    if (filter.resourceTypes.size > 0 && !filter.resourceTypes.has(node.resource_type)) continue;
-    if (filter.materializations.size > 0 && (!node.materialized || !filter.materializations.has(node.materialized))) continue;
-    if (filter.tags.size > 0 && !node.tags.some((t) => filter.tags.has(t))) continue;
-    if (filter.statuses.size > 0 && !filter.statuses.has(node.status)) continue;
-
-    filtered.add(id);
+    if (node && matchesDropdownFilters(node, filter)) filtered.add(id);
   }
 
   return {

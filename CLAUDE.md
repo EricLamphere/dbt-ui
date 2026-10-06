@@ -70,6 +70,9 @@ frontend/src/
       lib/
         commandPaletteContext.tsx — React context + useCommandPalette() hook for open/close
         openInFiles.ts — useOpenInFiles(projectId) → { canOpen, open, handleClick }; shared Cmd+click "open node in Files" (used by Health drift/freshness panels and Run History detail pane)
+        selectedNodeContext.tsx — SelectedNodeContext/SetSelectedNodeContext + useReportSelectedNode(uid) / useSelectedNodeId(); feeds the bottom pane's Node DAG tab
+        nodeLineage.ts — buildNodeLineageGraph(graph, uid) → full `+uid+` subgraph; filterNodeLineage(lineage, uid, filter) applies Type/Materialization/Status (Type defaults to seed/source/model/exposure via defaultNodeDagFilter(); selected node always kept) and bridges edges across hidden nodes (dashed)
+        useLiveRunStatuses.ts — main DAG's live run-status overlay parsed from run_log; holds each node in `running` ≥600ms (fast adapters finish in ms); owns the `statuses_changed` refetch and drops the overlay only after it lands, so nodes don't flash their pre-run color
         customCommand.ts — runCustomCommand() (POST /command, returns user-facing error or null) + per-project recent-command history in localStorage
       components/
         CommandPalette.tsx — VS Code-style palette; nav + project actions + model search; "Run custom dbt command…" (or typing `dbt …`) switches to CustomCommandMode.tsx
@@ -89,6 +92,7 @@ frontend/src/
         HealthCheckPanel.tsx — Runs dbt debug; renders structured per-check pass/fail table + version info
         DriftPanel.tsx   — Triggers schema drift scan; renders per-model column diff accordion
         FreshnessPanel.tsx — Triggers dbt source freshness; renders per-source collapsible groups with age, thresholds, and pass/warn/error badges; resizable columns; filter pills
+        FilterDropdown.tsx — Multi-select checkbox dropdown shared by DagFilterBar and the bottom pane's Node DAG
         CoverageLegend.tsx — Legend panel for test coverage overlay showing 4 buckets (untested/1 test/2 tests/3+ tests); rendered as ReactFlow Panel in top-right when coverage toggle is on
         SidePane/
           index.tsx      — Right collapsible/draggable panel (horizontal drag); tabs: Properties + Profile; props: projectId, model, graph, page, navigation callbacks, onNavigateToFile
@@ -96,6 +100,7 @@ frontend/src/
           ProfilePanel.tsx — Column profile stats (row count, null%, distinct, min/max, samples) via dbt show
         BottomPane/
           RunPanel.tsx     — Execution DAG (parses run_log to show real-time status); shows full-run notice when no model is selected
+          NodeDagPanel.tsx — Node DAG tab: `+node+` lineage of the selected node (from SelectedNodeContext), centered on it; Type/Materialization/Status filter dropdowns (sessionStorage `node-dag-filter-{id}`); Cmd+click a node to open in Files
           TerminalPanel.tsx — xterm.js terminals (multi-instance tabs); optimized resize with lastSizeRef to prevent spurious SIGWINCH
           LogPanel.tsx     — Project and API logs
         Header.tsx         — Navigation + ProjectSelectors (Profile/Target dropdowns)
@@ -325,7 +330,8 @@ useInitSessionEvents(sessionId, onEvent, useCallback(() => { /* on close */ }, [
 - Shared across all Project routes (Home, Models, Docs, etc.)
 - Lives in `ProjectLayout` alongside router outlet
 - Supports dragging to open/close; snaps closed below 80px threshold
-- Multi-tab interface with "Run" (DAG), "Project Logs", "API Logs", and "Terminal"
+- Multi-tab interface with "Run" (DAG), "Node DAG", "Project Logs", "API Logs", and "Terminal"
+- **Node DAG** tab (`NodeDagPanel.tsx`) shows the `+node+` lineage of the selected node, centered on it. The selection is lifted into `ProjectLayout` via `lib/selectedNodeContext.tsx`: pages call `useReportSelectedNode(uid)` (Models.tsx and FileExplorer do) and it clears on unmount; `lib/nodeLineage.ts` `buildNodeLineageGraph()` builds the subgraph (tests excluded unless the selected node is a test). Mounted only while visible so centering uses the real pane size
 - Terminal tab allows multiple instances with VSCode-style tabs on the right side
 - `RunPanel` always mounted to continuously receive `run_log` SSE events
 - `BottomPane` manages `open` state, `activeTab`, and `height`

@@ -118,6 +118,14 @@ Click **Clear** in the filter bar to reset all filters and return to the full gr
 
 The node count in the filter bar shows how many nodes are currently visible vs. the total.
 
+## Viewing a node's lineage in the bottom pane
+
+The **Node DAG** tab in the bottom pane shows the selected node's full upstream and downstream lineage (`+model+`), centered on that node. It follows your selection on the DAG page, and on the Files page it follows the model whose file is open (or the test you're on in a YAML file). 
+
+- Use the **Type**, **Materialization**, and **Status** dropdowns in the tab's header to narrow the lineage (same multi-select behavior as the main DAG's filters; saved per project for the session). The selected node always stays visible. When filtered-out nodes sit between two visible ones, a dashed edge connects them so the lineage stays readable. Type defaults to `seed`, `source`, `model`, and `exposure` (tests hidden); check `test` or click **Clear** to show tests.
+- Click the crosshair button in the tab's header to re-center after panning.
+- Cmd/ctrl-click any node to open its file in the Files page.
+
 ## Viewing model details in the SidePane
 
 With a model selected, the SidePane is persistent — it stays open as you click different nodes. Resize it by dragging the left edge. Collapse it by clicking the collapse arrow.

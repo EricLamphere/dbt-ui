@@ -4,8 +4,17 @@ import { type GraphDto } from '../../../../lib/api';
 import { RunPanel } from './RunPanel';
 import { LogPanel } from './LogPanel';
 import { SingleTerminal } from './TerminalPanel';
+import { NodeDagPanel } from './NodeDagPanel';
 
-export type PaneTabId = 'run' | 'project-logs' | 'api-logs' | 'terminal';
+export type PaneTabId = 'run' | 'node-dag' | 'project-logs' | 'api-logs' | 'terminal';
+
+const PANE_TABS: { id: PaneTabId; label: string }[] = [
+  { id: 'run', label: 'Execution DAG' },
+  { id: 'node-dag', label: 'Node DAG' },
+  { id: 'terminal', label: 'Terminal' },
+  { id: 'project-logs', label: 'Project Logs' },
+  { id: 'api-logs', label: 'API Logs' },
+];
 
 interface TermTab {
   id: string;      // unique per instance
@@ -16,6 +25,7 @@ interface BottomPaneProps {
   projectId: number;
   graph: GraphDto | null;
   projectPath: string | null;
+  selectedNodeId: string | null;
 }
 
 const MIN_HEIGHT = 180;
@@ -41,7 +51,7 @@ function newTermTab(): TermTab {
   return { id: `term-${termIdCounter}`, label: 'bash' };
 }
 
-export function BottomPane({ projectId, graph, projectPath }: BottomPaneProps) {
+export function BottomPane({ projectId, graph, projectPath, selectedNodeId }: BottomPaneProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<PaneTabId>('run');
   const [height, setHeight] = useState(readStoredHeight);
@@ -182,7 +192,7 @@ export function BottomPane({ projectId, graph, projectPath }: BottomPaneProps) {
         </div>
 
         {/* Pane tabs */}
-        {(['run', 'terminal', 'project-logs', 'api-logs'] as PaneTabId[]).map((id) => (
+        {PANE_TABS.map(({ id, label }) => (
           <button
             key={id}
             onClick={() => {
@@ -196,7 +206,7 @@ export function BottomPane({ projectId, graph, projectPath }: BottomPaneProps) {
                 : 'text-gray-500 hover:text-gray-300'
               }`}
           >
-            {id === 'run' ? 'Execution DAG' : id === 'terminal' ? 'Terminal' : id === 'project-logs' ? 'Project Logs' : 'API Logs'}
+            {label}
           </button>
         ))}
 
@@ -219,6 +229,13 @@ export function BottomPane({ projectId, graph, projectPath }: BottomPaneProps) {
       >
         <RunPanel projectId={projectId} graph={graph} onRunStart={handleRunStart} />
       </div>
+
+      {/* Node DAG — mounted only while visible so it centres against the real pane size */}
+      {open && activeTab === 'node-dag' && (
+        <div style={{ height }} className="overflow-hidden flex flex-col">
+          <NodeDagPanel projectId={projectId} graph={graph} selectedNodeId={selectedNodeId} />
+        </div>
+      )}
 
       {/* Terminal view — two-column: terminal canvas | terminal tabs strip */}
       {/* All terminal instances stay mounted once created; only display changes */}

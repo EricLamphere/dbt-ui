@@ -47,6 +47,8 @@ function ModelNodeComponent({ data, selected }: Props) {
   const { activeColumnSels, relatedColumnsMap, onColumnClick, onToggleExpand } = useColumnLineage();
 
   const ring = STATUS_RING[model.status] ?? STATUS_RING.idle;
+  // Selected nodes keep their status ring color; the sky selection ring only shows while idle.
+  const selectedRing = model.status in STATUS_RING && model.status !== 'idle' ? ring : 'node-selected-ring';
   const dot = STATUS_DOT[model.status] ?? STATUS_DOT.idle;
   const icon = TYPE_ICON[model.resource_type] ?? '▣';
   const hasColumns = model.columns.length > 0;
@@ -63,7 +65,7 @@ function ModelNodeComponent({ data, selected }: Props) {
           w-[200px] rounded-lg ring-2 px-3 py-2 flex flex-col
           cursor-pointer select-none transition-all duration-150
           ${selected
-            ? 'node-selected ring-2 shadow-lg'
+            ? `node-selected ${selectedRing} ring-2 shadow-lg`
             : `bg-surface-panel ${ring} ring-1 hover:brightness-105`}
         `}
       >

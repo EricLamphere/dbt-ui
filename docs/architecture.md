@@ -99,7 +99,9 @@ dbt-ui/
 │   │       └── Project/
 │   │           ├── ProjectLayout.tsx    # Shared layout (BottomPane + <Outlet overflow-auto>); global ⌘K listener; CommandPaletteContext
 │   │           ├── lib/
-│   │           │   └── commandPaletteContext.tsx # React context (CommandPaletteContext) + useCommandPalette() hook
+│   │           │   ├── commandPaletteContext.tsx # React context (CommandPaletteContext) + useCommandPalette() hook
+│   │           │   ├── selectedNodeContext.tsx   # Selected node lifted to ProjectLayout; useReportSelectedNode() (DAG + Files pages)
+│   │           │   └── nodeLineage.ts            # buildNodeLineageGraph() — +uid+ subgraph for the Node DAG tab
 │   │       │   └── testCoverage.ts # Test coverage utility; buildCoverageMap(), getModelCoverageStats(), bucketFor(), badgeClassesFor(); derives per-column test counts
 │   │           ├── components/
 │   │           │   └── CommandPalette.tsx # VS Code-style palette (z-[60]); nav + project actions + model search
@@ -118,6 +120,7 @@ dbt-ui/
 │   │               ├── BottomPane/
 │   │               │   ├── index.tsx        # Drag-to-resize pane; tab management; terminal instances
 │   │               │   ├── RunPanel.tsx     # Execution DAG (real-time run_log parsing); shows full-run notice when no model selected
+│   │               │   ├── NodeDagPanel.tsx # Node DAG: +node+ lineage of the selected node (SelectedNodeContext), centered on it
 │   │               │   ├── TerminalPanel.tsx # xterm.js multi-instance terminal; only resizes PTY when dims change
 │   │               │   └── LogPanel.tsx     # Project and API logs
 │   │               ├── NavRail.tsx          # Collapsible left nav sidebar (persists collapsed state in localStorage; resizable when expanded)
@@ -542,6 +545,8 @@ DAG filtering (`dagFilter.ts`) is purely client-side — no backend involvement:
 7. On exit, `run_results.py` parses `target/run_results.json`, upserts `ModelStatus`, publishes `statuses_changed`
 8. Frontend invalidates the graph query → final statuses applied
 
+On the main DAG, `lib/useLiveRunStatuses.ts` overlays live statuses parsed from `run_log`. Each node shows `running` for at least 600ms (fast adapters like duckdb finish a model in tens of ms, which would otherwise never paint), and the overlay is cleared only after the `statuses_changed` refetch resolves and every held result has been shown. A selected node keeps its status ring color; the sky selection ring shows only while it's idle.
+
 ### 6. Execution DAG (RunPanel)
 
 `RunPanel.tsx` is always mounted (height=0 when the pane is closed) so it never misses SSE events:
@@ -550,6 +555,13 @@ DAG filtering (`dagFilter.ts`) is purely client-side — no backend involvement:
 - On `run_log` result line (OK/ERROR/WARN/PASS/FAIL): updates node status optimistically
 - `buildDisplayGraph` includes ancestor nodes so edges are visible even for single-model runs
 - On `statuses_changed`: final states confirmed from DB
+
+### 6a. Node DAG (bottom pane)
+
+The **Node DAG** tab shows the `+node+` lineage of whatever node is selected on the current page:
+- The selection lives in `ProjectLayout` (`lib/selectedNodeContext.tsx`). The DAG page reports its selected node and the Files page reports the open file's model (or the active test in a YAML file) via `useReportSelectedNode()`; it clears when the page unmounts, so other pages show an empty state
+- `buildNodeLineageGraph()` walks all transitive ancestors and descendants; `filterNodeLineage()` then applies the tab's Type/Materialization/Status dropdowns (shared `FilterDropdown` + `matchesDropdownFilters()` with the main DAG, persisted in sessionStorage as `node-dag-filter-{id}`). Type defaults to seed/source/model/exposure (`defaultNodeDagFilter()`), so tests are hidden until picked or the filter is cleared; the selected node is always kept. Edges that skip hidden nodes are drawn dashed (`bridged`) so the view stays connected
+- The panel is mounted only while its tab is visible, and centers on the selected node at a zoom that keeps the whole lineage in view. It re-centers when the selection or the node set changes, not on status-only refreshes, so a run doesn't move the viewport
 
 ### 7. Integrated Terminal
 
