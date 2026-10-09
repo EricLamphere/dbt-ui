@@ -72,6 +72,33 @@ tasks:
       - task: dev:frontend
       - task: open
 
+  dev:backend:pro:
+    desc: Start the backend in dev mode with Pro features from a live ../dbt-ui-pro checkout (hot reload covers both repos)
+    dir: "{{.BACKEND_DIR}}"
+    vars:
+      PRO_DIR: '{{.PRO_DIR | default (print .ROOT_DIR "/../dbt-ui-pro")}}'
+    deps:
+      - task: ensure:backend
+    preconditions:
+      - sh: test -d "{{.PRO_DIR}}/dbt_ui_pro"
+        msg: "dbt-ui-pro not found at {{.PRO_DIR}} — clone it as a sibling of dbt-ui/, or pass PRO_DIR=<path>."
+    cmds:
+      # PYTHONPATH puts the live checkout ahead of site-packages, so it wins even
+      # if `task package:pro` installed a copy into the venv; nothing is installed
+      # here. Lineage's process-pool workers inherit the path. --reload-dir
+      # replaces uvicorn's default (cwd), so list the backend too.
+      - .venv/bin/uvicorn app.main:app --reload --reload-dir . --reload-dir "{{.PRO_DIR}}" --host 127.0.0.1 --port 8001
+    env:
+      DBT_UI_FRONTEND_DIST: "{{.ROOT_DIR}}/frontend/dist"
+      PYTHONPATH: "{{.PRO_DIR}}"
+
+  start:pro:
+    desc: Like `start`, but with Pro features loaded from a live ../dbt-ui-pro checkout (license against Polar per backend/.env)
+    deps:
+      - task: dev:backend:pro
+      - task: dev:frontend
+      - task: open
+
   kill:ports:
     desc: Kill any processes using the backend (8001) and frontend (5173) ports
     cmds:

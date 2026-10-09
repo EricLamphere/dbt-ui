@@ -52,7 +52,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 import app.db.engine as db_engine
 import app.dbt.column_lineage as column_lineage_module
 from app.db.engine import get_session
-from app.db.models import Base, Project
+from app.db.models import Base, ColumnLineageSnapshot, Project
 from app.dbt.column_lineage import ColumnRef, LineageJob
 from app.events.bus import bus
 from app.licensing import entitlements
@@ -85,15 +85,30 @@ def _fake_trace_job(job: LineageJob) -> tuple[str, dict[str, list[ColumnRef]]]:
     return job.uid, {"order_id": [ColumnRef(node="model.proj.stg_orders", column="order_id")]}
 
 
+def _fake_trace_job_full(
+    job: LineageJob,
+) -> tuple[str, dict[str, list[ColumnRef]], list[ColumnRef]]:
+    """_fake_trace_job plus one row dependency (as if orders filtered on stg_orders.status)."""
+    uid, columns = _fake_trace_job(job)
+    return uid, columns, [ColumnRef(node="model.proj.stg_orders", column="status")]
+
+
+def _supports_rows() -> bool:
+    return True
+
+
 @pytest.fixture(autouse=True)
 def _fake_algorithm(monkeypatch: pytest.MonkeyPatch):
     """See module docstring for why both the true-origin module AND the
     api module's imported alias are patched."""
     monkeypatch.setattr(column_lineage_module, "prepare_lineage_jobs", _fake_prepare_lineage_jobs)
     monkeypatch.setattr(column_lineage_module, "trace_job", _fake_trace_job)
+    monkeypatch.setattr(column_lineage_module, "trace_job_full", _fake_trace_job_full)
+    monkeypatch.setattr(column_lineage_module, "supports_row_dependencies", _supports_rows)
     import app.api.column_lineage as api_module
     monkeypatch.setattr(api_module, "prepare_lineage_jobs", _fake_prepare_lineage_jobs)
-    monkeypatch.setattr(api_module, "trace_job", _fake_trace_job)
+    monkeypatch.setattr(api_module, "trace_job_full", _fake_trace_job_full)
+    monkeypatch.setattr(api_module, "supports_row_dependencies", _supports_rows)
 
 
 @pytest.fixture(autouse=True)
@@ -238,6 +253,35 @@ async def test_start_and_poll_end_to_end(
     assert len(refs) == 1
     assert refs[0]["node"] == "model.proj.stg_orders"
     assert refs[0]["column"] == "order_id"
+    assert final["row_dependencies"] == {
+        "model.proj.orders": [{"node": "model.proj.stg_orders", "column": "status"}],
+    }
+    assert final["lineage_version"] == 2
+
+
+async def test_rerun_recomputes_snapshots_from_an_older_lineage_version(
+    client: AsyncClient, db_session: AsyncSession, tmp_path: Path
+) -> None:
+    """A snapshot computed before row dependencies existed must not satisfy the
+    unchanged-manifest short-circuit, or its missing row data would be served forever."""
+    proj_dir = tmp_path / "proj_v1"
+    proj_dir.mkdir()
+    target = proj_dir / "target"
+    target.mkdir()
+    _make_manifest(target)
+    pid = await _seed_project(db_session, str(proj_dir))
+    old = ColumnLineageSnapshot(
+        project_id=pid, status="done", results_json="{}", lineage_version=1,
+        manifest_mtime=(target / "manifest.json").stat().st_mtime,
+    )
+    db_session.add(old)
+    await db_session.commit()
+
+    resp = await client.post(f"/api/projects/{pid}/column-lineage/start")
+    assert resp.status_code == 202
+    final = await _wait_for_done(client, pid)
+    assert final["id"] != old.id
+    assert final["lineage_version"] == 2
 
 
 async def test_start_auto_compiles_stale_manifest(

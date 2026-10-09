@@ -40,13 +40,13 @@ export function FlagBadge({ flag, count }: { flag: ImpactFlag; count?: number })
   );
 }
 
-/** `dbt build --select <seed>+ …` for the given seeds, with loading/error state. */
+/** Starts impact builds (`dbt build --select …`), with loading/error state. */
 export function useBuildImpacted(projectId: number) {
   const [building, setBuilding] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const build = useCallback(async (seeds: readonly ModelNode[]) => {
-    const selector = buildImpactSelector(seeds);
+  /** Build an explicit `--select` value (e.g. column-level impact's exact node list). */
+  const buildSelector = useCallback(async (selector: string) => {
     if (!selector) return;
     setBuilding(true);
     setError(null);
@@ -59,5 +59,8 @@ export function useBuildImpacted(projectId: number) {
     }
   }, [projectId]);
 
-  return { build, building, error };
+  /** Build the seeds and everything downstream of them. */
+  const build = useCallback((seeds: readonly ModelNode[]) => buildSelector(buildImpactSelector(seeds)), [buildSelector]);
+
+  return { build, buildSelector, building, error };
 }

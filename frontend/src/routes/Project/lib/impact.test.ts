@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Edge, GraphDto, ModelNode } from '../../../lib/api';
-import { buildImpactSelector, computeImpact, formatImpactCounts, selectorFor } from './impact';
+import { buildExactSelector, buildImpactSelector, computeImpact, formatImpactCounts, selectorFor } from './impact';
 
 function node(uid: string, overrides: Partial<ModelNode> = {}): ModelNode {
   const [resource_type, , name] = uid.split('.');
@@ -172,5 +172,42 @@ describe('formatImpactCounts', () => {
   it('still reports tests when nothing is downstream', () => {
     const { summary } = computeImpact(sampleGraph(), ['model.p.lonely']);
     expect(formatImpactCounts(summary)).toBe('0 tests');
+  });
+});
+
+describe('computeImpact with a precomputed reach (column-level)', () => {
+  it('uses the given downstream nodes and depths instead of walking the graph', () => {
+    const impact = computeImpact(sampleGraph(), ['model.p.stg'], {
+      reach: new Map([['model.p.int', 1]]),
+      affectedTests: new Set(['test.p.rel_fct_int']),
+    });
+    expect(impact.levels.map((l) => [l.depth, ids(l.nodes)])).toEqual([[1, ['model.p.int']]]);
+    expect(impact.summary.downstreamCount).toBe(1);
+  });
+
+  it('counts only affected tests, per node and in the summary', () => {
+    const impact = computeImpact(sampleGraph(), ['model.p.stg'], {
+      reach: new Map([['model.p.int', 1], ['model.p.fct', 1]]),
+      affectedTests: new Set(['test.p.rel_fct_int']),
+    });
+    const byId = new Map(impact.levels.flatMap((l) => l.nodes).map((n) => [n.node.unique_id, n]));
+    expect(byId.get('model.p.fct')).toMatchObject({ dataTests: 2, affectedTests: 1 });
+    expect(byId.get('model.p.int')).toMatchObject({ dataTests: 1, affectedTests: 1 });
+    expect(impact.seeds[0]).toMatchObject({ dataTests: 1, affectedTests: 0 });
+    expect(impact.summary.testsOnSeeds).toBe(0);
+    expect(impact.summary.testsDownstream).toBe(1);
+  });
+
+  it('leaves affectedTests unset at node level', () => {
+    const impact = computeImpact(sampleGraph(), ['model.p.stg']);
+    expect(impact.seeds[0].affectedTests).toBeUndefined();
+  });
+});
+
+describe('buildExactSelector', () => {
+  it('lists each buildable node without a downstream +', () => {
+    const g = sampleGraph();
+    const nodes = g.nodes.filter((n) => ['model.p.int', 'model.p.stg', 'exposure.p.dash', 'source.p.raw_orders'].includes(n.unique_id));
+    expect(buildExactSelector(nodes)).toBe('int source:shop.raw_orders stg');
   });
 });

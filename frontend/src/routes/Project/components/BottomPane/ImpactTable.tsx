@@ -3,6 +3,7 @@ import type { ImpactLevel, ImpactNode } from '../../lib/impact';
 import { getModelCoverageStats, type CoverageMap } from '../../lib/testCoverage';
 import { typeIconFor } from '../../lib/nodeTypeIcon';
 import { OPEN_IN_FILES_HOVER_CLS, OPEN_IN_FILES_TITLE } from '../../lib/openInFiles';
+import type { AffectedColumnsLabel } from '../../lib/columnImpact';
 import { FlagBadge } from '../impact/impactUi';
 
 interface ImpactTableProps {
@@ -14,11 +15,22 @@ interface ImpactTableProps {
   seedLabel: string;
   /** Why each depth-0 node counts as changed, shown after its name. */
   reasons?: ReadonlyMap<string, string>;
+  /** Column-level mode: affected columns per node, shown in an extra column. */
+  affectedColumns?: ReadonlyMap<string, AffectedColumnsLabel>;
 }
 
-const GRID = 'grid grid-cols-[minmax(14rem,2fr)_5.5rem_7.5rem_6rem_6.5rem_8.5rem_minmax(9rem,1.5fr)] items-center gap-4 px-4';
+const GRID_BASE = 'grid items-center gap-4 px-4';
+const GRID_COLS = 'grid-cols-[minmax(14rem,2fr)_5.5rem_7.5rem_6rem_6.5rem_8.5rem_minmax(9rem,1.5fr)]';
+const GRID_COLS_WITH_AFFECTED = 'grid-cols-[minmax(12rem,1.5fr)_minmax(11rem,1.5fr)_5.5rem_7.5rem_6rem_6.5rem_8.5rem_minmax(8rem,1fr)]';
 
 const COLUMNS = ['Node', 'Type', 'Materialization', 'Status', 'Tests', 'Column coverage', 'Flags'];
+const COLUMNS_WITH_AFFECTED = ['Node', 'Affected columns', ...COLUMNS.slice(1)];
+
+const AFFECTED_TONE: Record<AffectedColumnsLabel['tone'], string> = {
+  columns: 'font-mono text-brand-300',
+  rows: 'text-amber-300',
+  muted: 'text-gray-500',
+};
 
 const STATUS_STYLE: Record<string, { dot: string; text: string }> = {
   success: { dot: 'bg-emerald-400', text: 'text-emerald-400' },
@@ -61,7 +73,8 @@ function TestsCell({ item }: { item: ImpactNode }) {
   if (!COVERAGE_TYPES.has(item.node.resource_type) && item.dataTests === 0) return <Muted />;
   if (item.dataTests === 0 && item.unitTests === 0) return <span className="text-red-400/80">none</span>;
   return (
-    <span className="tabular-nums text-gray-300">
+    <span className="tabular-nums text-gray-300" title={item.affectedTests !== undefined ? `${item.affectedTests} of ${item.dataTests} data tests check an affected column` : undefined}>
+      {item.affectedTests !== undefined && <span className={item.affectedTests > 0 ? 'text-brand-300' : 'text-gray-500'}>{item.affectedTests} of </span>}
       {item.dataTests}
       {item.unitTests > 0 && <span className="text-gray-500"> + {item.unitTests} unit</span>}
     </span>
@@ -83,16 +96,19 @@ function CoverageCell({ item, coverage }: { item: ImpactNode; coverage: Coverage
   );
 }
 
-function ImpactRow({ item, coverage, onNodeClick, reason }: {
+function ImpactRow({ item, coverage, onNodeClick, reason, grid, affected }: {
   item: ImpactNode;
   coverage: CoverageMap;
   onNodeClick: ImpactTableProps['onNodeClick'];
   reason?: string;
+  grid: string;
+  /** Present in column-level mode (undefined label = not computed for this row). */
+  affected?: AffectedColumnsLabel | null;
 }) {
   const { node } = item;
   const rowFlags = item.flags.filter((f) => f !== 'exposure');
   return (
-    <div className={`${GRID} h-8 text-xs border-b border-gray-800/40 transition-colors hover:bg-gray-800/40`}>
+    <div className={`${grid} h-8 text-xs border-b border-gray-800/40 transition-colors hover:bg-gray-800/40`}>
       <span className="flex items-center gap-2 min-w-0">
         <span className="w-3 text-center text-gray-600 shrink-0">{typeIconFor(node.resource_type)}</span>
         <button
@@ -104,6 +120,11 @@ function ImpactRow({ item, coverage, onNodeClick, reason }: {
         </button>
         {reason && <span className="text-[11px] text-amber-300/70 truncate shrink-[2]" title={reason}>{reason}</span>}
       </span>
+      {affected !== undefined && (
+        affected
+          ? <span className={`truncate ${AFFECTED_TONE[affected.tone]}`} title={affected.title}>{affected.text}</span>
+          : <Muted />
+      )}
       <span className={`truncate ${isExposure(item) ? 'text-purple-300' : 'text-gray-400'}`}>{node.resource_type}</span>
       <span className="text-gray-400 truncate">{node.materialized ?? <Muted />}</span>
       {isExposure(item) ? <Muted /> : <StatusCell status={node.status} />}
@@ -128,11 +149,13 @@ function GroupHeader({ depth, count, seedLabel }: { depth: number; count: number
   );
 }
 
-export function ImpactTable({ groups, coverage, onNodeClick, seedLabel, reasons }: ImpactTableProps) {
+export function ImpactTable({ groups, coverage, onNodeClick, seedLabel, reasons, affectedColumns }: ImpactTableProps) {
+  const grid = `${GRID_BASE} ${affectedColumns ? GRID_COLS_WITH_AFFECTED : GRID_COLS}`;
+  const columns = affectedColumns ? COLUMNS_WITH_AFFECTED : COLUMNS;
   return (
-    <div className="min-w-[60rem]">
-      <div className={`${GRID} sticky top-0 z-10 h-7 bg-surface-panel border-b border-gray-800 text-[10px] uppercase tracking-wider font-medium text-gray-500 select-none`}>
-        {COLUMNS.map((c) => <span key={c} className="truncate">{c}</span>)}
+    <div className={affectedColumns ? 'min-w-[72rem]' : 'min-w-[60rem]'}>
+      <div className={`${grid} sticky top-0 z-10 h-7 bg-surface-panel border-b border-gray-800 text-[10px] uppercase tracking-wider font-medium text-gray-500 select-none`}>
+        {columns.map((c) => <span key={c} className="truncate">{c}</span>)}
       </div>
       {groups.map(({ depth, nodes }) => (
         <div key={depth}>
@@ -144,6 +167,8 @@ export function ImpactTable({ groups, coverage, onNodeClick, seedLabel, reasons 
               coverage={coverage}
               onNodeClick={onNodeClick}
               reason={depth === 0 ? reasons?.get(item.node.unique_id) : undefined}
+              grid={grid}
+              affected={affectedColumns ? affectedColumns.get(item.node.unique_id) ?? null : undefined}
             />
           ))}
         </div>

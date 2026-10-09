@@ -9,7 +9,9 @@ import { CommandPalette } from './components/CommandPalette';
 import { CommandPaletteContext } from './lib/commandPaletteContext';
 import {
   SelectedNodeContext,
+  SelectedColumnsContext,
   SelectedNodeIdsContext,
+  SetSelectedColumnsContext,
   SetSelectedNodeContext,
   SetSelectedNodeIdsContext,
 } from './lib/selectedNodeContext';
@@ -35,6 +37,7 @@ export default function ProjectLayout() {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeIds, setSelectedNodeIds] = useState<readonly string[]>([]);
+  const [selectedColumns, setSelectedColumns] = useState<readonly string[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
 
@@ -77,6 +80,8 @@ export default function ProjectLayout() {
       <SelectedNodeContext.Provider value={selectedNodeId}>
       <SetSelectedNodeIdsContext.Provider value={setSelectedNodeIds}>
       <SelectedNodeIdsContext.Provider value={selectedNodeIds}>
+      <SetSelectedColumnsContext.Provider value={setSelectedColumns}>
+      <SelectedColumnsContext.Provider value={selectedColumns}>
       <div className="flex flex-col h-full overflow-hidden">
         <div className="flex-1 min-h-0 overflow-auto">
           <Outlet />
@@ -87,6 +92,7 @@ export default function ProjectLayout() {
           projectPath={project?.path ?? null}
           selectedNodeId={selectedNodeId}
           selectedNodeIds={selectedNodeIds}
+          selectedColumns={selectedColumns}
         />
         {paletteOpen && (
           <CommandPalette
@@ -98,6 +104,8 @@ export default function ProjectLayout() {
           />
         )}
       </div>
+      </SelectedColumnsContext.Provider>
+      </SetSelectedColumnsContext.Provider>
       </SelectedNodeIdsContext.Provider>
       </SetSelectedNodeIdsContext.Provider>
       </SelectedNodeContext.Provider>

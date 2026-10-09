@@ -298,6 +298,10 @@ export interface ColumnLineageDto {
   total_models: number;
   checked_models: number;
   results: Record<string, Record<string, ColumnLineageEntry[]>>;
+  /** uid → upstream columns the model filters / joins / groups on (empty when lineage_version is 1). */
+  row_dependencies: Record<string, ColumnLineageEntry[]>;
+  /** 1 = projection lineage only; 2 = also row dependencies. */
+  lineage_version: number;
   error_message: string | null;
 }
 

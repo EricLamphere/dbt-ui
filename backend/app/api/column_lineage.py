@@ -12,7 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.engine import get_session
 from app.db.models import ColumnLineageSnapshot, Project
-from app.dbt.column_lineage import ColumnLineageUnavailable, LineageJob, prepare_lineage_jobs, trace_job
+from app.dbt.column_lineage import (
+    ColumnLineageUnavailable,
+    LineageJob,
+    prepare_lineage_jobs,
+    supports_row_dependencies,
+    trace_job_full,
+)
 from app.events.bus import Event, bus
 from app.licensing import entitlements
 from app.logging_setup import get_logger
@@ -28,6 +34,15 @@ _running: dict[int, asyncio.Task] = {}
 # across a small pool of worker processes so a large project doesn't take
 # minutes on a single core and doesn't starve the event loop.
 _POOL_SIZE = max(1, min(8, (os.cpu_count() or 2) - 1))
+
+# Bumped whenever snapshots gain data older ones lack, so the unchanged-manifest
+# short-circuit doesn't keep serving them. 2 = row dependencies.
+LINEAGE_VERSION = 2
+
+
+def _current_lineage_version() -> int:
+    """What a scan run now would produce (an older Pro build can't trace row dependencies)."""
+    return LINEAGE_VERSION if supports_row_dependencies() else 1
 _pool = ProcessPoolExecutor(max_workers=_POOL_SIZE)
 
 
@@ -45,6 +60,9 @@ class ColumnLineageSnapshotDto(BaseModel):
     total_models: int
     checked_models: int
     results: dict[str, dict[str, list[ColumnLineageEntryDto]]]
+    # upstream columns each model filters / joins / groups on (empty for lineage_version 1)
+    row_dependencies: dict[str, list[ColumnLineageEntryDto]] = {}
+    lineage_version: int = 1
     error_message: str | None
 
 
@@ -100,6 +118,11 @@ def _snapshot_to_dto(snap: ColumnLineageSnapshot) -> ColumnLineageSnapshotDto:
         }
         for uid, col_map in raw.items()
     }
+    try:
+        raw_rows: dict = json.loads(snap.row_dependencies_json or "{}")
+    except Exception:
+        raw_rows = {}
+    row_dependencies = {uid: [ColumnLineageEntryDto(**ref) for ref in refs] for uid, refs in raw_rows.items()}
     return ColumnLineageSnapshotDto(
         id=snap.id,
         project_id=snap.project_id,
@@ -109,6 +132,8 @@ def _snapshot_to_dto(snap: ColumnLineageSnapshot) -> ColumnLineageSnapshotDto:
         total_models=snap.total_models,
         checked_models=snap.checked_models,
         results=results,
+        row_dependencies=row_dependencies,
+        lineage_version=snap.lineage_version or 1,
         error_message=snap.error_message,
     )
 
@@ -149,7 +174,12 @@ async def start_column_lineage(
             .limit(1)
         )
         latest = result.scalar_one_or_none()
-        if latest is not None and latest.status == "done" and latest.manifest_mtime == manifest_mtime:
+        if (
+            latest is not None
+            and latest.status == "done"
+            and latest.manifest_mtime == manifest_mtime
+            and latest.lineage_version == _current_lineage_version()
+        ):
             response.status_code = 200
             return _snapshot_to_dto(latest)
 
@@ -165,6 +195,7 @@ async def start_column_lineage(
         checked_models=0,
         results_json="{}",
         manifest_mtime=manifest_mtime,
+        lineage_version=_current_lineage_version(),
     )
     session.add(snap)
     await session.commit()
@@ -304,12 +335,13 @@ async def _run_column_lineage(
     loop = asyncio.get_event_loop()
 
     results: dict[str, dict] = {}
+    row_results: dict[str, list] = {}
     checked = 0
     error_message: str | None = None
 
     try:
         future_to_job = {
-            loop.run_in_executor(_pool, trace_job, job): job
+            loop.run_in_executor(_pool, trace_job_full, job): job
             for job in jobs
         }
 
@@ -325,12 +357,14 @@ async def _run_column_lineage(
             for fut in done:
                 job = future_to_job[fut]
                 try:
-                    uid, col_lineage = fut.result()
+                    uid, col_lineage, row_refs = fut.result()
                     if col_lineage:
                         results[uid] = {
                             col: [{"node": ref.node, "column": ref.column} for ref in refs]
                             for col, refs in col_lineage.items()
                         }
+                    if row_refs:
+                        row_results[uid] = [{"node": ref.node, "column": ref.column} for ref in row_refs]
                 except Exception as exc:
                     log.warning("column_lineage_job_failed", uid=job.uid, error=str(exc))
 
@@ -341,6 +375,7 @@ async def _run_column_lineage(
                     if snap is not None:
                         snap.checked_models = checked
                         snap.results_json = json.dumps(results)
+                        snap.row_dependencies_json = json.dumps(row_results)
                         await session.commit()
 
                 await bus.publish(Event(
@@ -365,6 +400,7 @@ async def _run_column_lineage(
             snap.finished_at = datetime.now(timezone.utc)
             snap.checked_models = checked
             snap.results_json = json.dumps(results)
+            snap.row_dependencies_json = json.dumps(row_results)
             snap.error_message = error_message
             snap.manifest_mtime = manifest_mtime
             await session.commit()

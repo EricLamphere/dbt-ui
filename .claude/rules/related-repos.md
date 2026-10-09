@@ -34,12 +34,20 @@ package or git submodule.
 
 - Contains the actual sqlglot-based column-lineage tracing algorithm (the
   proprietary part: case-insensitive matching, UNPIVOT stripping, etc.) —
-  this is the IP that Pro licensing gates.
+  this is the IP that Pro licensing gates. Also `row_dependencies.py`
+  (`trace_row_dependencies()` / `trace_job_full()`): the columns each model
+  filters, joins or groups on, used by column-level impact analysis. Its
+  tests run against sqlglot 30.18 in its own venv, but the shipped app uses
+  the backend venv's sqlglot (30.20 at time of writing), and sqlglot renames
+  internals between minor versions, so run its tests under both.
 - Depends on `dbt-ui`'s backend at dev time for the shared `ColumnRef`/
   `LineageJob` types (`pip install -e ../dbt-ui/backend` before installing
   `dbt-ui-pro` itself — see `dbt-ui-pro/pyproject.toml`'s comment on why this
   isn't a normal package dependency: pip requires an absolute `file://` path
   for local deps, which isn't portable across machines/CI).
+- For day-to-day development, `task start:pro` runs the dev servers with the
+  live checkout on `PYTHONPATH` (nothing installed; uvicorn reloads on edits in
+  either repo). It takes precedence over any copy `task package:pro` installed.
 - Installed into `dbt-ui`'s **shared backend venv** via `task package:pro`
   (plain `pip install`, deliberately **not** `-e`/editable — PyInstaller's
   static analysis can't see through an editable install's import-finder

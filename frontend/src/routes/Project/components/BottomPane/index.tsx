@@ -31,6 +31,8 @@ interface BottomPaneProps {
   projectPath: string | null;
   selectedNodeId: string | null;
   selectedNodeIds: readonly string[];
+  /** DAG column selection (`<uid>::<column>`), which drives column-level impact. */
+  selectedColumns: readonly string[];
 }
 
 const MIN_HEIGHT = 180;
@@ -56,12 +58,13 @@ function newTermTab(): TermTab {
   return { id: `term-${termIdCounter}`, label: 'bash' };
 }
 
-export function BottomPane({ projectId, graph, projectPath, selectedNodeId, selectedNodeIds }: BottomPaneProps) {
+export function BottomPane({ projectId, graph, projectPath, selectedNodeId, selectedNodeIds, selectedColumns }: BottomPaneProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<PaneTabId>('run');
   // Impact tab source + branch base live here so they survive switching tabs
   const [impactMode, setImpactMode] = useState<ImpactMode>('selection');
   const [impactBase, setImpactBase] = useState<string | null>(null);
+  const [impactColumnLevel, setImpactColumnLevel] = useState(false);
   const [height, setHeight] = useState(readStoredHeight);
   const resizing = useRef(false);
   const startY = useRef(0);
@@ -264,10 +267,13 @@ export function BottomPane({ projectId, graph, projectPath, selectedNodeId, sele
             graph={graph}
             selectedNodeId={selectedNodeId}
             selectedNodeIds={selectedNodeIds}
+            selectedColumns={selectedColumns}
             mode={impactMode}
             onModeChange={setImpactMode}
             base={impactBase}
             onBaseChange={setImpactBase}
+            columnLevel={impactColumnLevel}
+            onColumnLevelChange={setImpactColumnLevel}
           />
         </div>
       )}

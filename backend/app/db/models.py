@@ -177,6 +177,10 @@ class ColumnLineageSnapshot(Base):
     results_json: Mapped[str] = mapped_column(Text, default="{}")
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     manifest_mtime: Mapped[float] = mapped_column(Float, default=0.0)
+    # {downstream uid: [{node, column}]} — upstream columns each model filters/joins/groups on
+    row_dependencies_json: Mapped[str] = mapped_column(Text, default="{}")
+    # 1 = projection lineage only; 2 = also row dependencies (see api/column_lineage.py)
+    lineage_version: Mapped[int] = mapped_column(Integer, default=1)
 
 
 class RunInvocation(Base):

@@ -26,6 +26,7 @@ task start
 | Command | What it does |
 |---|---|
 | `task start` | Run the app in the browser with hot reload |
+| `task start:pro` | Same, with Pro features loaded from a sibling `../dbt-ui-pro` checkout (maintainers; `PRO_DIR=<path>` to override). Licensing uses `backend/.env`'s Polar settings |
 | `task test` | Backend tests + frontend type-check and build |
 | `task test:backend` | `pytest --cov=app` only |
 | `task test:frontend` | `tsc` + `vite build` only |

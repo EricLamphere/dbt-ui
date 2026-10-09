@@ -82,5 +82,29 @@ def trace_job(job) -> tuple:
     return _pro().trace_job(job)
 
 
+def trace_job_full(job) -> tuple:
+    """Projection lineage plus row dependencies for one model:
+    (uid, {column: [ColumnRef]}, [ColumnRef]). Row dependencies are the
+    upstream columns the model filters / joins / groups on, which decide
+    which rows it produces. Module-level for the same pickling reason as
+    trace_job(). Older dbt_ui_pro builds without row-dependency tracing get
+    an empty list — see supports_row_dependencies()."""
+    pro = _pro()
+    full = getattr(pro, "trace_job_full", None)
+    if full is not None:
+        return full(job)
+    uid, col_lineage = pro.trace_job(job)
+    return uid, col_lineage, []
+
+
+def supports_row_dependencies() -> bool:
+    """Whether the installed dbt_ui_pro traces row dependencies (False if it's
+    missing or predates them), so snapshots can record what they contain."""
+    try:
+        return hasattr(_pro(), "trace_job_full")
+    except ColumnLineageUnavailable:
+        return False
+
+
 def build_column_lineage(manifest_path: Path) -> dict:
     return _pro().build_column_lineage(manifest_path)

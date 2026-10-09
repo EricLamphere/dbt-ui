@@ -29,7 +29,7 @@ import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserial
 import { ColumnLineageContext, type ColumnLineageContextValue } from './lib/columnLineageContext';
 import { buildCoverageMap, getModelCoverageStats } from './lib/testCoverage';
 import CoverageLegend from './components/CoverageLegend';
-import { useReportSelectedNode, useReportSelectedNodes } from './lib/selectedNodeContext';
+import { useReportSelectedColumns, useReportSelectedNode, useReportSelectedNodes } from './lib/selectedNodeContext';
 import { useLiveRunStatuses, applyLiveStatuses } from './lib/useLiveRunStatuses';
 
 function FitViewOnFirstLoad({ trigger }: { trigger: unknown }) {
@@ -211,6 +211,8 @@ export default function ModelsPage() {
     [selectedModels],
   );
   useReportSelectedNodes(multiSelectedIds);
+  const selectedColumnKeys = useMemo(() => [...activeColumnSels], [activeColumnSels]);
+  useReportSelectedColumns(selectedColumnKeys);
 
   useEffect(() => {
     if (!graph || !selectedModel) return;

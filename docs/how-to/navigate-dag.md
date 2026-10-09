@@ -146,6 +146,15 @@ The switch at the left of the Impact tab's toolbar picks what to analyze:
 - **Uncommitted**: everything you've changed but not committed, including staged and untracked files
 - **Branch**: everything on the current branch since it split from a base branch, plus uncommitted changes. Pick the base in the **vs** dropdown (it defaults to the remote's default branch, or `main`/`master`)
 
+**Column-level impact (Pro).** In **Selection** mode, turn on **Columns** in the toolbar, load column lineage if prompted, then pick the columns you're changing (or **all columns**, e.g. for a filter or join change). The list narrows to what those columns actually reach:
+- An **Affected columns** column shows the downstream columns each node gets them through. `all · rows via <model>.<column>` means the node filters, joins or groups on an affected column, so every row and column can change. `all · not traced` means dbt-ui couldn't trace that model's SQL, so it's assumed fully affected.
+- **Tests** shows how many of each node's tests check an affected column ("3 of 12"), and the toolbar shows how many downstream nodes are unaffected.
+- **Build impacted** builds exactly the affected nodes.
+
+Shortcut: with column lineage loaded on the DAG, clicking a column in an expanded node (Cmd+click for several) makes the Impact tab show that column's column-level impact automatically. Click the canvas to clear the column selection.
+
+Without a Pro license, the toggle offers an upgrade instead. Uncommitted and Branch modes stay node-level for now.
+
 In the git modes the first group is **Changed**, and each node shows why it counts: `edited`, `new file`, the schema YAML that documents it, or `via macro <name>` when you changed a macro it calls (directly or through another macro). A notice above the list says what was compared. It also warns when `dbt_project.yml`, `packages.yml` or similar project-wide files changed, and lists changed files the manifest doesn't know yet (new files appear after **Refresh DAG**). Editing a schema YAML marks every model it documents as changed, even if you only touched one of them. Exposures are listed but left out of **Build impacted**.
 
 ## Viewing model details in the SidePane

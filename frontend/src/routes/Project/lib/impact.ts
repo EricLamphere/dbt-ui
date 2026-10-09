@@ -15,6 +15,8 @@ export interface ImpactNode {
   depth: number;
   dataTests: number;
   unitTests: number;
+  /** Column-level only: how many of `dataTests` check an affected column. */
+  affectedTests?: number;
   flags: ImpactFlag[];
 }
 
@@ -107,9 +109,10 @@ function downstreamDepths(seedIds: string[], children: Map<string, string[]>): M
   return depths;
 }
 
-function countDataTests(testParents: Map<string, string[]>): Map<string, number> {
+function countDataTests(testParents: Map<string, string[]>, only?: ReadonlySet<string>): Map<string, number> {
   const counts = new Map<string, number>();
-  for (const parents of testParents.values()) {
+  for (const [test, parents] of testParents) {
+    if (only && !only.has(test)) continue;
     for (const p of new Set(parents)) counts.set(p, (counts.get(p) ?? 0) + 1);
   }
   return counts;
@@ -123,12 +126,15 @@ function groupByDepth(nodes: ImpactNode[]): ImpactLevel[] {
     .map(([depth, items]) => ({ depth, nodes: [...items].sort(compareNodes) }));
 }
 
-function summarize(seeds: ImpactNode[], downstream: ImpactNode[], index: GraphIndex): ImpactSummary {
+function summarize(
+  seeds: ImpactNode[], downstream: ImpactNode[], index: GraphIndex, affectedTests?: ReadonlySet<string>,
+): ImpactSummary {
   const seedIds = new Set(seeds.map((n) => n.node.unique_id));
   const downstreamIds = new Set(downstream.map((n) => n.node.unique_id));
   let testsOnSeeds = 0;
   let testsDownstream = 0;
-  for (const parents of index.testParents.values()) {
+  for (const [test, parents] of index.testParents) {
+    if (affectedTests && !affectedTests.has(test)) continue;
     if (parents.some((p) => seedIds.has(p))) testsOnSeeds += 1;
     else if (parents.some((p) => downstreamIds.has(p))) testsDownstream += 1;
   }
@@ -150,25 +156,51 @@ function summarize(seeds: ImpactNode[], downstream: ImpactNode[], index: GraphIn
   };
 }
 
-export function computeImpact(graph: GraphDto, seedIds: readonly string[]): Impact {
+export interface ComputeImpactOptions {
+  /**
+   * Downstream node → depth, computed elsewhere (column-level impact).
+   * Replaces the node-level graph walk; seeds are always depth 0.
+   */
+  reach?: ReadonlyMap<string, number>;
+  /** Only these tests count in the summary; nodes also get `affectedTests`. */
+  affectedTests?: ReadonlySet<string>;
+}
+
+export function computeImpact(graph: GraphDto, seedIds: readonly string[], options: ComputeImpactOptions = {}): Impact {
+  const { reach, affectedTests } = options;
   const index = indexGraph(graph);
   const validSeeds = [...new Set(seedIds)].filter((id) => {
     const n = index.byId.get(id);
     return n != null && n.resource_type !== 'test';
   });
   const dataTests = countDataTests(index.testParents);
+  const affectedCounts = affectedTests ? countDataTests(index.testParents, affectedTests) : null;
 
-  const impactNodes = [...downstreamDepths(validSeeds, index.children)].flatMap(([id, depth]) => {
+  const depths = reach
+    ? new Map([...reach, ...validSeeds.map((id) => [id, 0] as const)])
+    : downstreamDepths(validSeeds, index.children);
+
+  const impactNodes = [...depths].flatMap(([id, depth]) => {
     const node = index.byId.get(id);
     if (!node) return [];
     const data = dataTests.get(id) ?? 0;
     const unit = node.resource_type === 'model' ? index.unitTestsByModelName.get(node.name) ?? 0 : 0;
-    return [{ node, depth, dataTests: data, unitTests: unit, flags: flagsFor(node, data + unit) }];
+    const affected = affectedCounts ? { affectedTests: affectedCounts.get(id) ?? 0 } : {};
+    return [{ node, depth, dataTests: data, unitTests: unit, ...affected, flags: flagsFor(node, data + unit) }];
   });
 
   const seeds = impactNodes.filter((n) => n.depth === 0).sort(compareNodes);
   const downstream = impactNodes.filter((n) => n.depth > 0);
-  return { seeds, levels: groupByDepth(downstream), summary: summarize(seeds, downstream, index) };
+  return { seeds, levels: groupByDepth(downstream), summary: summarize(seeds, downstream, index, affectedTests) };
+}
+
+/**
+ * `dbt build --select` value for exactly these nodes (no `+`), for column-level
+ * impact where only some downstream nodes are affected. Exposures left out.
+ */
+export function buildExactSelector(nodes: readonly ModelNode[]): string {
+  const buildable = nodes.filter((n) => n.resource_type !== 'exposure');
+  return [...new Set(buildable.map(selectorFor))].sort().join(' ');
 }
 
 /** The dbt `--select` term for a single node. */

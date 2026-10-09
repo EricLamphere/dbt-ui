@@ -32,12 +32,30 @@ export function useReportSelectedNode(uid: string | null): void {
 export const SelectedNodeIdsContext = createContext<readonly string[]>(NO_IDS);
 export const SetSelectedNodeIdsContext = createContext<(uids: readonly string[]) => void>(() => {});
 
-/** Publish this page's multi-selection; clears it again when the page unmounts. */
-export function useReportSelectedNodes(uids: readonly string[]): void {
-  const setSelected = useContext(SetSelectedNodeIdsContext);
-  const key = uids.join('|');
+/** Publish a list into `setterContext`; clears it again when the page unmounts. */
+function useReportList(setterContext: typeof SetSelectedNodeIdsContext, items: readonly string[]): void {
+  const setSelected = useContext(setterContext);
+  const key = JSON.stringify(items);
   useEffect(() => {
-    setSelected(key ? key.split('|') : NO_IDS);
+    const parsed = JSON.parse(key) as string[];
+    setSelected(parsed.length > 0 ? parsed : NO_IDS);
   }, [key, setSelected]);
   useEffect(() => () => setSelected(NO_IDS), [setSelected]);
+}
+
+/** Publish this page's multi-selection; clears it again when the page unmounts. */
+export function useReportSelectedNodes(uids: readonly string[]): void {
+  useReportList(SetSelectedNodeIdsContext, uids);
+}
+
+/**
+ * The DAG's column selection (`<uid>::<column>` keys, from clicking columns in
+ * expanded nodes), so the Impact tab can start column-level impact from it.
+ */
+export const SelectedColumnsContext = createContext<readonly string[]>(NO_IDS);
+export const SetSelectedColumnsContext = createContext<(keys: readonly string[]) => void>(() => {});
+
+/** Publish this page's column selection; clears it again when the page unmounts. */
+export function useReportSelectedColumns(keys: readonly string[]): void {
+  useReportList(SetSelectedColumnsContext, keys);
 }

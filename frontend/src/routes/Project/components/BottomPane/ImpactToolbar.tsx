@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, Copy, Hammer, Loader2 } from 'lucide-react';
+import { Check, Columns3, Copy, Hammer, Loader2 } from 'lucide-react';
 import { api } from '../../../../lib/api';
 import { formatImpactCounts, IMPACT_FLAGS, type Impact } from '../../lib/impact';
 import type { ImpactMode } from '../../lib/impactChanges';
@@ -26,6 +26,26 @@ function useCopied(): [boolean, (text: string) => void] {
     navigator.clipboard.writeText(text).then(() => setCopied(true), () => setCopied(false));
   };
   return [copied, copy];
+}
+
+function ColumnLevelToggle({ on, onChange, forced }: { on: boolean; onChange: (on: boolean) => void; forced: boolean }) {
+  return (
+    <button
+      onClick={() => onChange(!on)}
+      disabled={forced}
+      aria-pressed={on}
+      title={forced
+        ? 'On while columns are selected on the DAG'
+        : 'Column-level impact (Pro): follow only the columns you change, including through filters and joins'}
+      className={`flex items-center gap-1.5 px-2 py-0.5 rounded-md border text-[11px] shrink-0 transition-colors ${
+        on ? 'border-brand-600 bg-brand-900/50 text-brand-200' : 'border-gray-700 text-gray-400 hover:border-gray-500 hover:text-gray-200'
+      }`}
+    >
+      <Columns3 size={12} />
+      Columns
+      <span className="px-1 rounded bg-brand-900/70 text-[9px] font-semibold uppercase tracking-wider text-brand-300">Pro</span>
+    </button>
+  );
 }
 
 function ModeSwitch({ mode, onChange }: { mode: ImpactMode; onChange: (m: ImpactMode) => void }) {
@@ -82,6 +102,12 @@ interface ImpactToolbarProps {
   resolvedBase: string | null;
   onBaseChange: (base: string | null) => void;
   impact: Impact | null;
+  /** Column-level mode: downstream nodes the node-level view would show but no affected column reaches. */
+  prunedCount: number | null;
+  columnLevel: boolean;
+  onColumnLevelChange: (on: boolean) => void;
+  /** Column-level is on because columns are selected on the DAG. */
+  columnLevelForced: boolean;
   selector: string;
   building: boolean;
   buildError: string | null;
@@ -101,6 +127,9 @@ export function ImpactToolbar(props: ImpactToolbarProps) {
       {mode === 'branch' && (
         <BasePicker projectId={projectId} base={props.base} resolved={props.resolvedBase} onChange={props.onBaseChange} />
       )}
+      {mode === 'selection' && (
+        <ColumnLevelToggle on={props.columnLevel} onChange={props.onColumnLevelChange} forced={props.columnLevelForced} />
+      )}
       {hasSeeds && summary && (
         <>
           <span className="w-px h-4 bg-gray-800 shrink-0" />
@@ -112,6 +141,11 @@ export function ImpactToolbar(props: ImpactToolbarProps) {
           <span className="text-xs text-gray-400 whitespace-nowrap">
             {summary.downstreamCount === 0 ? 'Nothing downstream' : formatImpactCounts(summary)}
           </span>
+          {props.prunedCount !== null && props.prunedCount > 0 && (
+            <span className="text-xs text-emerald-400/80 whitespace-nowrap" title="Downstream of the selection, but no affected column reaches them">
+              {props.prunedCount} node{props.prunedCount === 1 ? '' : 's'} unaffected
+            </span>
+          )}
           {flags.length > 0 && (
             <span className="flex items-center gap-1 shrink-0">
               {flags.map((f) => <FlagBadge key={f} flag={f} count={summary.flagCounts[f]} />)}

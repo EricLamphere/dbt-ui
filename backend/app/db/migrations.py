@@ -370,6 +370,18 @@ async def run_migrations() -> None:
             )
             await session.commit()
 
+        if not await _column_exists(session, "column_lineage_snapshots", "row_dependencies_json"):
+            await session.execute(
+                text("ALTER TABLE column_lineage_snapshots ADD COLUMN row_dependencies_json TEXT NOT NULL DEFAULT '{}'")
+            )
+            await session.commit()
+
+        if not await _column_exists(session, "column_lineage_snapshots", "lineage_version"):
+            await session.execute(
+                text("ALTER TABLE column_lineage_snapshots ADD COLUMN lineage_version INTEGER NOT NULL DEFAULT 1")
+            )
+            await session.commit()
+
 
 async def init_db() -> None:
     await ensure_db_initialized()
