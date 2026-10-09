@@ -33,7 +33,9 @@ const FEATURES: PlanFeature[] = [
   { label: 'Health check & schema drift', base: true, pro: true },
   { label: 'Column profiling & test coverage heatmap', base: true, pro: true },
   { label: 'Run history', base: true, pro: true },
+  { label: 'Model impact analysis — selection, uncommitted & branch changes', base: true, pro: true },
   { label: 'Column-level lineage tracing', base: false, pro: true },
+  { label: 'Column-level impact analysis, incl. filter & join effects', base: false, pro: true },
   { label: 'Priority support', base: false, pro: true },
 ];
 
