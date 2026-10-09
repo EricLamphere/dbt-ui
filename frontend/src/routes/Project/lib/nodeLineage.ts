@@ -13,10 +13,6 @@ export interface NodeLineage {
 
 export type NodeDagFilter = Pick<DropdownFilters, 'resourceTypes' | 'materializations' | 'statuses'>;
 
-export function emptyNodeDagFilter(): NodeDagFilter {
-  return { resourceTypes: new Set(), materializations: new Set(), statuses: new Set() };
-}
-
 /** Initial filter: everything except tests, which as leaf nodes would swamp the view. */
 export function defaultNodeDagFilter(): NodeDagFilter {
   return {
@@ -24,10 +20,6 @@ export function defaultNodeDagFilter(): NodeDagFilter {
     materializations: new Set(),
     statuses: new Set(),
   };
-}
-
-export function isNodeDagFilterActive(f: NodeDagFilter): boolean {
-  return f.resourceTypes.size > 0 || f.materializations.size > 0 || f.statuses.size > 0;
 }
 
 export function serializeNodeDagFilter(f: NodeDagFilter): string {

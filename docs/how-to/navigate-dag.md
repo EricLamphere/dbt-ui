@@ -126,7 +126,7 @@ The node count in the filter bar shows how many nodes are currently visible vs. 
 
 The **Node DAG** tab in the bottom pane shows the selected node's full upstream and downstream lineage (`+model+`), centered on that node. It follows your selection on the DAG page, and on the Files page it follows the model whose file is open (or the test you're on in a YAML file). 
 
-- Use the **Type**, **Materialization**, and **Status** dropdowns in the tab's header to narrow the lineage (same multi-select behavior as the main DAG's filters; saved per project for the session). The selected node always stays visible. When filtered-out nodes sit between two visible ones, a dashed edge connects them so the lineage stays readable. Type defaults to `seed`, `source`, `model`, and `exposure` (tests hidden); check `test` or click **Clear** to show tests.
+- Use the **Type**, **Materialization**, and **Status** dropdowns in the tab's header to narrow the lineage (same multi-select behavior as the main DAG's filters; saved per project for the session). The selected node always stays visible. When filtered-out nodes sit between two visible ones, a dashed edge connects them so the lineage stays readable. Type defaults to `seed`, `source`, `model`, and `exposure` (tests hidden); check `test` to show tests. The tab always shows the selected node's full `+node+` lineage; there's no Clear button, so the dropdowns only narrow which node types appear.
 - Click the crosshair button in the tab's header to re-center after panning.
 - Cmd/ctrl-click any node to open its file in the Files page.
 

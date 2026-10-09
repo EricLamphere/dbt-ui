@@ -9,7 +9,7 @@ import {
   type Node,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Crosshair, X } from 'lucide-react';
+import { Crosshair } from 'lucide-react';
 
 import type { GraphDto, ModelNode } from '../../../../lib/api';
 import ModelNodeComponent from '../ModelNode';
@@ -19,9 +19,7 @@ import {
   buildNodeLineageGraph,
   deserializeNodeDagFilter,
   defaultNodeDagFilter,
-  emptyNodeDagFilter,
   filterNodeLineage,
-  isNodeDagFilterActive,
   serializeNodeDagFilter,
   type NodeDagFilter,
 } from '../../lib/nodeLineage';
@@ -181,15 +179,6 @@ function NodeDagPanelInner({ projectId, graph, selectedNodeId }: NodeDagPanelPro
             onChange={setCategory('statuses')}
             closeSignal={closeDropdownsSignal}
           />
-          {isNodeDagFilterActive(filter) && (
-            <button
-              onClick={() => setFilter(emptyNodeDagFilter())}
-              className="flex items-center gap-1 px-2 py-1.5 text-xs rounded text-gray-400 transition-colors hover:bg-gray-800 hover:text-gray-200"
-            >
-              <X size={12} />
-              Clear
-            </button>
-          )}
         </div>
         <button
           onClick={() => recenter()}
