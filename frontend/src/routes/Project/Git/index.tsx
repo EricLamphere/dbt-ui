@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import { api, type GitFileChange } from '../../../lib/api';
 import { useProjectEvents } from '../../../lib/sse';
 import NavRail from '../components/NavRail';
+import { useReportSelectedNode } from '../lib/selectedNodeContext';
+import { nodeForRepoPath } from '../lib/nodeForPath';
 import { ChangesList } from './components/ChangesList';
 import { CommitBox } from './components/CommitBox';
+import { ImpactSection } from './components/ImpactSection';
+import { PaneSectionHeader, usePersistedOpen } from './components/PaneSection';
 import { DiffView } from './components/DiffView';
 import { BranchPicker } from './components/BranchPicker';
 import { HistorySection } from './components/HistorySection';
@@ -26,6 +30,7 @@ export default function GitPage() {
   const changesWidthRef = useRef(changesWidth);
 
   // UI state — restore selected path from sessionStorage
+  const [changesOpen, toggleChanges] = usePersistedOpen('dbt-ui:git-changes-open', true);
   const [selectedPath, setSelectedPath] = useState<string | null>(
     () => sessionStorage.getItem(SESSION_KEY)
   );
@@ -47,6 +52,18 @@ export default function GitPage() {
     queryFn: () => api.git.status(id),
     retry: false,
   });
+
+  // The selected changed file's node feeds the bottom pane's Node DAG and Impact tabs, as on the Files page
+  const { data: graph } = useQuery({
+    queryKey: ['graph', id],
+    queryFn: () => api.models.graph(id),
+    enabled: !!id,
+  });
+  const selectedNodeUid = useMemo(
+    () => nodeForRepoPath(graph, selectedPath, status?.project_subpath ?? ''),
+    [graph, selectedPath, status?.project_subpath],
+  );
+  useReportSelectedNode(selectedNodeUid);
 
   const statusRef = useRef(status);
   statusRef.current = status;
@@ -178,7 +195,7 @@ export default function GitPage() {
         style={{ width: changesWidth }}
         className="shrink-0 flex flex-col bg-surface-panel border-r border-zinc-800 overflow-hidden"
       >
-        <div className="px-3 py-2 border-b border-zinc-800 shrink-0">
+        <div className="px-3 py-2 shrink-0">
           <h2 className="text-xs font-semibold uppercase tracking-widest text-zinc-400">
             Source Control
           </h2>
@@ -201,19 +218,29 @@ export default function GitPage() {
 
         {status && (
           <>
-            <div className="flex-1 min-h-0 overflow-y-auto">
-              <ChangesList
-                changes={changes}
-                selectedPath={selectedPath}
-                onSelect={setSelectedPath}
-                onStage={(paths) => stageMutation.mutate(paths)}
-                onUnstage={(paths) => unstageMutation.mutate(paths)}
-                onDiscard={(paths) => setDiscardConfirm(paths)}
-                onDeleteNew={(paths) => setDeleteNewConfirm(paths)}
-              />
-            </div>
+            {/* VS Code-style stacked sections; the commit box stays pinned at the bottom */}
+            <PaneSectionHeader title="Changes" open={changesOpen} onToggle={toggleChanges} count={changes.length} />
+            {/* natural height; shrinks and scrolls once the list outgrows the panel */}
+            {changesOpen && (
+              <div className="shrink min-h-0 overflow-y-auto">
+                <ChangesList
+                  changes={changes}
+                  selectedPath={selectedPath}
+                  onSelect={setSelectedPath}
+                  onStage={(paths) => stageMutation.mutate(paths)}
+                  onUnstage={(paths) => unstageMutation.mutate(paths)}
+                  onDiscard={(paths) => setDiscardConfirm(paths)}
+                  onDeleteNew={(paths) => setDeleteNewConfirm(paths)}
+                />
+              </div>
+            )}
+
+            <ImpactSection projectId={id} />
 
             <HistorySection projectId={id} selectedPath={selectedPath} />
+
+            {/* sections stack from the top; leftover space sits above the commit box */}
+            <div className="flex-1" />
 
             <CommitBox
               projectId={id}

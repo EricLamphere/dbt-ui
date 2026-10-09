@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent } from 'react';
 import { HistoryPanel } from './HistoryPanel';
+import { PaneSectionHeader, usePersistedOpen } from './PaneSection';
 
 const HEIGHT_KEY = 'dbt-ui:git-history-height';
 const OPEN_KEY = 'dbt-ui:git-history-open';
@@ -24,21 +25,14 @@ interface Props {
   selectedPath: string | null;
 }
 
-/** Collapsible History section with a drag handle on its top edge to resize it. */
+/** Collapsible Commit History section (collapsed by default) with a drag handle on its top edge to resize it. */
 export function HistorySection({ projectId, selectedPath }: Props) {
-  const [open, setOpen] = useState(() => readStored(OPEN_KEY) === '1');
+  const [open, toggle] = usePersistedOpen(OPEN_KEY, false);
   const [height, setHeight] = useState(() => {
     const v = parseInt(readStored(HEIGHT_KEY) ?? '', 10);
     return Number.isNaN(v) ? DEFAULT_HEIGHT : clampHistoryHeight(v);
   });
   const drag = useRef<{ startY: number; startHeight: number } | null>(null);
-
-  const toggle = () => {
-    setOpen((o) => {
-      writeStored(OPEN_KEY, o ? '0' : '1');
-      return !o;
-    });
-  };
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -56,7 +50,7 @@ export function HistorySection({ projectId, selectedPath }: Props) {
   };
 
   return (
-    <div className="shrink-0 border-t border-zinc-800">
+    <div className="shrink-0">
       {open && (
         <div
           role="separator"
@@ -66,18 +60,10 @@ export function HistorySection({ projectId, selectedPath }: Props) {
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onDoubleClick={() => { setHeight(DEFAULT_HEIGHT); writeStored(HEIGHT_KEY, String(DEFAULT_HEIGHT)); }}
-          className="h-1 -mt-0.5 cursor-row-resize hover:bg-brand-500 transition-colors"
+          className="relative z-10 h-1 -mb-1 cursor-row-resize hover:bg-brand-500 transition-colors"
         />
       )}
-      <button
-        onClick={toggle}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-500 hover:text-gray-300 hover:bg-surface-elevated"
-      >
-        <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-        </svg>
-        History
-      </button>
+      <PaneSectionHeader title="Commit History" open={open} onToggle={toggle} />
       {open && (
         <div className="border-t border-zinc-800" style={{ height }}>
           <HistoryPanel projectId={projectId} selectedPath={selectedPath} />

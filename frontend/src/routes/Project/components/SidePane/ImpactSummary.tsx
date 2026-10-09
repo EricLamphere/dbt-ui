@@ -39,7 +39,7 @@ export function ImpactSummary({ projectId, nodes, graph }: ImpactSummaryProps) {
         )}
         <div className="grid grid-cols-2 gap-1.5 pt-1">
           <button
-            onClick={() => openBottomTab('impact')}
+            onClick={() => openBottomTab('impact', { impactMode: 'selection' })}
             className="flex items-center justify-center gap-1.5 py-1.5 text-xs rounded border bg-surface-elevated border-gray-700 text-gray-200 hover:border-brand-600 hover:text-brand-300 transition-colors"
           >
             <ListTree className="w-3.5 h-3.5" />

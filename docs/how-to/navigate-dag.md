@@ -141,6 +141,13 @@ The **Downstream impact** card in the SidePane summarizes what sits downstream o
 
 **Build impacted** runs `dbt build --select <node>+`, which builds the node and everything downstream and runs their tests. **Show impact** opens the **Impact** tab in the bottom pane, which lists the selected node and then every downstream node grouped by depth (direct children first). Each row shows its type, materialization, data/unit test count, column test coverage, and flags. The tab follows your selection like the Node DAG tab does. With several nodes Cmd/ctrl-clicked on the DAG, the card (in the multi-selection panel) and the tab show their combined impact: each downstream node appears once, at its shortest distance from any selected node, and Build impacted selects `a+ b+ …`. Use **Copy selector** for the `--select` value, and Cmd/ctrl-click a name to open its file.
 
+The switch at the left of the Impact tab's toolbar picks what to analyze:
+- **Selection**: the node(s) selected on the DAG or Files page (described above)
+- **Uncommitted**: everything you've changed but not committed, including staged and untracked files
+- **Branch**: everything on the current branch since it split from a base branch, plus uncommitted changes. Pick the base in the **vs** dropdown (it defaults to the remote's default branch, or `main`/`master`)
+
+In the git modes the first group is **Changed**, and each node shows why it counts: `edited`, `new file`, the schema YAML that documents it, or `via macro <name>` when you changed a macro it calls (directly or through another macro). A notice above the list says what was compared. It also warns when `dbt_project.yml`, `packages.yml` or similar project-wide files changed, and lists changed files the manifest doesn't know yet (new files appear after **Refresh DAG**). Editing a schema YAML marks every model it documents as changed, even if you only touched one of them. Exposures are listed but left out of **Build impacted**.
+
 ## Viewing model details in the SidePane
 
 With a model selected, the SidePane is persistent — it stays open as you click different nodes. Resize it by dragging the left edge. Collapse it by clicking the collapse arrow.

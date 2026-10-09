@@ -178,9 +178,14 @@ export function selectorFor(node: ModelNode): string {
   return node.name;
 }
 
-/** `dbt build --select` value covering the seeds and everything downstream. */
+/**
+ * `dbt build --select` value covering the seeds and everything downstream.
+ * Exposures are left out: they're leaves that dbt build has nothing to do for.
+ * Empty when there's nothing buildable.
+ */
 export function buildImpactSelector(seeds: readonly ModelNode[]): string {
-  return [...new Set(seeds.map((n) => `${selectorFor(n)}+`))].sort().join(' ');
+  const buildable = seeds.filter((n) => n.resource_type !== 'exposure');
+  return [...new Set(buildable.map((n) => `${selectorFor(n)}+`))].sort().join(' ');
 }
 
 function plural(count: number, noun: string): string {

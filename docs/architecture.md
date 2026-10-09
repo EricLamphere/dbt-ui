@@ -409,6 +409,7 @@ POST   /api/projects/{id}/git/checkout               switch branch
 POST   /api/projects/{id}/git/pull                   SSE-streamed git pull
 POST   /api/projects/{id}/git/push                   SSE-streamed git push
 GET    /api/projects/{id}/git/log                    commit history (?path= &limit=)
+GET    /api/projects/{id}/impact/changes             changed files → manifest nodes (?scope=working|branch &base=<ref>)
 ```
 
 ---
@@ -567,7 +568,7 @@ On the main DAG, `lib/useLiveRunStatuses.ts` overlays live statuses parsed from 
 ### 6a. Node DAG (bottom pane)
 
 The **Node DAG** tab shows the `+node+` lineage of whatever node is selected on the current page:
-- The selection lives in `ProjectLayout` (`lib/selectedNodeContext.tsx`). The DAG page reports its selected node and the Files page reports the open file's model (or the active test in a YAML file) via `useReportSelectedNode()`; it clears when the page unmounts, so other pages show an empty state
+- The selection lives in `ProjectLayout` (`lib/selectedNodeContext.tsx`). The DAG page reports its selected node, the Files page reports the open file's model (or the active test in a YAML file), and the Git page reports the node defined by the selected changed file (`lib/nodeForPath.ts`; prefers a non-test node in a shared YAML file) via `useReportSelectedNode()`; it clears when the page unmounts, so other pages show an empty state
 - `buildNodeLineageGraph()` walks all transitive ancestors and descendants; `filterNodeLineage()` then applies the tab's Type/Materialization/Status dropdowns (shared `FilterDropdown` + `matchesDropdownFilters()` with the main DAG, persisted in sessionStorage as `node-dag-filter-{id}`). Type defaults to seed/source/model/exposure (`defaultNodeDagFilter()`), so tests are hidden until picked or the filter is cleared; the selected node is always kept. Edges that skip hidden nodes are drawn dashed (`bridged`) so the view stays connected
 - The panel is mounted only while its tab is visible, and centers on the selected node at a zoom that keeps the whole lineage in view. It re-centers when the selection or the node set changes, not on status-only refreshes, so a run doesn't move the viewport
 
@@ -578,7 +579,13 @@ The **Node DAG** tab shows the `+node+` lineage of whatever node is selected on 
 - Flags: `untested` (model/snapshot with no tests), `exposure`, `incremental`, `failing` (error/warn), `stale`. The summary counts downstream nodes by type, tests on seeds vs. tests only downstream, and flags across downstream nodes
 - `buildImpactSelector()` produces `<seed>+ …` (sources as `source:x.y`), which `useBuildImpacted()` sends to `POST /build` as `select`
 
-It's shown in two places: `SidePane/ImpactSummary.tsx` (a card in PropertiesTab, hidden for tests and exposures) and the bottom pane **Impact** tab (`ImpactPanel.tsx`, mounted only while visible). The card also appears in the multi-selection panel. The tab uses the DAG's multi-selection when there is one (`SelectedNodeIdsContext`, reported by Models.tsx via `useReportSelectedNodes()` and empty unless 2+ nodes are selected), otherwise `SelectedNodeContext`. The card's **Show impact** button calls `openBottomTab('impact')`, a `dbt-ui:open-bottom-tab` window event that BottomPane listens for. It takes a list of seeds so the planned git change-set mode (uncommitted / branch vs. base) can reuse it.
+It's shown in two places: `SidePane/ImpactSummary.tsx` (a card in PropertiesTab, hidden for tests and exposures) and the bottom pane **Impact** tab (`ImpactPanel.tsx`, mounted only while visible). The card also appears in the multi-selection panel. The tab uses the DAG's multi-selection when there is one (`SelectedNodeIdsContext`, reported by Models.tsx via `useReportSelectedNodes()` and empty unless 2+ nodes are selected), otherwise `SelectedNodeContext`. The card's **Show impact** button calls `openBottomTab('impact')`, a `dbt-ui:open-bottom-tab` window event that BottomPane listens for. `openBottomTab(tab, { impactMode })` can also pick the tab's source.
+
+**Change-set modes.** The Impact tab's **Selection / Uncommitted / Branch** switch (state held in BottomPane so it survives tab switches) picks the starting nodes. The two git modes call `GET /api/projects/{id}/impact/changes` (`api/impact.py`) via `lib/useImpactChanges.ts`, which refetches on `git_status_changed`, `files_changed` and `graph_changed`:
+- `git/changeset.py` collects repo-relative changes through `git_runner`. `scope=working` runs `git status --porcelain=v2 -z --untracked-files=all`; a rename also reports its old path as deleted. `scope=branch` resolves the base (`?base=`, else `origin/HEAD`'s target, else `main`/`master`/`origin/main`/`origin/master`; refs are validated against a safe-ref pattern and `rev-parse --verify`), then `git merge-base <base> HEAD` and `git diff --name-status -z --no-renames <merge-base>` (commits plus uncommitted changes) plus untracked files. `to_project_files()` keeps paths inside the dbt project directory, so projects in a monorepo work
+- `dbt/changes.py` `map_changed_files()` maps files to manifest nodes. `original_file_path` covers model SQL, seed CSVs and the YAML defining sources/exposures. `patch_path` maps a schema YAML to every node it documents, which over-approximates when one YAML documents several models. A root-project macro file maps to every node that calls it, directly or through other macros (`depends_on.macros`). Only models, seeds, snapshots, sources and exposures are returned. `dbt_project.yml`/`packages.yml`/`dependencies.yml`/`selectors.yml`/`profiles.yml` come back as `project_wide`. Other `.sql/.yml/.yaml/.csv/.py` files under the project's resource paths (read from `dbt_project.yml`) that the manifest doesn't know come back as `unmapped`. `target/`, `dbt_packages/` and `logs/` are ignored
+- In the UI, the depth-0 group is labelled "Changed", with each node's reason (`lib/impactChanges.ts` `describeReasons()`: "edited", "new file", "_schema.yml", "via macro x"). `ImpactNotices.tsx` explains what was compared and lists project-wide and unmapped files. `buildImpactSelector()` leaves exposures out, since `dbt build` has nothing to build for them
+- The Git page's collapsible **Impact** section (`Git/components/ImpactSection.tsx`, between Changes and Commit History; sections share `PaneSection.tsx`) shows the uncommitted change set's impact, with **Details** (`openBottomTab('impact', { impactMode: 'working' })`) and **Build impacted**
 
 ### 7. Integrated Terminal
 
@@ -862,7 +869,7 @@ task install PYTHON=python3.12
 
 **SidePane as a unified panel** — The right-side panel (DAG and File Explorer) intentionally has no tab bar. Model metadata and run controls live in one scrollable view. Separating them into tabs added navigation friction with no benefit since both are used together during a typical run-and-inspect workflow.
 
-**SidePane upstream/downstream chips** — "Refs / Sources" (upstream nodes) and "Referenced By" (downstream nodes) are shown as chips derived from graph edges at render time. Cmd+clicking a chip calls `onNavigateToFile(path)`, which in FileExplorer expands the tree and opens the file. Chips without a navigable `original_file_path` render in muted style with no hover effect.
+**SidePane upstream/downstream chips** — "Refs / Sources" (upstream nodes) and "Referenced By" (downstream nodes) are shown as chips derived from graph edges at render time. "Referenced By" is collapsed by default behind a header with its count (a widely used model can have dozens of children, tests included); its open state persists while switching nodes. Cmd+clicking a chip calls `onNavigateToFile(path)`, which in FileExplorer expands the tree and opens the file. Chips without a navigable `original_file_path` render in muted style with no hover effect.
 
 **NavRail collapse state in localStorage** — The left sidebar collapse state persists in `localStorage` under `nav-rail-collapsed`. Navigating between pages or clicking a nav icon while collapsed never re-opens the rail; the collapsed state is only changed by clicking the toggle chevron at the bottom of the rail.
 

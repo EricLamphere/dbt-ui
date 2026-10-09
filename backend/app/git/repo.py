@@ -139,3 +139,17 @@ def parse_porcelain_v2(output: str) -> tuple[BranchInfo, list[FileChange]]:
         i += 1
 
     return branch, changes
+
+
+def parse_name_status_z(output: str) -> list[tuple[str, str]]:
+    """Parse `git diff --name-status -z --no-renames` into (status letter, path) pairs.
+
+    Records are ``STATUS\\0PATH\\0``; with --no-renames there are no two-path records.
+    """
+    tokens = [t for t in output.split("\0") if t != ""]
+    pairs: list[tuple[str, str]] = []
+    for status, path in zip(tokens[0::2], tokens[1::2]):
+        status = status.strip()
+        if status:
+            pairs.append((status[0], path))
+    return pairs

@@ -46,11 +46,12 @@ export function useBuildImpacted(projectId: number) {
   const [error, setError] = useState<string | null>(null);
 
   const build = useCallback(async (seeds: readonly ModelNode[]) => {
-    if (seeds.length === 0) return;
+    const selector = buildImpactSelector(seeds);
+    if (!selector) return;
     setBuilding(true);
     setError(null);
     try {
-      await api.runs.build(projectId, '', 'only', {}, buildImpactSelector(seeds));
+      await api.runs.build(projectId, '', 'only', {}, selector);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start build');
     } finally {

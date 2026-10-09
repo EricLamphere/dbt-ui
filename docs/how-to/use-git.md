@@ -6,21 +6,25 @@ dbt-ui includes a VSCode-style Source Control panel for the active dbt project. 
 
 Click **Source Control** in the left rail of any project page. The panel loads the current branch, ahead/behind counts, and the list of changed files.
 
+Like VS Code, the panel is a stack of collapsible sections: **Changes** (expanded), **Impact** (expanded) and **Commit History** (collapsed), with the branch/commit/push box always at the bottom. Click a section header to collapse or expand it; dbt-ui remembers your choice.
+
 If the project is not inside a git repository, the panel shows "Not a git repository" with no file list.
 
 ## Viewing Changes
 
-Changed files are grouped into three sections:
+In the **Changes** section (its header shows the total), changed files are grouped into:
 
-| Section | What it shows |
+| Group | What it shows |
 |---|---|
 | **Staged Changes** | Files added to the index (`git add`) |
 | **Merge Conflicts** | Unmerged files |
-| **Changes** | Worktree modifications not yet staged |
+| **Unstaged Changes** | Worktree modifications and new files not yet staged |
 
 Each file row shows a status letter: **M** (modified), **A** (added), **D** (deleted), **R** (renamed), **U** (untracked / unmerged).
 
 Click a file to open its Monaco diff view on the right — HEAD on the left, working tree on the right. The diff is read-only; use the file editor to make changes.
+
+If the file defines a dbt node (a model's SQL, a seed's CSV, or a YAML file defining sources or exposures), the bottom pane's **Node DAG** and **Impact** tabs follow it, just as they do for the open file on the Files page. Impact follows it in **Selection** mode; the **Uncommitted** and **Branch** modes keep showing the whole change set.
 
 ## Staging and Unstaging
 
@@ -52,7 +56,16 @@ Click the **branch chip** (showing the current branch name) to open the branch p
 
 ## Commit History
 
-At the bottom of the changes panel, click **History** to expand the commit log. The log shows the 200 most recent commits (hash, author, date, message) and refreshes after commits, pulls and branch switches. While a file is selected, an **All / <file>** toggle lets you narrow the log to commits that touched that file (it defaults to All). Drag the top edge of the History section to resize it (double-click to reset); the size and open state are remembered.
+Expand the **Commit History** section (collapsed by default) to see the commit log. The log shows the 200 most recent commits (hash, author, date, message) and refreshes after commits, pulls and branch switches. While a file is selected, an **All / <file>** toggle lets you narrow the log to commits that touched that file (it defaults to All). Drag the top edge of the Commit History section to resize it (double-click to reset); the size and open state are remembered.
+
+## Impact of Your Changes
+
+The **Impact** section (between Changes and Commit History; its header shows how many dbt nodes you've changed) summarizes what your uncommitted changes affect downstream, counting changes to models, seeds, snapshots, sources, exposures and macros. If they touch no dbt nodes it says so. Otherwise it reads like "3 changed nodes affect 9 models · 1 exposure · 27 tests", with flags for risky downstream nodes (untested, exposures, incremental, failing or stale). It also warns when `dbt_project.yml` or `packages.yml` changed, since that can affect every node.
+
+- **Details** opens the bottom pane's **Impact** tab in **Uncommitted** mode, with the full downstream list. Switch it to **Branch** to see everything on your branch compared to `main` (or another base) before opening a PR.
+- **Build impacted** runs `dbt build --select <changed>+`, which builds the changed nodes and everything downstream and runs their tests.
+
+See [Seeing what a change would affect](navigate-dag.md#seeing-what-a-change-would-affect) for how changes are matched to nodes.
 
 ## Keyboard Shortcuts
 

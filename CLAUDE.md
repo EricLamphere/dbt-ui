@@ -26,7 +26,7 @@ working on Pro features or updating screenshots/gallery content.
 
 ```
 backend/app/
-  api/            — FastAPI routers, one file per resource (projects, models, document, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git, debug, drift, freshness, column_lineage, license)
+  api/            — FastAPI routers, one file per resource (projects, models, document, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git, debug, drift, freshness, column_lineage, license, impact)
   db/
     models.py     — All SQLAlchemy models (12 tables)
     engine.py     — get_session dependency
@@ -40,6 +40,7 @@ backend/app/
     interactive.py — InteractiveInitManager (ptyprocess PTY sessions; reused for terminal too)
     debug_parser.py — parse_debug_output() → structured DebugResult from dbt debug stdout
     custom_command.py — parse_custom_command() → ParsedCommand; shlex-tokenizes user-entered dbt commands, blocks `init`/`docs serve`, detects --select/--target/--profiles-dir
+    changes.py    — map_changed_files(manifest, files, resource_dirs) → ChangeMapping (nodes→reasons, unmapped, project_wide, relevant_files): changed files → model/seed/snapshot/source/exposure nodes via original_file_path, patch_path (schema YAML) and root-project macros (transitively through depends_on.macros); resource_dirs_from_project_yml(); pure, unit-tested in test_changes.py
     drift.py      — diff_columns() + is_eligible_for_drift_check() — column schema diff helpers
     probe.py      — probe_warehouse_columns() — a built node's real column names via `dbt show --inline`; shared by drift and the docs generator
     schema_yaml.py — document_node() — docs generator: adds `- name:` entries for a model/seed/snapshot + columns to its schema YAML (patch_path file → folder YAML with the resource key → new schema.yml). Never re-serialises: ruamel.yaml only locates line positions, new lines are spliced in matching the file's indent style, and the result is re-parsed and verified before writing
@@ -57,7 +58,8 @@ backend/app/
     service.py    — Upsert projects to DB; _effective_workspace() for DBT_UI_PROJECTS_PATH
   git/
     runner.py     — GitRunner singleton; subprocess + serialization lock per project; stream() publishes git_started/git_log/git_finished
-    repo.py       — find_repo_root() walks upward for .git/; parse_porcelain_v2() parses git status --porcelain=v2 -z
+    repo.py       — find_repo_root() walks upward for .git/; parse_porcelain_v2() parses git status --porcelain=v2 -z; parse_name_status_z() parses git diff --name-status -z
+    changeset.py  — working_changes() / branch_changes(base) / resolve_base() / current_branch() over a GitCall; to_project_files() narrows repo paths to the dbt project; used by api/impact.py (GET /impact/changes?scope=working|branch&base=)
   watcher/
     service.py    — WatcherManager (watchfiles, per-project); also watches .git/HEAD, .git/index, .git/refs/ to emit git_status_changed
 
@@ -80,7 +82,9 @@ frontend/src/
         selectedNodeContext.tsx — SelectedNodeContext/SetSelectedNodeContext + useReportSelectedNode(uid) / useSelectedNodeId(); feeds the bottom pane's Node DAG tab. Also SelectedNodeIdsContext + useReportSelectedNodes(uids) for the DAG's Cmd+click multi-selection (empty unless 2+ nodes), which the Impact tab prefers over the single selection
         impact.ts — computeImpact(graph, seedIds) → seeds + downstream nodes grouped by shortest depth, per-node data/unit test counts, risk flags (untested/exposure/incremental/failing/stale) and summary; buildImpactSelector() → `a+ b+` for dbt build; unit-tested in impact.test.ts
         nodeTypeIcon.ts — typeIconFor(resource_type): glyph per node type, shared by ModelNode (DAG) and the Impact table
-        bottomPaneEvents.ts — openBottomTab(tab): `dbt-ui:open-bottom-tab` window event BottomPane listens for (used by the SidePane impact card)
+        bottomPaneEvents.ts — openBottomTab(tab, { impactMode? }): `dbt-ui:open-bottom-tab` window event BottomPane listens for (used by the SidePane impact card and the Git page ImpactSection)
+        impactChanges.ts — ImpactMode ('selection' | 'working' | 'branch'); describeReason(s)() labels for why a node changed; seedIdsFrom()/reasonsByNode() over ImpactChangesDto; changeErrorMessage()
+        useImpactChanges.ts — useImpactChanges(projectId, scope, base, enabled): query ['impact-changes', id, scope, base], invalidated on git_status_changed/files_changed/graph_changed
         nodeLineage.ts — buildNodeLineageGraph(graph, uid) → full `+uid+` subgraph; filterNodeLineage(lineage, uid, filter) applies Type/Materialization/Status (Type defaults to seed/source/model/exposure via defaultNodeDagFilter(); selected node always kept) and bridges edges across hidden nodes (dashed)
         useLiveRunStatuses.ts — main DAG's live run-status overlay parsed from run_log; holds each node in `running` ≥600ms (fast adapters finish in ms); owns the `statuses_changed` refetch and drops the overlay only after it lands, so nodes don't flash their pre-run color
         customCommand.ts — runCustomCommand() (POST /command, returns user-facing error or null) + per-project recent-command history in localStorage
@@ -91,7 +95,7 @@ frontend/src/
       Models.tsx         — React Flow DAG page (/projects/:projectId/models); ?model=<uid> is the selected node (clicking a node pushes it, so back/forward steps through selections; pane click clears it with replace; modifier-click multi-select doesn't touch it); uses SidePane(page="dag"); optional test coverage overlay with toggle in DagFilterBar; persists coverage state per-project in sessionStorage
       Docs.tsx           — Native docs browser (folder tree); MacroDetail includes "Try It" section with arg inputs, editable Jinja call textarea, and inline compile button
       FileExplorer/      — File browser + editor; uses SidePane(page="files") with navigation to DAG. ?path=<file> is the open file (opening a file pushes it, so back/forward covers files); inbound ?model=<uid> deep-links (or the last-open file) are resolved to ?path= with replace on arrival
-      Git/               — Source Control page (VSCode-style SCM): ChangesList, DiffView (Monaco DiffEditor), CommitBox, BranchPicker, HistoryPanel
+      Git/               — Source Control page (VSCode-style SCM): ChangesList, DiffView (Monaco DiffEditor), CommitBox, BranchPicker, HistoryPanel. The changes panel is VS Code-style collapsible sections (PaneSection.tsx: PaneSectionHeader + usePersistedOpen in localStorage): Changes (open by default, `dbt-ui:git-changes-open`) → ImpactSection (impact of uncommitted changes, open, `dbt-ui:git-impact-open`) → HistorySection "Commit History" (collapsed, resizable) → CommitBox pinned at the bottom
       Workspace/         — SQL Workspace page: file tree + Monaco editor + Compiled SQL tab + resizable results pane; SQL/dbt autocomplete; cmd+click refs navigate to File Explorer
       Environment.tsx    — Env vars + profiles
       InitScripts.tsx    — Init pipeline management
@@ -106,11 +110,11 @@ frontend/src/
         CoverageLegend.tsx — Legend panel for test coverage overlay showing 4 buckets (untested/1 test/2 tests/3+ tests); rendered as ReactFlow Panel in top-right when coverage toggle is on
         SidePane/
           index.tsx      — Right collapsible/draggable panel (horizontal drag); tabs: Properties + Profile; props: projectId, model, graph, page, navigation callbacks, onNavigateToFile
-          PropertiesTab.tsx — Model metadata; Refs/Sources + Referenced By chips (cmd+clickable → onNavigateToFile); run controls (run/build/test grid); test failures; Downstream impact card (ImpactSummary.tsx: counts + flags, Show impact / Build impacted); action buttons (incl. DocumentModelButton.tsx — "Generate docs YAML", probes the warehouse)
+          PropertiesTab.tsx — Model metadata; Refs/Sources + Referenced By chips (cmd+clickable → onNavigateToFile; Referenced By collapsed by default, header shows the count); run controls (run/build/test grid); test failures; Downstream impact card (ImpactSummary.tsx: counts + flags, Show impact / Build impacted); action buttons (incl. DocumentModelButton.tsx — "Generate docs YAML", probes the warehouse)
           ProfilePanel.tsx — Column profile stats (row count, null%, distinct, min/max, samples) via dbt show
         BottomPane/
           RunPanel.tsx     — Execution DAG (parses run_log to show real-time status); shows full-run notice when no model is selected
-          ImpactPanel.tsx — Impact tab: downstream impact of the selected node(s) (multi-selection if any, else SelectedNodeContext) toolbar (selector, counts, flags, Build impacted + Copy selector) over ImpactTable.tsx — sticky column headers (Node/Type/Materialization/Status/Tests/Column coverage/Flags) and sticky per-depth group headers
+          ImpactPanel.tsx — Impact tab: Selection / Uncommitted / Branch modes (mode + base held in BottomPane). Selection = downstream impact of the selected node(s) (multi-selection if any, else SelectedNodeContext); git modes = changed nodes from GET /impact/changes. ImpactToolbar.tsx (mode switch, base picker, selector, counts, flags, Build impacted + Copy selector) + ImpactNotices.tsx (what was compared, project-wide/unmapped files) over ImpactTable.tsx (depth-0 group "Selected"/"Changed" with per-node change reasons) — sticky column headers (Node/Type/Materialization/Status/Tests/Column coverage/Flags) and sticky per-depth group headers
           NodeDagPanel.tsx — Node DAG tab: `+node+` lineage of the selected node (from SelectedNodeContext), centered on it; Type/Materialization/Status filter dropdowns (sessionStorage `node-dag-filter-{id}`); Cmd+click a node to open in Files
           TerminalPanel.tsx — xterm.js terminals (multi-instance tabs); optimized resize with lastSizeRef to prevent spurious SIGWINCH
           LogPanel.tsx     — Project and API logs
@@ -341,8 +345,8 @@ useInitSessionEvents(sessionId, onEvent, useCallback(() => { /* on close */ }, [
 - Shared across all Project routes (Home, Models, Docs, etc.)
 - Lives in `ProjectLayout` alongside router outlet
 - Supports dragging to open/close; snaps closed below 80px threshold
-- Multi-tab interface with "Run" (DAG), "Node DAG", "Impact", "Project Logs", "API Logs", and "Terminal"
-- **Node DAG** tab (`NodeDagPanel.tsx`) shows the `+node+` lineage of the selected node, centered on it. The selection is lifted into `ProjectLayout` via `lib/selectedNodeContext.tsx`: pages call `useReportSelectedNode(uid)` (Models.tsx and FileExplorer do) and it clears on unmount; `lib/nodeLineage.ts` `buildNodeLineageGraph()` builds the subgraph (tests excluded unless the selected node is a test). Mounted only while visible so centering uses the real pane size
+- Multi-tab interface, in order: "Node DAG", "Execution DAG" (RunPanel), "Impact", "Terminal", "Project Logs", "API Logs"; Execution DAG is still the default tab, since runs open the pane to it
+- **Node DAG** tab (`NodeDagPanel.tsx`) shows the `+node+` lineage of the selected node, centered on it. The selection is lifted into `ProjectLayout` via `lib/selectedNodeContext.tsx`: pages call `useReportSelectedNode(uid)` (Models.tsx, FileExplorer and the Git page — the selected changed file's node via `lib/nodeForPath.ts` `nodeForRepoPath()`, which strips the repo-relative project subpath) and it clears on unmount; `lib/nodeLineage.ts` `buildNodeLineageGraph()` builds the subgraph (tests excluded unless the selected node is a test). Mounted only while visible so centering uses the real pane size
 - Terminal tab allows multiple instances with VSCode-style tabs on the right side
 - `RunPanel` always mounted to continuously receive `run_log` SSE events
 - `BottomPane` manages `open` state, `activeTab`, and `height`

@@ -6,13 +6,14 @@ import { LogPanel } from './LogPanel';
 import { SingleTerminal } from './TerminalPanel';
 import { NodeDagPanel } from './NodeDagPanel';
 import { ImpactPanel } from './ImpactPanel';
-import { OPEN_BOTTOM_TAB_EVENT, type BottomTabRequest } from '../../lib/bottomPaneEvents';
+import { OPEN_BOTTOM_TAB_EVENT, type OpenBottomTabDetail } from '../../lib/bottomPaneEvents';
+import type { ImpactMode } from '../../lib/impactChanges';
 
 export type PaneTabId = 'run' | 'node-dag' | 'impact' | 'project-logs' | 'api-logs' | 'terminal';
 
 const PANE_TABS: { id: PaneTabId; label: string }[] = [
-  { id: 'run', label: 'Execution DAG' },
   { id: 'node-dag', label: 'Node DAG' },
+  { id: 'run', label: 'Execution DAG' },
   { id: 'impact', label: 'Impact' },
   { id: 'terminal', label: 'Terminal' },
   { id: 'project-logs', label: 'Project Logs' },
@@ -58,6 +59,9 @@ function newTermTab(): TermTab {
 export function BottomPane({ projectId, graph, projectPath, selectedNodeId, selectedNodeIds }: BottomPaneProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<PaneTabId>('run');
+  // Impact tab source + branch base live here so they survive switching tabs
+  const [impactMode, setImpactMode] = useState<ImpactMode>('selection');
+  const [impactBase, setImpactBase] = useState<string | null>(null);
   const [height, setHeight] = useState(readStoredHeight);
   const resizing = useRef(false);
   const startY = useRef(0);
@@ -131,8 +135,9 @@ export function BottomPane({ projectId, graph, projectPath, selectedNodeId, sele
   // Other components (e.g. the SidePane impact card) can ask for a tab
   useEffect(() => {
     const onOpenTab = (e: Event) => {
-      const tab = (e as CustomEvent<BottomTabRequest>).detail;
+      const { tab, impactMode: mode } = (e as CustomEvent<OpenBottomTabDetail>).detail;
       setActiveTab(tab);
+      if (mode) setImpactMode(mode);
       setOpen(true);
     };
     window.addEventListener(OPEN_BOTTOM_TAB_EVENT, onOpenTab);
@@ -259,6 +264,10 @@ export function BottomPane({ projectId, graph, projectPath, selectedNodeId, sele
             graph={graph}
             selectedNodeId={selectedNodeId}
             selectedNodeIds={selectedNodeIds}
+            mode={impactMode}
+            onModeChange={setImpactMode}
+            base={impactBase}
+            onBaseChange={setImpactBase}
           />
         </div>
       )}

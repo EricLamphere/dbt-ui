@@ -122,7 +122,7 @@ function SectionHeader({
   onUnstageAll?: () => void;
 }) {
   return (
-    <div className="flex items-center gap-2 px-3 py-1 text-xs font-semibold uppercase tracking-widest text-zinc-500 select-none">
+    <div className="flex items-center gap-2 pl-6 pr-3 py-1 text-[11px] font-medium text-zinc-500 select-none">
       <span className="flex-1">{label}</span>
       <span className="text-zinc-600">{count}</span>
       {onStageAll && (
@@ -203,7 +203,7 @@ export function ChangesList({ changes, selectedPath, onSelect, onStage, onUnstag
       {unstaged.length > 0 && (
         <>
           <SectionHeader
-            label="Changes"
+            label="Unstaged Changes"
             count={unstaged.length}
             onStageAll={() => onStage(unstaged.map((c) => c.path))}
           />

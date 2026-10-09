@@ -529,6 +529,38 @@ export interface GitBranchesDto {
   branches: GitBranchDto[];
 }
 
+export type ImpactChangeScope = 'working' | 'branch';
+export type FileChangeKind = 'added' | 'modified' | 'deleted' | 'renamed';
+
+export interface ImpactChangedFileDto {
+  path: string;
+  change: FileChangeKind;
+}
+
+export interface ImpactChangeReasonDto {
+  kind: 'file' | 'yaml' | 'macro';
+  path: string;
+  change: FileChangeKind;
+  macro: string | null;
+}
+
+export interface ImpactChangedNodeDto {
+  unique_id: string;
+  reasons: ImpactChangeReasonDto[];
+}
+
+export interface ImpactChangesDto {
+  scope: ImpactChangeScope;
+  branch: string | null;
+  base: string | null;
+  merge_base: string | null;
+  manifest_available: boolean;
+  changed_files: number;
+  nodes: ImpactChangedNodeDto[];
+  unmapped: ImpactChangedFileDto[];
+  project_wide: ImpactChangedFileDto[];
+}
+
 export interface GitCommitLogEntry {
   hash: string;
   short_hash: string;
@@ -835,6 +867,14 @@ export const api = {
       get<GitCommitLogDto>(
         `/projects/${projectId}/git/log?limit=${limit}${path ? `&path=${encodeURIComponent(path)}` : ''}`
       ),
+  },
+  impact: {
+    /** Changed files (uncommitted, or branch vs `base`) mapped to manifest nodes. */
+    changes: (projectId: number, scope: ImpactChangeScope, base?: string) => {
+      const p = new URLSearchParams({ scope });
+      if (base) p.set('base', base);
+      return get<ImpactChangesDto>(`/projects/${projectId}/impact/changes?${p}`);
+    },
   },
   settings: {
     get: () => get<SettingsDto>('/settings'),

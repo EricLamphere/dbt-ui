@@ -10,6 +10,10 @@ interface ImpactTableProps {
   groups: ImpactLevel[];
   coverage: CoverageMap;
   onNodeClick: (e: MouseEvent, uniqueId: string) => void;
+  /** Title of the depth-0 group ("Selected" or "Changed"). */
+  seedLabel: string;
+  /** Why each depth-0 node counts as changed, shown after its name. */
+  reasons?: ReadonlyMap<string, string>;
 }
 
 const GRID = 'grid grid-cols-[minmax(14rem,2fr)_5.5rem_7.5rem_6rem_6.5rem_8.5rem_minmax(9rem,1.5fr)] items-center gap-4 px-4';
@@ -29,8 +33,8 @@ const COVERAGE_TYPES = new Set(['model', 'snapshot']);
 /** Exposures aren't run, so their status is meaningless; their type already says "exposure". */
 const isExposure = (item: ImpactNode) => item.node.resource_type === 'exposure';
 
-function groupTitle(depth: number): { label: string; hint: string } {
-  if (depth === 0) return { label: 'Selected', hint: '' };
+function groupTitle(depth: number, seedLabel: string): { label: string; hint: string } {
+  if (depth === 0) return { label: seedLabel, hint: '' };
   if (depth === 1) return { label: 'Depth 1', hint: 'direct children' };
   return { label: `Depth ${depth}`, hint: `${depth} hops downstream` };
 }
@@ -79,7 +83,12 @@ function CoverageCell({ item, coverage }: { item: ImpactNode; coverage: Coverage
   );
 }
 
-function ImpactRow({ item, coverage, onNodeClick }: { item: ImpactNode } & Omit<ImpactTableProps, 'groups'>) {
+function ImpactRow({ item, coverage, onNodeClick, reason }: {
+  item: ImpactNode;
+  coverage: CoverageMap;
+  onNodeClick: ImpactTableProps['onNodeClick'];
+  reason?: string;
+}) {
   const { node } = item;
   const rowFlags = item.flags.filter((f) => f !== 'exposure');
   return (
@@ -93,6 +102,7 @@ function ImpactRow({ item, coverage, onNodeClick }: { item: ImpactNode } & Omit<
         >
           {node.source_name ? `${node.source_name}.${node.name}` : node.name}
         </button>
+        {reason && <span className="text-[11px] text-amber-300/70 truncate shrink-[2]" title={reason}>{reason}</span>}
       </span>
       <span className={`truncate ${isExposure(item) ? 'text-purple-300' : 'text-gray-400'}`}>{node.resource_type}</span>
       <span className="text-gray-400 truncate">{node.materialized ?? <Muted />}</span>
@@ -106,8 +116,8 @@ function ImpactRow({ item, coverage, onNodeClick }: { item: ImpactNode } & Omit<
   );
 }
 
-function GroupHeader({ depth, count }: { depth: number; count: number }) {
-  const { label, hint } = groupTitle(depth);
+function GroupHeader({ depth, count, seedLabel }: { depth: number; count: number; seedLabel: string }) {
+  const { label, hint } = groupTitle(depth, seedLabel);
   return (
     <div className="sticky top-7 z-[5] flex items-center gap-2 h-7 px-4 bg-surface-panel border-b border-gray-800 select-none">
       <span className={`w-0.5 h-3 rounded-full ${depth === 0 ? 'bg-brand-400' : 'bg-gray-600'}`} />
@@ -118,7 +128,7 @@ function GroupHeader({ depth, count }: { depth: number; count: number }) {
   );
 }
 
-export function ImpactTable({ groups, coverage, onNodeClick }: ImpactTableProps) {
+export function ImpactTable({ groups, coverage, onNodeClick, seedLabel, reasons }: ImpactTableProps) {
   return (
     <div className="min-w-[60rem]">
       <div className={`${GRID} sticky top-0 z-10 h-7 bg-surface-panel border-b border-gray-800 text-[10px] uppercase tracking-wider font-medium text-gray-500 select-none`}>
@@ -126,9 +136,15 @@ export function ImpactTable({ groups, coverage, onNodeClick }: ImpactTableProps)
       </div>
       {groups.map(({ depth, nodes }) => (
         <div key={depth}>
-          <GroupHeader depth={depth} count={nodes.length} />
+          <GroupHeader depth={depth} count={nodes.length} seedLabel={seedLabel} />
           {nodes.map((item) => (
-            <ImpactRow key={item.node.unique_id} item={item} coverage={coverage} onNodeClick={onNodeClick} />
+            <ImpactRow
+              key={item.node.unique_id}
+              item={item}
+              coverage={coverage}
+              onNodeClick={onNodeClick}
+              reason={depth === 0 ? reasons?.get(item.node.unique_id) : undefined}
+            />
           ))}
         </div>
       ))}

@@ -238,3 +238,14 @@ def test_parse_porcelain_v2_staged(git_repo: Path) -> None:
     _, changes = parse_porcelain_v2(result.stdout)
     staged = [c for c in changes if c.staged]
     assert any(c.path == "models/base.sql" for c in staged)
+
+
+def test_parse_name_status_z() -> None:
+    from app.git.repo import parse_name_status_z
+    out = "M\0models/a.sql\0A\0models/new file.sql\0D\0seeds/old.csv\0"
+    assert parse_name_status_z(out) == [("M", "models/a.sql"), ("A", "models/new file.sql"), ("D", "seeds/old.csv")]
+
+
+def test_parse_name_status_z_empty() -> None:
+    from app.git.repo import parse_name_status_z
+    assert parse_name_status_z("") == []

@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { BookOpen, Play, Hammer, FlaskConical, Layers, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { BookOpen, ChevronRight, Play, Hammer, FlaskConical, Layers, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, type ModelNode, type GraphDto, type RunOpts } from '../../../../lib/api';
 import { DocumentModelButton, canDocument } from './DocumentModelButton';
 import { ImpactSummary } from './ImpactSummary';
@@ -228,6 +228,8 @@ export function PropertiesTab({
 }: PropertiesTabProps) {
   const [loading, setLoading] = useState<RunCommand | null>(null);
   const [opts, dispatchOpts] = useReducer(runOptionsReducer, undefined, runOptionsInitial);
+  // Collapsed by default: heavily-used models can have dozens of children. Stays as set while switching nodes.
+  const [referencedByOpen, setReferencedByOpen] = useState(false);
 
   const qc = useQueryClient();
   const [descEditing, setDescEditing] = useState(false);
@@ -434,28 +436,41 @@ export function PropertiesTab({
                 </Row>
               )}
               {downstreamNodes.length > 0 && (
-                <Row label="Referenced By">
-                  <div className="flex flex-wrap gap-1 mt-0.5">
-                    {downstreamNodes.map((n) => (
-                      <button
-                        key={n.unique_id}
-                        title={n.original_file_path ? 'Cmd+click to open in Files' : n.name}
-                        onClick={(e) => {
-                          if ((e.metaKey || e.ctrlKey) && n.original_file_path && onNavigateToFile) {
-                            onNavigateToFile(n.original_file_path);
-                          }
-                        }}
-                        className={`inline-block text-[10px] px-1.5 py-0.5 rounded font-mono border transition-colors ${
-                          n.original_file_path && onNavigateToFile
-                            ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-brand-500 hover:text-brand-300 cursor-default mod:cursor-pointer'
-                            : 'bg-surface-elevated text-gray-500 border-transparent cursor-default'
-                        }`}
-                      >
-                        {n.name}
-                      </button>
-                    ))}
-                  </div>
-                </Row>
+                <div className="flex flex-col gap-0.5">
+                  <button
+                    onClick={() => setReferencedByOpen((o) => !o)}
+                    aria-expanded={referencedByOpen}
+                    className="flex items-center gap-1 text-[10px] uppercase tracking-wider text-gray-600 font-medium hover:text-gray-400 transition-colors"
+                  >
+                    <ChevronRight className={`w-3 h-3 transition-transform ${referencedByOpen ? 'rotate-90' : ''}`} />
+                    Referenced By
+                    <span className="px-1.5 rounded-full bg-gray-800 normal-case tracking-normal tabular-nums text-gray-400">
+                      {downstreamNodes.length}
+                    </span>
+                  </button>
+                  {referencedByOpen && (
+                    <div className="flex flex-wrap gap-1 mt-0.5">
+                      {downstreamNodes.map((n) => (
+                        <button
+                          key={n.unique_id}
+                          title={n.original_file_path ? 'Cmd+click to open in Files' : n.name}
+                          onClick={(e) => {
+                            if ((e.metaKey || e.ctrlKey) && n.original_file_path && onNavigateToFile) {
+                              onNavigateToFile(n.original_file_path);
+                            }
+                          }}
+                          className={`inline-block text-[10px] px-1.5 py-0.5 rounded font-mono border transition-colors ${
+                            n.original_file_path && onNavigateToFile
+                              ? 'bg-gray-700 text-gray-300 border-gray-600 hover:border-brand-500 hover:text-brand-300 cursor-default mod:cursor-pointer'
+                              : 'bg-surface-elevated text-gray-500 border-transparent cursor-default'
+                          }`}
+                        >
+                          {n.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
             </>
           );

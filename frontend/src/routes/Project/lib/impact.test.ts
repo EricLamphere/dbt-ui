@@ -154,6 +154,13 @@ describe('buildImpactSelector', () => {
     const seeds = g.nodes.filter((n) => ['model.p.stg', 'source.p.raw_orders'].includes(n.unique_id));
     expect(buildImpactSelector([...seeds, seeds[0]])).toBe('source:shop.raw_orders+ stg+');
   });
+
+  it('leaves out exposures, which dbt build has nothing to build for', () => {
+    const g = sampleGraph();
+    const seeds = g.nodes.filter((n) => ['model.p.int', 'exposure.p.dash'].includes(n.unique_id));
+    expect(buildImpactSelector(seeds)).toBe('int+');
+    expect(buildImpactSelector(seeds.filter((n) => n.resource_type === 'exposure'))).toBe('');
+  });
 });
 
 describe('formatImpactCounts', () => {

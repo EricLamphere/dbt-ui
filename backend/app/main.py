@@ -18,6 +18,7 @@ from app.api import events as events_api
 from app.api import files as files_api
 from app.api import global_profiles as global_profiles_api
 from app.api import health as health_api
+from app.api import impact as impact_api
 from app.api import init as init_api
 from app.api import license as license_api
 from app.api import logs as logs_api
@@ -80,6 +81,7 @@ app.include_router(debug_api.router)
 app.include_router(drift_api.router)
 app.include_router(freshness_api.router)
 app.include_router(column_lineage_api.router)
+app.include_router(impact_api.router)
 app.include_router(runs_api.router)
 app.include_router(sql_api.router)
 app.include_router(init_api.router)

@@ -65,6 +65,7 @@ When handling SSE events, invalidate the relevant query:
 | `docs_generated` | `['docs-status', projectId]` |
 | `init_pipeline_finished` | `['project', projectId]`, `['init-steps', projectId]` (init status/logs are now persisted to the DB, so the cached project + step rows need to catch up once the run settles; the UI itself still updates live from `init_step` events during the run) |
 | `freshness_finished` | `['freshness-latest', projectId]` |
+| `git_status_changed`, `files_changed`, `graph_changed` | `['impact-changes', projectId]` (via `lib/useImpactChanges.ts`) |
 
 When adding a new event type that signals stale data, add an entry here.
 
