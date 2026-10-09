@@ -28,7 +28,6 @@ tasks:
     cmds:
       - .venv/bin/uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
     env:
-      DBT_UI_DATA_DIR: "{{.ROOT_DIR}}/data"
       DBT_UI_FRONTEND_DIST: "{{.ROOT_DIR}}/frontend/dist"
 
   ensure:frontend:

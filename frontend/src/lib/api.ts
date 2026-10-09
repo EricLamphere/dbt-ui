@@ -540,7 +540,6 @@ export interface GitAcceptedDto {
 
 export interface SettingsDto {
   dbt_projects_path: string | null;
-  data_dir: string | null;
   log_level: string | null;
   global_requirements_path: string | null;
   theme: string | null;
@@ -583,7 +582,6 @@ export interface PythonInterpreterDto {
 
 export interface SettingsUpdateDto {
   dbt_projects_path?: string;
-  data_dir?: string;
   log_level?: string;
   global_requirements_path?: string;
   theme?: string;

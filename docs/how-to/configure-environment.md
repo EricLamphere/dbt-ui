@@ -95,7 +95,6 @@ Global settings are shown for reference but can only be edited in the Global Set
 
 - **DBT_UI_PROJECTS_PATH** — the workspace directory scanned for dbt projects
 - **DBT_UI_GLOBAL_REQUIREMENTS_PATH** — a global `requirements.txt` installed for every project
-- **DBT_UI_DATA_DIR** — where the SQLite database is stored
 - **DBT_UI_LOG_LEVEL** — logging verbosity
 - **DBT_UI_PYTHON_PATH** — the Python interpreter dbt runs on (see below)
 

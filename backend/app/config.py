@@ -27,7 +27,10 @@ def _bundle_dir() -> Path:
 
 def _default_data_dir() -> Path:
     if not _is_frozen():
-        return Path("data")
+        # Dev mode: always <repo>/data (gitignored), regardless of the cwd the
+        # backend is launched from. The desktop app passes its own location
+        # (Tauri's app data dir) via DBT_UI_DATA_DIR — see src-tauri/src/lib.rs.
+        return Path(__file__).resolve().parents[2] / "data"
     try:
         from platformdirs import user_data_dir
 
@@ -47,9 +50,8 @@ def _default_frontend_dist() -> Path:
 
 def _default_dbt_venv_dir() -> Path:
     if not _is_frozen():
-        # Dev mode: <repo>/data/dbt-venv — the same dir `task dev:backend` uses
-        # as DBT_UI_DATA_DIR (gitignored, and outside backend/ so uvicorn
-        # --reload doesn't watch it). Deliberately NOT backend/.venv: dbt gets
+        # Dev mode: <repo>/data/dbt-venv — inside the dev data dir (gitignored,
+        # and outside backend/ so uvicorn --reload doesn't watch it). Deliberately NOT backend/.venv: dbt gets
         # its own venv, as in the packaged app, so its interpreter can be
         # switched via the python_path setting without touching the venv the
         # backend itself runs from, and dbt adapters never clash with backend deps.

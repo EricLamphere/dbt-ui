@@ -58,7 +58,7 @@ The rules that matter most:
 |---|---|---|
 | `DBT_UI_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects (overridable in the UI) |
 | `DBT_UI_GLOBAL_REQUIREMENTS_PATH` | _(none)_ | `requirements.txt` installed into the dbt venv on every project open |
-| `DBT_UI_DATA_DIR` | `data/` (dev) / OS user-data dir (desktop app) | SQLite storage directory |
+| `DBT_UI_DATA_DIR` | `<repo>/data` (dev) / `~/Library/Application Support/com.dbt-ui.desktop` (desktop app) | App storage (SQLite DB, dbt venv, docs, logs). Set automatically — not configurable in the UI |
 | `DBT_UI_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 | `POLAR_USE_SANDBOX` | `true` | Which Polar environment (sandbox/production) license checks talk to |
 | `POLAR_SANDBOX_ORGANIZATION_ID` / `POLAR_PRODUCTION_ORGANIZATION_ID` | _(none)_ | Polar org id used to validate license keys (not a secret) |

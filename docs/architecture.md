@@ -771,7 +771,7 @@ Behavior:
 | Variable | Default | Description |
 |---|---|---|
 | `DBT_UI_PROJECTS_PATH` | _(none)_ | Root directory scanned for dbt projects; overridable via Global Settings UI |
-| `DBT_UI_DATA_DIR` | `data/` (dev) / OS user-data dir (packaged app, via `platformdirs`) | Directory for SQLite database, logs, and (packaged app only) the dbt venv |
+| `DBT_UI_DATA_DIR` | `<repo>/data` (dev) / `~/Library/Application Support/com.dbt-ui.desktop` (desktop app, passed in by the Tauri shell) | App storage: SQLite database, dbt venv, generated docs, API logs. Not a user-facing setting — the dev default is fixed and the desktop app sets it from Tauri's `app_data_dir()` |
 | `DBT_UI_DATABASE_URL` | _(derived from DATA_DIR)_ | Override SQLite path |
 | `DBT_UI_LOG_LEVEL` | `INFO` | structlog level |
 | `DBT_UI_FRONTEND_DIST` | `frontend/dist` (dev) / resolved next to the packaged binary | Directory the SPA is served from — see `_mount_spa()` |
@@ -792,7 +792,6 @@ Global settings (stored in `app_settings` table, set via UI):
 |---|---|
 | `dbt_projects_path` | Overrides `DBT_UI_PROJECTS_PATH` |
 | `global_requirements_path` | Absolute path to a `requirements.txt` installed into the dbt venv on every project open |
-| `data_dir` | Overrides `DBT_UI_DATA_DIR` |
 | `log_level` | Overrides `DBT_UI_LOG_LEVEL` |
 | `python_path` | Python 3.11+ interpreter the dbt venv is built from (UI label `DBT_UI_PYTHON_PATH`). Auto-detected on first launch; changing it rebuilds the venv. Not editable in a source checkout |
 
