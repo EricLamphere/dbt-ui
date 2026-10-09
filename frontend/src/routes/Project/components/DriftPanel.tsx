@@ -1,9 +1,10 @@
 import { useCallback, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, FilePlus2, Loader2 } from 'lucide-react';
 import { api, type DriftSnapshot, type ModelDriftResult, type ColumnDrift } from '../../../lib/api';
 import { useProjectEvents } from '../../../lib/sse';
 import { OPEN_IN_FILES_HOVER_CLS, OPEN_IN_FILES_TITLE, useOpenInFiles } from '../lib/openInFiles';
+import { describeDocumentResult, documentErrorMessage } from '../lib/documentModel';
 
 interface DriftPanelProps {
   projectId: number;
@@ -30,6 +31,10 @@ function relativeTime(iso: string): string {
   return `${hrs}h ago`;
 }
 
+function isWarehouseOnly(col: ColumnDrift): boolean {
+  return !col.in_manifest && col.in_warehouse;
+}
+
 function columnDriftLabel(col: ColumnDrift): string {
   if (col.type_mismatch) return 'type mismatch';
   if (col.in_manifest && !col.in_warehouse) return 'manifest only';
@@ -53,18 +58,63 @@ function matchesFilter(result: ModelDriftResult, filter: FilterKey): boolean {
   return false;
 }
 
+interface DocumentColumnsButtonProps {
+  projectId: number;
+  uniqueId: string;
+  columns: string[];
+  onDocumented: (columns: string[]) => void;
+}
+
+/** Adds the model's warehouse-only columns to its schema YAML. */
+function DocumentColumnsButton({ projectId, uniqueId, columns, onDocumented }: DocumentColumnsButtonProps) {
+  const mutation = useMutation({
+    mutationFn: () => api.models.document(projectId, uniqueId, columns),
+    onSuccess: () => onDocumented(columns),
+  });
+
+  return (
+    <div className="flex items-center gap-2 pt-1.5">
+      {columns.length > 0 && (
+        <button
+          type="button"
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+          title="Add these columns to the model's schema YAML"
+          className="flex items-center gap-1.5 px-2 py-1 text-[10px] rounded border border-gray-700 bg-surface-elevated text-gray-300 hover:border-brand-600 hover:text-brand-300 transition-colors disabled:opacity-40"
+        >
+          {mutation.isPending ? <Loader2 className="w-3 h-3 animate-spin" /> : <FilePlus2 className="w-3 h-3" />}
+          Document {columns.length} warehouse-only column{columns.length !== 1 ? 's' : ''}
+        </button>
+      )}
+      {mutation.isSuccess && (
+        <span className="text-[10px] text-emerald-400 truncate">{describeDocumentResult(mutation.data)}</span>
+      )}
+      {mutation.isError && (
+        <span className="text-[10px] text-red-400 break-all">{documentErrorMessage(mutation.error)}</span>
+      )}
+    </div>
+  );
+}
+
 interface ModelDriftRowProps {
+  projectId: number;
   result: ModelDriftResult;
   fileNav: ReturnType<typeof useOpenInFiles>;
 }
 
-function ModelDriftRow({ result, fileNav }: ModelDriftRowProps) {
+function ModelDriftRow({ projectId, result, fileNav }: ModelDriftRowProps) {
   const [open, setOpen] = useState(true);
+  // Columns documented from this row; the snapshot only catches up on the next scan
+  const [documented, setDocumented] = useState<ReadonlySet<string>>(new Set());
   const canOpen = fileNav.canOpen(result.unique_id);
 
   const driftCols = result.columns.filter(
     (c) => !c.in_manifest || !c.in_warehouse || c.type_mismatch
   );
+  const undocumentedCols = driftCols
+    .filter((c) => isWarehouseOnly(c) && !documented.has(c.name))
+    .map((c) => c.name);
+  const hasWarehouseOnly = driftCols.some(isWarehouseOnly);
 
   const summary = result.error
     ? 'error'
@@ -103,14 +153,28 @@ function ModelDriftRow({ result, fileNav }: ModelDriftRowProps) {
           {result.error ? (
             <p className="text-[10px] text-red-400 font-mono break-all">{result.error}</p>
           ) : (
-            driftCols.map((col) => (
-              <div key={col.name} className="flex items-center gap-2 py-0.5">
-                <span className="text-[10px] font-mono text-gray-400 flex-1 truncate">{col.name}</span>
-                <span className={`text-[10px] shrink-0 ${columnDriftColor(col)}`}>
-                  {columnDriftLabel(col)}
-                </span>
-              </div>
-            ))
+            <>
+              {driftCols.map((col) => (
+                <div key={col.name} className="flex items-center gap-2 py-0.5">
+                  <span className="text-[10px] font-mono text-gray-400 flex-1 truncate">{col.name}</span>
+                  {documented.has(col.name) ? (
+                    <span className="text-[10px] shrink-0 text-emerald-400">documented</span>
+                  ) : (
+                    <span className={`text-[10px] shrink-0 ${columnDriftColor(col)}`}>
+                      {columnDriftLabel(col)}
+                    </span>
+                  )}
+                </div>
+              ))}
+              {hasWarehouseOnly && (
+                <DocumentColumnsButton
+                  projectId={projectId}
+                  uniqueId={result.unique_id}
+                  columns={undocumentedCols}
+                  onDocumented={(cols) => setDocumented((prev) => new Set([...prev, ...cols]))}
+                />
+              )}
+            </>
           )}
         </div>
       )}
@@ -252,7 +316,7 @@ export default function DriftPanel({ projectId }: DriftPanelProps) {
                   {filteredResults.length === 0 ? (
                     <p className="text-xs text-gray-600">No models match this filter.</p>
                   ) : (
-                    filteredResults.map((r) => <ModelDriftRow key={r.unique_id} result={r} fileNav={fileNav} />)
+                    filteredResults.map((r) => <ModelDriftRow key={r.unique_id} projectId={projectId} result={r} fileNav={fileNav} />)
                   )}
                 </div>
               </>

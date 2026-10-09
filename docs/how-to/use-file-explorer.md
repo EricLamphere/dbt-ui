@@ -37,6 +37,8 @@ When a model is open in the editor, the **SidePane** on the right shows the mode
 
 Click **Open in DAG** in the SidePane to navigate to the Models page with that model pre-selected.
 
+Click **Generate docs YAML** to add the model and its warehouse columns to the schema YAML in its folder (see [navigate-dag.md](navigate-dag.md#selecting-a-model) for how the file is chosen).
+
 ## Running a model from the File Explorer
 
 With a model open, use the SidePane run grid to execute `dbt run`, `dbt build`, or `dbt test` with upstream/only/downstream selection. This is identical to running from the DAG.

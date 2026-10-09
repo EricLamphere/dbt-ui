@@ -2,6 +2,7 @@ import { useEffect, useReducer, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Play, Hammer, FlaskConical, Layers, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, type ModelNode, type GraphDto, type RunOpts } from '../../../../lib/api';
+import { DocumentModelButton, canDocument } from './DocumentModelButton';
 
 type RunCommand = 'run' | 'build' | 'test';
 
@@ -541,6 +542,9 @@ export function PropertiesTab({
           <BookOpen className="w-4 h-4" />
           View docs
         </button>
+        {canDocument(model) && (
+          <DocumentModelButton key={model.unique_id} projectId={projectId} model={model} />
+        )}
         {model.resource_type === 'model' && model.original_file_path && (
           <button
             onClick={onDelete}

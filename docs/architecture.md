@@ -49,6 +49,7 @@ dbt-ui/
 │   │   │   ├── events.py            # /api/projects/{id}/events — SSE endpoint
 │   │   │   ├── debug.py             # /api/projects/{id}/debug — runs dbt debug, parses output into structured checks
 │   │   │   ├── drift.py             # /api/projects/{id}/drift — schema drift check (dbt show per model vs manifest columns)
+│   │   │   ├── document.py          # /api/projects/{id}/models/{uid}/document — docs generator (stub `- name:` entries in schema YAML)
 │   │   │   ├── freshness.py         # /api/projects/{id}/freshness — dbt source freshness, backgrounded snapshot
 │   │   │   ├── column_lineage.py    # /api/projects/{id}/column-lineage — backgrounded, parallel column-level lineage scan
 │   │   │   └── health.py            # /api/health
@@ -66,6 +67,8 @@ dbt-ui/
 │   │   │   ├── init_scripts.py      # Read/write init/*.sh custom scripts
 │   │   │   ├── debug_parser.py      # Parse dbt debug stdout → structured DebugResult with per-check status
 │   │   │   ├── drift.py             # diff_columns / is_eligible_for_drift_check — column drift helpers
+│   │   │   ├── probe.py             # probe_warehouse_columns() — actual column names via dbt show --inline (drift + docs generator)
+│   │   │   ├── schema_yaml.py       # document_node() — splices `- name:` entries into the node's schema YAML without re-serialising it
 │   │   │   ├── column_lineage.py    # SQL-first column lineage (sqlglot); LineageJob prep + trace_job (poolable worker fn)
 │   │   │   ├── profile.py           # Parse dbt show --output json output into column profile stats
 │   │   │   ├── show_parser.py       # parse_show_json() — handles dbt 1.5+ and 1.11+ show output formats
@@ -309,6 +312,7 @@ POST   /api/projects/{id}/compile
 GET    /api/projects/{id}/models/{unique_id}/compiled    on-demand compile + return compiled SQL
 POST   /api/projects/{id}/models/{unique_id}/show        run dbt show, return rows
 POST   /api/projects/{id}/models/{unique_id}/profile    run dbt show (full table), return column profile stats
+POST   /api/projects/{id}/models/{unique_id}/document   add `- name:` entries for the node + columns to its schema YAML (body `{columns}`; null → probe the warehouse); then dbt compile
 GET    /api/projects/{id}/models/{unique_id}/sql
 PUT    /api/projects/{id}/models/{unique_id}/sql
 POST   /api/projects/{id}/column-lineage/start            start async column lineage scan (202, or 200 if a fresh snapshot already exists); returns ColumnLineageSnapshot — Pro feature, 403 if not entitled

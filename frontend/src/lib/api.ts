@@ -195,6 +195,13 @@ export interface ModelDriftResult {
   has_drift: boolean;
 }
 
+export interface DocumentResultDto {
+  path: string;
+  created_file: boolean;
+  added_entry: boolean;
+  added_columns: string[];
+}
+
 export interface DriftSnapshot {
   id: number;
   project_id: number;
@@ -637,6 +644,9 @@ export const api = {
       post<ProfileResponse>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/profile`),
     patchDescription: (projectId: number, uniqueId: string, description: string) =>
       patch<{ ok: boolean }>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/description`, { description }),
+    /** Add stub `- name:` docs entries; omit `columns` to use the node's warehouse columns. */
+    document: (projectId: number, uniqueId: string, columns?: string[]) =>
+      post<DocumentResultDto>(`/projects/${projectId}/models/${encodeURIComponent(uniqueId)}/document`, { columns: columns ?? null }),
   },
   runs: {
     run: (projectId: number, model: string, mode: string, opts?: RunOpts, select?: string) =>

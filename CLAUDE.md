@@ -26,7 +26,7 @@ working on Pro features or updating screenshots/gallery content.
 
 ```
 backend/app/
-  api/            — FastAPI routers, one file per resource (projects, models, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git, debug, drift, freshness, column_lineage, license)
+  api/            — FastAPI routers, one file per resource (projects, models, document, runs, files, docs, init, env, sql, terminal, settings, global_profiles, git, debug, drift, freshness, column_lineage, license)
   db/
     models.py     — All SQLAlchemy models (12 tables)
     engine.py     — get_session dependency
@@ -41,6 +41,8 @@ backend/app/
     debug_parser.py — parse_debug_output() → structured DebugResult from dbt debug stdout
     custom_command.py — parse_custom_command() → ParsedCommand; shlex-tokenizes user-entered dbt commands, blocks `init`/`docs serve`, detects --select/--target/--profiles-dir
     drift.py      — diff_columns() + is_eligible_for_drift_check() — column schema diff helpers
+    probe.py      — probe_warehouse_columns() — a built node's real column names via `dbt show --inline`; shared by drift and the docs generator
+    schema_yaml.py — document_node() — docs generator: adds `- name:` entries for a model/seed/snapshot + columns to its schema YAML (patch_path file → folder YAML with the resource key → new schema.yml). Never re-serialises: ruamel.yaml only locates line positions, new lines are spliced in matching the file's indent style, and the result is re-parsed and verified before writing
     column_lineage.py — dbt-ui Pro feature (gated via app/licensing). Public shim only: defines the real, always-importable ColumnRef/LineageJob dataclasses (required at import time by api/column_lineage.py) and lazily delegates prepare_lineage_jobs()/trace_job()/build_column_lineage() to the private `dbt_ui_pro` package (separate repo), raising ColumnLineageUnavailable if it isn't installed. The actual sqlglot-based tracing algorithm (case-insensitive matching, UNPIVOT stripping, etc.) lives in dbt-ui-pro, not this repo.
   licensing/
     polar_client.py — thin async httpx client wrapping Polar's license-key validate/activate endpoints (sandbox or production per Settings.polar_use_sandbox)
@@ -95,13 +97,13 @@ frontend/src/
         NavRail.tsx      — Collapsible left nav sidebar; persists collapsed state in localStorage; resizable when expanded; never re-opens on navigation
         ProjectNav.tsx   — Nav items (DAG/Files/Docs/Workspace/Git/Environment/Init/Health); icon-only when NavRail collapsed
         HealthCheckPanel.tsx — Runs dbt debug; renders structured per-check pass/fail table + version info
-        DriftPanel.tsx   — Triggers schema drift scan; renders per-model column diff accordion
+        DriftPanel.tsx   — Triggers schema drift scan; renders per-model column diff accordion; "Document N warehouse-only columns" button per model (POST /document)
         FreshnessPanel.tsx — Triggers dbt source freshness; renders per-source collapsible groups with age, thresholds, and pass/warn/error badges; resizable columns; filter pills
         FilterDropdown.tsx — Multi-select checkbox dropdown shared by DagFilterBar and the bottom pane's Node DAG
         CoverageLegend.tsx — Legend panel for test coverage overlay showing 4 buckets (untested/1 test/2 tests/3+ tests); rendered as ReactFlow Panel in top-right when coverage toggle is on
         SidePane/
           index.tsx      — Right collapsible/draggable panel (horizontal drag); tabs: Properties + Profile; props: projectId, model, graph, page, navigation callbacks, onNavigateToFile
-          PropertiesTab.tsx — Model metadata; Refs/Sources + Referenced By chips (cmd+clickable → onNavigateToFile); run controls (run/build/test grid); test failures; action buttons
+          PropertiesTab.tsx — Model metadata; Refs/Sources + Referenced By chips (cmd+clickable → onNavigateToFile); run controls (run/build/test grid); test failures; action buttons (incl. DocumentModelButton.tsx — "Generate docs YAML", probes the warehouse)
           ProfilePanel.tsx — Column profile stats (row count, null%, distinct, min/max, samples) via dbt show
         BottomPane/
           RunPanel.tsx     — Execution DAG (parses run_log to show real-time status); shows full-run notice when no model is selected

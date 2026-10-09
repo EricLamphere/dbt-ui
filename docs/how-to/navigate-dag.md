@@ -25,7 +25,9 @@ Click any node to open the **SidePane** on the right. The SidePane shows:
 - Tags and description (from schema.yml)
 - Current run status and last message
 - Run controls (3×3 grid of run/build/test × upstream/only/downstream)
-- Action buttons: Edit in Files, Open in DAG, View Docs, Delete
+- Action buttons: Edit in Files, Open in DAG, View Docs, Generate docs YAML, Delete
+
+**Generate docs YAML** reads the node's actual columns from the warehouse (so it must be built) and adds `- name:` entries for the node and any undocumented columns to its schema YAML — the file it's already documented in, else a YAML in its folder that has a `models:` (or `seeds:`/`snapshots:`) list, else a new `schema.yml`. Only lines are added; existing content, comments and indentation are untouched. The manifest recompiles afterwards so the SidePane picks up the new columns.
 
 ## Navigating the graph
 

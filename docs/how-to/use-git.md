@@ -52,7 +52,7 @@ Click the **branch chip** (showing the current branch name) to open the branch p
 
 ## Commit History
 
-At the bottom of the changes panel, click **History** to expand the commit log. The log shows the 50 most recent commits (hash, author, date, message). If a file is selected in the diff view, the log filters to commits that touched that file.
+At the bottom of the changes panel, click **History** to expand the commit log. The log shows the 200 most recent commits (hash, author, date, message) and refreshes after commits, pulls and branch switches. While a file is selected, an **All / <file>** toggle lets you narrow the log to commits that touched that file (it defaults to All). Drag the top edge of the History section to resize it (double-click to reset); the size and open state are remembered.
 
 ## Keyboard Shortcuts
 

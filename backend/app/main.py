@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api import column_lineage as column_lineage_api
 from app.api import debug as debug_api
 from app.api import docs as docs_api
+from app.api import document as document_api
 from app.api import drift as drift_api
 from app.api import freshness as freshness_api
 from app.api import env as env_api
@@ -74,6 +75,7 @@ app.include_router(settings_api.router)
 app.include_router(setup_api.router)
 app.include_router(projects_api.router)
 app.include_router(models_api.router)
+app.include_router(document_api.router)
 app.include_router(debug_api.router)
 app.include_router(drift_api.router)
 app.include_router(freshness_api.router)

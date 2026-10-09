@@ -8,7 +8,7 @@ import { ChangesList } from './components/ChangesList';
 import { CommitBox } from './components/CommitBox';
 import { DiffView } from './components/DiffView';
 import { BranchPicker } from './components/BranchPicker';
-import { HistoryPanel } from './components/HistoryPanel';
+import { HistorySection } from './components/HistorySection';
 
 export default function GitPage() {
   const { projectId } = useParams<{ projectId: string }>();
@@ -22,7 +22,6 @@ export default function GitPage() {
   const [changesWidth, setChangesWidth] = useState(() => {
     try { const v = parseInt(localStorage.getItem('dbt-ui:git-changes-width') ?? '', 10); return !isNaN(v) && v >= 180 && v <= 600 ? v : 280; } catch { return 280; }
   });
-  const [historyOpen, setHistoryOpen] = useState(false);
   const changesResizing = useRef(false);
   const changesWidthRef = useRef(changesWidth);
 
@@ -85,6 +84,7 @@ export default function GitPage() {
     if (event.type === 'git_status_changed') {
       qc.invalidateQueries({ queryKey: ['git', 'status', id] });
       qc.invalidateQueries({ queryKey: ['git', 'branches', id] });
+      qc.invalidateQueries({ queryKey: ['git', 'log', id] });
     }
     if (event.type === 'git_log') {
       const data = event.data as { line?: string };
@@ -98,6 +98,7 @@ export default function GitPage() {
       setSyncing(false);
       qc.invalidateQueries({ queryKey: ['git', 'status', id] });
       qc.invalidateQueries({ queryKey: ['git', 'branches', id] });
+      qc.invalidateQueries({ queryKey: ['git', 'log', id] });
     }
   }, [id, qc]));
 
@@ -200,7 +201,7 @@ export default function GitPage() {
 
         {status && (
           <>
-            <div className="flex-1 overflow-y-auto">
+            <div className="flex-1 min-h-0 overflow-y-auto">
               <ChangesList
                 changes={changes}
                 selectedPath={selectedPath}
@@ -212,23 +213,7 @@ export default function GitPage() {
               />
             </div>
 
-            {/* History toggle */}
-            <div className="shrink-0 border-t border-zinc-800">
-              <button
-                onClick={() => setHistoryOpen((o) => !o)}
-                className="w-full flex items-center gap-2 px-3 py-1.5 text-xs text-zinc-500 hover:text-gray-300 hover:bg-surface-elevated"
-              >
-                <svg className={`w-3 h-3 transition-transform ${historyOpen ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                </svg>
-                History
-              </button>
-              {historyOpen && (
-                <div className="border-t border-zinc-800 max-h-48 overflow-y-auto">
-                  <HistoryPanel projectId={id} selectedPath={selectedPath} />
-                </div>
-              )}
-            </div>
+            <HistorySection projectId={id} selectedPath={selectedPath} />
 
             <CommitBox
               projectId={id}

@@ -12,8 +12,7 @@ from app.db.engine import get_session
 from app.db.models import DriftSnapshot, Project
 from app.dbt.drift import ModelDriftResult, diff_columns, is_eligible_for_drift_check
 from app.dbt.manifest import load_manifest
-from app.dbt.runner import RunRequest, runner
-from app.dbt.show_parser import parse_show_json
+from app.dbt.probe import probe_warehouse_columns
 from app.events.bus import Event, bus
 
 router = APIRouter(prefix="/api/projects", tags=["drift"])
@@ -190,7 +189,6 @@ async def _run_drift_check(
 
     topic = f"project:{project_id}"
     total = len(eligible)
-    target_args: tuple[str, ...] = ("--target", target_val) if target_val else ()
 
     await bus.publish(Event(
         topic=topic,
@@ -203,35 +201,11 @@ async def _run_drift_check(
 
     for node in eligible:
         model_result: ModelDriftResult | None = None
-        error_msg: str | None = None
-        probe_columns: tuple[str, ...] = ()
-
-        inline_sql = f"select * from {{{{ ref('{node.name}') }}}}"
-        req = RunRequest(
-            project_id=project_id,
-            project_path=Path(project_path),
-            command="show",
-            extra=("--inline", inline_sql, "--limit", "1", "--output", "json") + target_args,
-            env=env,
+        probe = await probe_warehouse_columns(
+            project_id, Path(project_path), node.name, env, target_val
         )
-
-        try:
-            async with asyncio.timeout(30):
-                _, stdout_bytes, stderr_bytes = await runner.run(req)
-            stdout_str = stdout_bytes.decode(errors="replace")
-            stderr_str = stderr_bytes.decode(errors="replace")
-            cols, _ = parse_show_json(stdout_str)
-            if not cols:
-                # Some dbt versions write JSON output to stderr
-                cols, _ = parse_show_json(stderr_str)
-            if not cols:
-                error_msg = "no columns returned — table may be empty or schema not materialized"
-            else:
-                probe_columns = tuple(cols)
-        except TimeoutError:
-            error_msg = "probe timed out after 30s"
-        except Exception as exc:
-            error_msg = str(exc)
+        error_msg = probe.error
+        probe_columns = probe.columns
 
         if error_msg is None:
             drifted_cols = diff_columns(node.columns, probe_columns)
