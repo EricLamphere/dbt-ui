@@ -10,10 +10,10 @@ export function NavArrows() {
 
   return (
     <div className="flex items-center gap-0.5">
-      <button onClick={goBack} disabled={!canGoBack} title="Back (⌘[)" aria-label="Back" className={BUTTON_CLASSES}>
+      <button onClick={goBack} disabled={!canGoBack} title="Back (⌘[ or ⌘←)" aria-label="Back" className={BUTTON_CLASSES}>
         <ChevronLeft size={16} />
       </button>
-      <button onClick={goForward} disabled={!canGoForward} title="Forward (⌘])" aria-label="Forward" className={BUTTON_CLASSES}>
+      <button onClick={goForward} disabled={!canGoForward} title="Forward (⌘] or ⌘→)" aria-label="Forward" className={BUTTON_CLASSES}>
         <ChevronRight size={16} />
       </button>
     </div>

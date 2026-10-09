@@ -15,6 +15,10 @@ const NavHistoryContext = createContext<NavHistoryControls | null>(null);
 const MOUSE_BACK = 3;
 const MOUSE_FORWARD = 4;
 
+// KeyboardEvent.key values that step back / forward when held with ⌘
+const BACK_KEYS = new Set(['[', 'ArrowLeft']);
+const FORWARD_KEYS = new Set([']', 'ArrowRight']);
+
 function toEntry(location: Location): NavEntry {
   return { key: location.key, href: location.pathname + location.search };
 }
@@ -52,11 +56,12 @@ export function NavHistoryProvider({ children }: { children: ReactNode }) {
   const goForward = useCallback(() => step(forwardDelta), [step, forwardDelta]);
 
   useEffect(() => {
-    // ⌘[ / ⌘] — skipped while typing so editors (Monaco outdent/indent) and the terminal keep them
+    // ⌘[ / ⌘] and ⌘← / ⌘→ — skipped while typing so editors (Monaco outdent/indent,
+    // line start/end) and the terminal keep them
     const onKeyDown = (e: KeyboardEvent) => {
       if (!e.metaKey || e.repeat || e.shiftKey || e.altKey || e.ctrlKey || isEditableTarget(e.target)) return;
-      if (e.key === '[') { e.preventDefault(); goBack(); }
-      else if (e.key === ']') { e.preventDefault(); goForward(); }
+      if (BACK_KEYS.has(e.key)) { e.preventDefault(); goBack(); }
+      else if (FORWARD_KEYS.has(e.key)) { e.preventDefault(); goForward(); }
     };
     // preventDefault stops the browser's native back/forward so we don't navigate twice
     const onMouseUp = (e: MouseEvent) => {

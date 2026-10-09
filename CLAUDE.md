@@ -64,7 +64,7 @@ frontend/src/
     api.ts        — All typed API fetch helpers (use these, never raw fetch in components)
     sse.ts        — useProjectEvents(), useInitSessionEvents(), useTerminalEvents() hooks
     navHistory.ts — pure back/forward bookkeeping (last 25 locations keyed by location.key; skips duplicate URLs); unit-tested in navHistory.test.ts (Vitest)
-    navHistoryContext.tsx — NavHistoryProvider (wraps the app inside BrowserRouter) + useNavHistory(); browser history is the source of truth (arrows call navigate(±n)); also binds ⌘[ / ⌘] (not while typing) and mouse back/forward buttons
+    navHistoryContext.tsx — NavHistoryProvider (wraps the app inside BrowserRouter) + useNavHistory(); browser history is the source of truth (arrows call navigate(±n)); also binds ⌘[ / ⌘] or ⌘← / ⌘→ (not while typing) and mouse back/forward buttons
     useUrlTab.ts  — useUrlTab(param, allowed, fallback, rememberKey?) — in-page tab state in a URL search param so tab switches are history entries. Used by Health (?tab=, remembered per project), project home file tabs (?file=), Docs browse tabs (?browse=) and Docs node/project detail tabs (?view=). Side/bottom pane tabs deliberately stay local state
   components/
     NavArrows.tsx — header back/forward buttons (right of the dbt-ui home link)

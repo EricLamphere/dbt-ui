@@ -634,6 +634,7 @@ export default function Home() {
       // below never matched, and this handler stole every arrow keypress meant for
       // the palette's own list navigation, force-focusing a card underneath it.
       if (allVisible.length === 0) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return; // ⌘← / ⌘→ are back/forward (navHistoryContext)
       const isArrow = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'ArrowLeft' || e.key === 'ArrowRight';
       if (!isArrow) return;
       const activeEl = document.activeElement;
@@ -651,6 +652,7 @@ export default function Home() {
   // Arrow key navigation + Enter to open
   const makeCardKeyDown = useCallback((idx: number): ((e: React.KeyboardEvent<HTMLButtonElement>) => void) => {
     return (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return; // ⌘← / ⌘→ are back/forward (navHistoryContext)
       const len = allVisible.length;
       let next = idx;
       if (e.key === 'ArrowRight')      { e.preventDefault(); next = Math.min(idx + 1, len - 1); }
