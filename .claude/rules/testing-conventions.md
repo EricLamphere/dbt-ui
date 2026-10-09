@@ -65,13 +65,12 @@ cd backend && .venv/bin/pytest --cov=app --cov-report=term-missing -q
 
 ## Frontend Testing
 
-There is **no Jest or Vitest suite** yet. The frontend "test" is:
+Pure logic is unit-tested with **Vitest** (`*.test.ts` next to the module, e.g. `src/lib/navHistory.test.ts`). There is no component/DOM test setup yet — extract logic into pure functions to test it.
 
 ```bash
-task test:frontend  # runs: npm run build (tsc + vite build)
+task test:frontend  # runs: npm test (vitest run) + npm run build (tsc + vite build)
+cd frontend && npx vitest run src/lib/navHistory.test.ts  # single file
 ```
-
-This catches TypeScript type errors and import failures. If adding unit tests, use **Vitest** (it's in the Vite ecosystem and requires no extra config).
 
 For type checking only (faster):
 ```bash

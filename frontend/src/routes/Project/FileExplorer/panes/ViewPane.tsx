@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Editor, { type Monaco } from '@monaco-editor/react';
 import type * as MonacoEditor from 'monaco-editor';
-import { ChevronLeft, ChevronRight, RotateCw, WrapText, Save, Trash2 } from 'lucide-react';
+import { RotateCw, WrapText, Save, Trash2 } from 'lucide-react';
 import { format as sqlFormat } from 'sql-formatter';
 import { api, type FileContentDto, type GraphDto, type ModelNode } from '../../../../lib/api';
 import { useTheme } from '../../../../lib/useTheme';
@@ -25,10 +25,6 @@ interface ViewPaneProps {
   graph: GraphDto | null;
   /** called when a ref/source link is cmd+clicked */
   onNavigateToFile: (path: string) => void;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  onGoBack: () => void;
-  onGoForward: () => void;
   /** YAML: test node to scroll the editor to when the file opens */
   targetTestNode?: ModelNode | null;
   /** YAML: called when the cursor moves into a test block; null if not in a test */
@@ -162,7 +158,6 @@ function findTestLineInYaml(
 export function ViewPane({
   projectId, openFile, edited, onEdit, onSave, onDelete,
   saving, saveStatus, saveError, isDirty, modelUid, graph, onNavigateToFile,
-  canGoBack, canGoForward, onGoBack, onGoForward,
   targetTestNode, onTestSelected,
 }: ViewPaneProps) {
   const theme = useTheme();
@@ -279,22 +274,6 @@ export function ViewPane({
       {/* Tab bar + actions */}
       <div className="flex items-center justify-between px-4 py-2 bg-surface-panel border-b border-gray-800 shrink-0 gap-3">
         <div className="flex items-center gap-1">
-          <button
-            onClick={onGoBack}
-            disabled={!canGoBack}
-            title="Go back (Alt+Left)"
-            className="p-0.5 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
-          <button
-            onClick={onGoForward}
-            disabled={!canGoForward}
-            title="Go forward (Alt+Right)"
-            className="p-0.5 rounded text-gray-500 hover:text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors mr-2"
-          >
-            <ChevronRight className="w-4 h-4" />
-          </button>
           {tabs.map((t) => (
             <button
               key={t.id}

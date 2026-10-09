@@ -50,7 +50,7 @@ export default function ModelsPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const qc = useQueryClient();
 
   const filterKey = `dag-filter-${id}`;
@@ -154,6 +154,14 @@ export default function ModelsPage() {
   // available on the first render even when the cached graph object reference
   // hasn't changed.
   const modelParam = searchParams.get('model');
+  const setModelParam = useCallback((uid: string | null, replace = false) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (uid) next.set('model', uid);
+      else next.delete('model');
+      return next;
+    }, { replace });
+  }, [setSearchParams]);
   const [selectedModel, setSelectedModel] = useState<ModelNode | null>(() => {
     const cachedGraph = qc.getQueryData<GraphDto>(['models', id]);
     if (!cachedGraph) return null;
@@ -165,21 +173,36 @@ export default function ModelsPage() {
     return null;
   });
 
+  // ?model= is the selected node, so clicking between nodes lands in back/forward history.
+  // Arriving without one, restore the last selection and write it back with replace, so an
+  // entry without ?model= always means "nothing selected".
+  const prevModelParamRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     if (!graph) return;
+    const firstRun = prevModelParamRef.current === undefined;
+    const changed = prevModelParamRef.current !== modelParam;
+    prevModelParamRef.current = modelParam;
+
     if (modelParam) {
       const node = graph.nodes.find((n) => n.unique_id === modelParam);
       if (node) setSelectedModel(node);
       return;
     }
-    setSelectedModel((current) => {
-      if (current) return current;
-      try {
-        const uid = sessionStorage.getItem(selectedModelKey);
-        if (uid) return graph.nodes.find((n) => n.unique_id === uid) ?? null;
-      } catch {}
-      return null;
-    });
+    if (firstRun) {
+      let restored = selectedModel;
+      if (!restored) {
+        try {
+          const uid = sessionStorage.getItem(selectedModelKey);
+          if (uid) restored = graph.nodes.find((n) => n.unique_id === uid) ?? null;
+        } catch {}
+      }
+      if (restored) {
+        setSelectedModel(restored);
+        setModelParam(restored.unique_id, true);
+      }
+      return;
+    }
+    if (changed) setSelectedModel(null);
   }, [graph, modelParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useReportSelectedNode(selectedModel?.unique_id ?? null);
@@ -453,17 +476,28 @@ export default function ModelsPage() {
     })));
   }, [selectedModel?.unique_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Back/forward changed ?model= — move React Flow's selection highlight to match
+  useEffect(() => {
+    setNodes((prev) => prev.map((n) => {
+      const selected = n.id === modelParam;
+      return n.selected === selected ? n : { ...n, selected };
+    }));
+  }, [modelParam]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node) => {
+    (event: React.MouseEvent, node: Node) => {
       const model = node.data?.model as ModelNode | undefined;
       if (model) {
         setSelectedModel(model);
+        // A modifier-click is multi-select — leave history (and the exclusive highlight) alone
+        const isMultiSelect = event.metaKey || event.ctrlKey || event.shiftKey;
+        if (!isMultiSelect && model.unique_id !== modelParam) setModelParam(model.unique_id);
         try { sessionStorage.setItem(selectedModelKey, model.unique_id); } catch {}
         setActiveColumnSels(new Set());
         try { sessionStorage.setItem(columnSelsKey, '[]'); } catch {}
       }
     },
-    [selectedModelKey, columnSelsKey],
+    [selectedModelKey, columnSelsKey, modelParam, setModelParam],
   );
 
   // onSelectionChange: only handles non-empty selections (multi-select, single-select).
@@ -483,12 +517,13 @@ export default function ModelsPage() {
 
   const onPaneClick = useCallback(() => {
     setSelectedModel(null);
+    setModelParam(null, true);
     setSelectedModels([]);
     try { sessionStorage.removeItem(selectedModelKey); } catch {}
     setActiveColumnSels(new Set());
     try { sessionStorage.setItem(columnSelsKey, '[]'); } catch {}
     setCloseDropdownsSignal((n) => n + 1);
-  }, [selectedModelKey, columnSelsKey]);
+  }, [selectedModelKey, columnSelsKey, setModelParam]);
 
   const handleRefreshDag = async () => {
     await api.models.compile(id);
@@ -498,6 +533,7 @@ export default function ModelsPage() {
     if (!confirm(`Delete model '${model.name}'? This removes the file from disk.`)) return;
     await api.models.delete(id, model.unique_id);
     setSelectedModel(null);
+    setModelParam(null, true);
   };
 
   const columnLineageCtx = useMemo<ColumnLineageContextValue>(() => ({

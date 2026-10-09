@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronsDownUp } from 'lucide-react';
-import { api, type FileContentDto, type ModelNode } from '../../../lib/api';
+import { api, type FileContentDto, type GraphDto, type ModelNode } from '../../../lib/api';
 import { useProjectEvents } from '../../../lib/sse';
 import NavRail from '../components/NavRail';
 import { SidePane, type FailedRowsCache } from '../components/SidePane';
@@ -13,11 +13,27 @@ import type { ContextMenuState, RenameState, TreeNode } from './types';
 import { filterTree, updateNode } from './types';
 import { useReportSelectedNode } from '../lib/selectedNodeContext';
 
+/** File path a ?model= deep-link points at (unit tests aren't graph nodes — use their YAML file). */
+function resolveDeepLinkPath(graph: GraphDto, uid: string | null): string | null {
+  if (!uid) return null;
+  return graph.nodes.find((n) => n.unique_id === uid)?.original_file_path
+    || graph.unit_tests?.find((u) => u.unique_id === uid)?.original_file_path
+    || null;
+}
+
+function readSessionPath(key: string): string | null {
+  try { return sessionStorage.getItem(key); } catch { return null; }
+}
+
 export default function FileExplorerPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // ?path= is the open file (so opening files lands in back/forward history);
+  // ?model= is the inbound deep-link (DAG/Docs/⌘K), resolved to a path on arrival
+  const pathParam = searchParams.get('path');
+  const modelParam = searchParams.get('model');
 
   const [tree, setTree] = useState<TreeNode[]>([]);
   const [filterText, setFilterText] = useState('');
@@ -62,10 +78,10 @@ export default function FileExplorerPage() {
 
   const [failedTestUid, setFailedTestUid] = useState<string | null>(null);
 
-  // File navigation history (max 10, session-scoped in component state)
-  const [fileHistory, setFileHistory] = useState<string[]>([]);
-  const [historyIndex, setHistoryIndex] = useState(-1);
-  const historyIndexRef = useRef(-1);
+  /** `${path}\n${model}` last loaded from the URL — stops graph refetches reloading (and discarding edits) */
+  const loadedKeyRef = useRef<string | null>(null);
+  /** bumped per load so a slow earlier load can't overwrite a later one (fast back/forward) */
+  const loadSeqRef = useRef(0);
 
   // Resizable panels
   const [treeWidth, setTreeWidth] = useState(256);
@@ -179,13 +195,15 @@ export default function FileExplorerPage() {
     }
   }, []));
 
-  const openFileNode = useCallback(async (path: string, skipHistory = false, testNode?: ModelNode | null) => {
+  const loadFile = useCallback(async (path: string, testNode: ModelNode | null) => {
+    const seq = ++loadSeqRef.current;
     setLoadingPath(path);
     setEdited(undefined);
     setSaveStatus('idle');
-    setTargetTestNode(testNode ?? null);
+    setTargetTestNode(testNode);
     try {
       const file = await api.files.getContent(id, path);
+      if (seq !== loadSeqRef.current) return;
       setOpenFile(file);
       // Resolve model for this file
       if (graph) {
@@ -214,22 +232,36 @@ export default function FileExplorerPage() {
           setSelectedTestNode(null);
         }
       }
-      if (!skipHistory) {
-        setFileHistory((prev) => {
-          const base = prev.slice(0, historyIndexRef.current + 1);
-          const next = [...base, path].slice(-10);
-          const newIndex = next.length - 1;
-          historyIndexRef.current = newIndex;
-          setHistoryIndex(newIndex);
-          return next;
-        });
-      }
     } catch (e) {
+      // e.g. going back to a file that has since been deleted or renamed
       console.error(e);
+      if (seq === loadSeqRef.current) setOpenFile(null);
     } finally {
-      setLoadingPath(null);
+      if (seq === loadSeqRef.current) setLoadingPath(null);
     }
   }, [id, graph]);
+
+  /** Opens a file as a new history entry; the URL effect below does the actual load. */
+  const openFileNode = useCallback((path: string) => {
+    if (path === pathParam) return;
+    setSearchParams({ path });
+  }, [pathParam, setSearchParams]);
+
+  /** Clears the open file (after delete/rename) without leaving a stale ?path= or session restore behind. */
+  const closeFile = useCallback(() => {
+    setOpenFile(null);
+    setEdited(undefined);
+    setModelUid(null);
+    setSelectedModel(null);
+    try { sessionStorage.removeItem(SESSION_KEY); } catch { /* storage unavailable */ }
+    loadedKeyRef.current = null;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete('path');
+      next.delete('model');
+      return next;
+    }, { replace: true });
+  }, [SESSION_KEY, setSearchParams]);
 
   // Persist open file path to sessionStorage whenever it changes
   useEffect(() => {
@@ -284,68 +316,32 @@ export default function FileExplorerPage() {
     saveExpandedPaths(expandedPaths);
   }, [id, getExpandedPaths, saveExpandedPaths]);
 
-  const navigateToFile = useCallback(async (path: string) => {
-    await expandToPath(path);
-    await openFileNode(path);
-  }, [expandToPath, openFileNode]);
-
-  const goBack = useCallback(async () => {
-    const newIndex = historyIndexRef.current - 1;
-    if (newIndex < 0 || newIndex >= fileHistory.length) return;
-    const path = fileHistory[newIndex];
-    historyIndexRef.current = newIndex;
-    setHistoryIndex(newIndex);
-    await expandToPath(path);
-    await openFileNode(path, true);
-  }, [fileHistory, expandToPath, openFileNode]);
-
-  const goForward = useCallback(async () => {
-    const newIndex = historyIndexRef.current + 1;
-    if (newIndex >= fileHistory.length) return;
-    const path = fileHistory[newIndex];
-    historyIndexRef.current = newIndex;
-    setHistoryIndex(newIndex);
-    await expandToPath(path);
-    await openFileNode(path, true);
-  }, [fileHistory, expandToPath, openFileNode]);
-
-  // Deep-link: ?model=<unique_id> — open the corresponding file
-  // Also restore last open file from sessionStorage (if no deep-link)
-  const deepLinkHandled = useRef(false);
+  // The URL's ?path= is the open file: load it whenever it changes (click, back/forward).
+  // Arriving without one, resolve the ?model= deep-link or the last-open file and write
+  // it back with replace, so every history entry names its file.
   useEffect(() => {
-    if (deepLinkHandled.current) return;
     if (!graph) return;
-    deepLinkHandled.current = true;
 
-    const modelParam = searchParams.get('model');
-    if (modelParam) {
-      const node = graph.nodes.find((n) => n.unique_id === modelParam);
-      if (node?.original_file_path) {
-        expandToPath(node.original_file_path);
-        // For test nodes, pass itself as the targetTestNode so the editor scrolls to it
-        const testNode = node.resource_type === 'test' ? node : null;
-        if (testNode) {
-          setSelectedTestNode(testNode);
-        }
-        openFileNode(node.original_file_path, false, testNode);
-        return;
+    if (!pathParam) {
+      const target = resolveDeepLinkPath(graph, modelParam) ?? readSessionPath(SESSION_KEY);
+      if (target) {
+        setSearchParams((prev) => {
+          const next = new URLSearchParams(prev);
+          next.set('path', target);
+          return next;
+        }, { replace: true });
       }
-      // Unit tests aren't graph nodes — open the YAML file that defines them
-      const unitTest = graph.unit_tests?.find((u) => u.unique_id === modelParam);
-      if (unitTest?.original_file_path) {
-        expandToPath(unitTest.original_file_path);
-        openFileNode(unitTest.original_file_path);
-        return;
-      }
+      return;
     }
 
-    // Restore last open file from sessionStorage
-    const savedPath = sessionStorage.getItem(SESSION_KEY);
-    if (savedPath) {
-      expandToPath(savedPath);
-      openFileNode(savedPath);
-    }
-  }, [searchParams, graph, openFileNode, expandToPath, SESSION_KEY]);
+    const key = `${pathParam}\n${modelParam ?? ''}`;
+    if (loadedKeyRef.current === key) return;
+    loadedKeyRef.current = key;
+    // For test deep-links, scroll the editor to that test
+    const testNode = graph.nodes.find((n) => n.unique_id === modelParam && n.resource_type === 'test') ?? null;
+    expandToPath(pathParam);
+    loadFile(pathParam, testNode);
+  }, [graph, pathParam, modelParam, SESSION_KEY, setSearchParams, expandToPath, loadFile]);
 
   const loadChildren = useCallback(async (node: TreeNode, pathParts: string[]) => {
     if (!node.is_dir) return;
@@ -385,19 +381,11 @@ export default function FileExplorerPage() {
         e.preventDefault();
         if (openFile && edited !== undefined) handleSave();
       }
-      if (e.altKey && e.key === 'ArrowLeft') {
-        e.preventDefault();
-        goBack();
-      }
-      if (e.altKey && e.key === 'ArrowRight') {
-        e.preventDefault();
-        goForward();
-      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [openFile, edited, goBack, goForward]);
+  }, [openFile, edited]);
 
   const handleSave = async () => {
     if (!openFile) return;
@@ -423,11 +411,7 @@ export default function FileExplorerPage() {
     if (!confirm(`Delete '${openFile.path}'? This cannot be undone.`)) return;
     try {
       await api.files.delete(id, openFile.path);
-      setOpenFile(null);
-      setEdited(undefined);
-      setModelUid(null);
-      setSelectedModel(null);
-      sessionStorage.removeItem(SESSION_KEY);
+      closeFile();
       await reloadDir();
     } catch (e) {
       console.error(e);
@@ -439,11 +423,7 @@ export default function FileExplorerPage() {
     if (!confirm(`Delete model '${selectedModel.name}'? This removes the file from disk.`)) return;
     try {
       await api.models.delete(id, selectedModel.unique_id);
-      setOpenFile(null);
-      setEdited(undefined);
-      setModelUid(null);
-      setSelectedModel(null);
-      sessionStorage.removeItem(SESSION_KEY);
+      closeFile();
       await reloadDir();
     } catch (e) {
       console.error(e);
@@ -462,10 +442,7 @@ export default function FileExplorerPage() {
     try {
       await api.files.delete(id, node.path);
       if (openFile?.path === node.path || openFile?.path.startsWith(node.path + '/')) {
-        setOpenFile(null);
-        setEdited(undefined);
-        setModelUid(null);
-        setSelectedModel(null);
+        closeFile();
       }
       await reloadDir();
     } catch (e) {
@@ -519,10 +496,7 @@ export default function FileExplorerPage() {
     try {
       await api.files.rename(id, renameState.path, trimmed);
       if (openFile?.path === renameState.path) {
-        setOpenFile(null);
-        setEdited(undefined);
-        setModelUid(null);
-        setSelectedModel(null);
+        closeFile();
       }
       await reloadDir();
     } catch (e) {
@@ -600,11 +574,7 @@ export default function FileExplorerPage() {
             isDirty={isDirty}
             modelUid={modelUid}
             graph={graph ?? null}
-            onNavigateToFile={navigateToFile}
-            canGoBack={historyIndex > 0}
-            canGoForward={historyIndex < fileHistory.length - 1}
-            onGoBack={goBack}
-            onGoForward={goForward}
+            onNavigateToFile={openFileNode}
             targetTestNode={targetTestNode}
             onTestSelected={(testNode) => setSelectedTestNode(testNode)}
           />
@@ -630,7 +600,7 @@ export default function FileExplorerPage() {
           nav && navigate(`/projects/${id}/docs?node=${encodeURIComponent(nav.unique_id)}`);
         }}
         onDelete={handleDeleteModel}
-        onNavigateToFile={navigateToFile}
+        onNavigateToFile={openFileNode}
         previewCache={previewCache}
         onPreviewCached={(uid, data) => setPreviewCache((prev) => {
           const next = new Map(prev).set(uid, data);

@@ -133,9 +133,10 @@ tasks:
       - .venv/bin/pytest --cov=app --cov-report=term-missing -q
 
   test:frontend:
-    desc: Type-check and build the frontend
+    desc: Run frontend unit tests, then type-check and build the frontend
     dir: "{{.FRONTEND_DIR}}"
     cmds:
+      - npm test
       - npm run build
 
   test:

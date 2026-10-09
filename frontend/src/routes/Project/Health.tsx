@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
+import { useUrlTab } from '../../lib/useUrlTab';
 import NavRail from './components/NavRail';
 import HealthCheckPanel from './components/HealthCheckPanel';
 import DriftPanel from './components/DriftPanel';
@@ -13,29 +13,14 @@ const TABS: { id: HealthTab; label: string }[] = [
   { id: 'source-freshness', label: 'Source Freshness' },
 ];
 
+const TAB_IDS = TABS.map((t) => t.id);
+
 export default function HealthPage() {
   const { projectId } = useParams<{ projectId: string }>();
   const id = Number(projectId);
-  const storageKey = `health-tab:${id}`;
-  const [searchParams, setSearchParams] = useSearchParams();
-  const [activeTab, setActiveTab] = useState<HealthTab>(
-    () => (sessionStorage.getItem(storageKey) as HealthTab) ?? 'health-check'
-  );
-
-  // Honor ?tab= param on initial load and when it changes (e.g. command palette navigates here)
-  useEffect(() => {
-    const tab = searchParams.get('tab') as HealthTab | null;
-    if (tab && TABS.some((t) => t.id === tab)) {
-      setActiveTab(tab);
-      sessionStorage.setItem(storageKey, tab);
-      setSearchParams({}, { replace: true });
-    }
-  }, [searchParams, storageKey, setSearchParams]);
-
-  function handleTabChange(tab: HealthTab) {
-    sessionStorage.setItem(storageKey, tab);
-    setActiveTab(tab);
-  }
+  // ?tab= drives the active tab (so back/forward covers it); the last-used tab is
+  // remembered per project for visits without one (e.g. clicking Health in the nav rail)
+  const [activeTab, handleTabChange] = useUrlTab<HealthTab>('tab', TAB_IDS, 'health-check', `health-tab:${id}`);
 
   return (
     <div className="flex h-full overflow-hidden">

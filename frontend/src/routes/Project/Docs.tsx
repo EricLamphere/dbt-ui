@@ -9,6 +9,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import { api, type DocsNodeDto, type DocsMacroDto } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
+import { useUrlTab } from '../../lib/useUrlTab';
 import NavRail from './components/NavRail';
 
 // ---- tree types ----
@@ -296,6 +297,25 @@ function useExpandedSet(storageKey: string): [Set<string>, (key: string, open: b
 
 type DocsTab = 'project' | 'database' | 'group';
 
+const DOCS_TAB_IDS: readonly DocsTab[] = ['project', 'database', 'group'];
+
+/**
+ * Selects a docs node as a new history entry (so back/forward steps through it),
+ * keeping the browse tab and dropping the previous node's detail tab (?view=).
+ */
+function useSelectDocsNode(): (uid: string) => void {
+  const [searchParams, setSearchParams] = useSearchParams();
+  return useCallback((uid: string) => {
+    if (searchParams.get('node') === uid) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('node', uid);
+      next.delete('view');
+      return next;
+    });
+  }, [searchParams, setSearchParams]);
+}
+
 // ---- Docs page ----
 
 export default function DocsPage() {
@@ -310,7 +330,8 @@ export default function DocsPage() {
   const listResizing = useRef(false);
   const [generating, setGenerating] = useState(false);
   const [filter, setFilter] = useState('');
-  const [docsTab, setDocsTab] = useState<DocsTab>('project');
+  const [docsTab, setDocsTab] = useUrlTab<DocsTab>('browse', DOCS_TAB_IDS, 'project');
+  const selectNode = useSelectDocsNode();
   const autoGenerateTriggered = useRef(false);
 
   const [projectExpanded, setProjectExpanded, collapseProject, expandProjectMany] = useExpandedSet(`docs-expanded-project-${id}`);
@@ -413,7 +434,11 @@ export default function DocsPage() {
   // Auto-select the project overview on load
   useEffect(() => {
     if (docsData && !selectedUid) {
-      setSearchParams({ node: '__project__' }, { replace: true });
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('node', '__project__');
+        return next;
+      }, { replace: true });
     }
   }, [docsData, selectedUid, setSearchParams]);
 
@@ -531,7 +556,7 @@ export default function DocsPage() {
                   projectName={projectName}
                   sections={projectSections}
                   selectedUid={selectedUid}
-                  onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })}
+                  onSelect={selectNode}
                   filterQ={q}
                   expanded={projectExpanded}
                   onToggle={setProjectExpanded}
@@ -541,7 +566,7 @@ export default function DocsPage() {
                 <FlatTree
                   tree={databaseTree}
                   selectedUid={selectedUid}
-                  onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })}
+                  onSelect={selectNode}
                   filterQ={q}
                   emptyLabel="No database objects found."
                   expanded={databaseExpanded}
@@ -552,7 +577,7 @@ export default function DocsPage() {
                 <FlatTree
                   tree={groupTree}
                   selectedUid={selectedUid}
-                  onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })}
+                  onSelect={selectNode}
                   filterQ={q}
                   emptyLabel="No grouped nodes found."
                   expanded={groupExpanded}
@@ -888,12 +913,14 @@ function TreeNodeRow({ node, depth, resourceType, selectedUid, onSelect, matchin
 
 type ProjectTab = 'overview' | 'readme';
 
+const PROJECT_TAB_IDS: readonly ProjectTab[] = ['overview', 'readme'];
+
 function ProjectOverview({ projectId, projectName, description }: {
   projectId: number;
   projectName: string;
   description: string;
 }) {
-  const [tab, setTab] = useState<ProjectTab>('overview');
+  const [tab, setTab] = useUrlTab<ProjectTab>('view', PROJECT_TAB_IDS, 'overview');
 
   const { data: project } = useQuery({
     queryKey: ['project', projectId],
@@ -963,14 +990,11 @@ type NodeTab = 'details' | 'description' | 'columns' | 'depends_on' | 'reference
 
 function NodeDetail({ node, allNodes, allMacros, projectId }: { node: DocsNodeDto; allNodes: Map<string, DocsNodeDto>; allMacros: Map<string, DocsMacroDto>; projectId: number }) {
   const navigate = useNavigate();
-  const [, setSearchParams] = useSearchParams();
-  const [tab, setTab] = useState<NodeTab>('details');
+  const selectNode = useSelectDocsNode();
   const [codeView, setCodeView] = useState<'source' | 'compiled'>('source');
   const [copied, setCopied] = useState(false);
   const isTest = node.resource_type === 'test';
   const hasDependsOn = node.depends_on_nodes.length > 0 || node.depends_on_macros.length > 0;
-
-  useEffect(() => { setTab('details'); }, [node.unique_id]);
 
   const tabs: { id: NodeTab; label: string }[] = [
     { id: 'details', label: 'Details' },
@@ -980,6 +1004,8 @@ function NodeDetail({ node, allNodes, allMacros, projectId }: { node: DocsNodeDt
     ...(node.child_models.length > 0 || node.child_tests.length > 0 ? [{ id: 'referenced_by' as NodeTab, label: 'Referenced By' }] : []),
     ...(!isTest && (node.raw_code || node.compiled_code) ? [{ id: 'code' as NodeTab, label: 'Code' }] : []),
   ];
+  // ?view= drives the tab; selecting another node drops it, so each node opens on Details
+  const [tab, setTab] = useUrlTab<NodeTab>('view', tabs.map((t) => t.id), 'details');
 
   const handleCopy = () => {
     const code = codeView === 'compiled' ? node.compiled_code : node.raw_code;
@@ -1061,13 +1087,13 @@ function NodeDetail({ node, allNodes, allMacros, projectId }: { node: DocsNodeDt
             {hasDependsOn && (
               <section>
                 <h2 className="text-sm font-semibold text-gray-200 mb-3">Depends On</h2>
-                <DependsOn dependsOnNodes={node.depends_on_nodes} dependsOnMacros={node.depends_on_macros} allNodes={allNodes} allMacros={allMacros} onSelectNode={(uid) => setSearchParams({ node: uid }, { replace: true })} />
+                <DependsOn dependsOnNodes={node.depends_on_nodes} dependsOnMacros={node.depends_on_macros} allNodes={allNodes} allMacros={allMacros} onSelectNode={selectNode} />
               </section>
             )}
             {(node.child_models.length > 0 || node.child_tests.length > 0) && (
               <section>
                 <h2 className="text-sm font-semibold text-gray-200 mb-3">Referenced By</h2>
-                <ReferencedBy childModels={node.child_models} childTests={node.child_tests} allNodes={allNodes} onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })} />
+                <ReferencedBy childModels={node.child_models} childTests={node.child_tests} allNodes={allNodes} onSelect={selectNode} />
               </section>
             )}
             {!isTest && (node.raw_code || node.compiled_code) && (
@@ -1104,13 +1130,13 @@ function NodeDetail({ node, allNodes, allMacros, projectId }: { node: DocsNodeDt
         {tab === 'depends_on' && (
           <div className="flex flex-col gap-3">
             <h2 className="text-sm font-semibold text-gray-200">Depends On</h2>
-            <DependsOn dependsOnNodes={node.depends_on_nodes} dependsOnMacros={node.depends_on_macros} allNodes={allNodes} allMacros={allMacros} onSelectNode={(uid) => setSearchParams({ node: uid }, { replace: true })} />
+            <DependsOn dependsOnNodes={node.depends_on_nodes} dependsOnMacros={node.depends_on_macros} allNodes={allNodes} allMacros={allMacros} onSelectNode={selectNode} />
           </div>
         )}
         {tab === 'referenced_by' && (
           <div className="flex flex-col gap-3">
             <h2 className="text-sm font-semibold text-gray-200">Referenced By</h2>
-            <ReferencedBy childModels={node.child_models} childTests={node.child_tests} allNodes={allNodes} onSelect={(uid) => setSearchParams({ node: uid }, { replace: true })} />
+            <ReferencedBy childModels={node.child_models} childTests={node.child_tests} allNodes={allNodes} onSelect={selectNode} />
           </div>
         )}
         {tab === 'code' && (

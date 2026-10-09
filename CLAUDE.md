@@ -63,6 +63,11 @@ frontend/src/
   lib/
     api.ts        — All typed API fetch helpers (use these, never raw fetch in components)
     sse.ts        — useProjectEvents(), useInitSessionEvents(), useTerminalEvents() hooks
+    navHistory.ts — pure back/forward bookkeeping (last 25 locations keyed by location.key; skips duplicate URLs); unit-tested in navHistory.test.ts (Vitest)
+    navHistoryContext.tsx — NavHistoryProvider (wraps the app inside BrowserRouter) + useNavHistory(); browser history is the source of truth (arrows call navigate(±n)); also binds ⌘[ / ⌘] (not while typing) and mouse back/forward buttons
+    useUrlTab.ts  — useUrlTab(param, allowed, fallback, rememberKey?) — in-page tab state in a URL search param so tab switches are history entries. Used by Health (?tab=, remembered per project), project home file tabs (?file=), Docs browse tabs (?browse=) and Docs node/project detail tabs (?view=). Side/bottom pane tabs deliberately stay local state
+  components/
+    NavArrows.tsx — header back/forward buttons (right of the dbt-ui home link)
   routes/
     Home.tsx      — Project list (respects DBT_UI_PROJECTS_PATH configured banner)
     Project/
@@ -78,9 +83,9 @@ frontend/src/
         CommandPalette.tsx — VS Code-style palette; nav + project actions + model search; "Run custom dbt command…" (or typing `dbt …`) switches to CustomCommandMode.tsx
         CustomCommandMode.tsx — palette mode: free-form `dbt <command>` input + recent commands (lib/customCommand.ts)
       index.tsx          — Project homepage (README, dbt_project.yml, profiles.yml tabbed viewer)
-      Models.tsx         — React Flow DAG page (/projects/:projectId/models); supports ?model=<uid> deep-link; uses SidePane(page="dag"); optional test coverage overlay with toggle in DagFilterBar; persists coverage state per-project in sessionStorage
+      Models.tsx         — React Flow DAG page (/projects/:projectId/models); ?model=<uid> is the selected node (clicking a node pushes it, so back/forward steps through selections; pane click clears it with replace; modifier-click multi-select doesn't touch it); uses SidePane(page="dag"); optional test coverage overlay with toggle in DagFilterBar; persists coverage state per-project in sessionStorage
       Docs.tsx           — Native docs browser (folder tree); MacroDetail includes "Try It" section with arg inputs, editable Jinja call textarea, and inline compile button
-      FileExplorer/      — File browser + editor; uses SidePane(page="files") with navigation to DAG
+      FileExplorer/      — File browser + editor; uses SidePane(page="files") with navigation to DAG. ?path=<file> is the open file (opening a file pushes it, so back/forward covers files); inbound ?model=<uid> deep-links (or the last-open file) are resolved to ?path= with replace on arrival
       Git/               — Source Control page (VSCode-style SCM): ChangesList, DiffView (Monaco DiffEditor), CommitBox, BranchPicker, HistoryPanel
       Workspace/         — SQL Workspace page: file tree + Monaco editor + Compiled SQL tab + resizable results pane; SQL/dbt autocomplete; cmd+click refs navigate to File Explorer
       Environment.tsx    — Env vars + profiles
@@ -349,7 +354,7 @@ useInitSessionEvents(sessionId, onEvent, useCallback(() => { /* on close */ }, [
   - Action buttons: Edit in Files / Open in DAG, View Docs, Delete model
 - All run state and execution logic lives in PropertiesTab (no lifting to parent)
 - Models.tsx mounts SidePane(page="dag"); FileExplorer mounts SidePane(page="files")
-- Deep-link support: `Models.tsx` uses `useSearchParams` to read `?model=<unique_id>` and pre-select on load
+- Deep-link support: `Models.tsx` uses `useSearchParams` to read `?model=<unique_id>` and pre-select on load; the param stays in sync with the selection so it's part of back/forward history
 
 ### Project Files and Configuration
 

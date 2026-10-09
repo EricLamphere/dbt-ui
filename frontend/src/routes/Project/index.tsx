@@ -6,6 +6,7 @@ import Editor from '@monaco-editor/react';
 import { api, type GraphDto, type Project, type RunInvocationDto, type RunOpts } from '../../lib/api';
 import { useProjectEvents } from '../../lib/sse';
 import { useTheme } from '../../lib/useTheme';
+import { useUrlTab } from '../../lib/useUrlTab';
 import NavRail from './components/NavRail';
 import { StatusLogPopover } from './components/StatusLogPopover';
 import {
@@ -581,7 +582,7 @@ function YamlViewer({ content }: { content: string }) {
 
 function ProjectFilesPanel({ project }: { project: Project }) {
   const available = FILE_TABS.filter((t) => project[t.field] != null);
-  const [activeTab, setActiveTab] = useState<FileTab>(() => available[0]?.id ?? 'readme');
+  const [activeTab, setActiveTab] = useUrlTab<FileTab>('file', available.map((t) => t.id), available[0]?.id ?? 'readme');
 
   if (available.length === 0) return null;
 

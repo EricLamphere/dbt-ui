@@ -35,6 +35,7 @@ task start
 - **Environment control** — named env var profiles, dbt target switching, and an init pipeline (`pip install`, `dbt deps`, your own scripts) that runs when a project opens
 - **Integrated terminal & project creation** — multi-tab terminal in the bottom pane; `dbt init` runs in an in-app terminal with adapter install and `profiles.yml` setup handled for you
 - **Command palette** — ⌘K to jump to any page, project, or model, or run a dbt command
+- **Back / forward navigation** — header arrows (or ⌘[ / ⌘] and mouse side buttons) step through your last 25 pages, in-page tabs, opened files, and selected DAG/docs nodes
 - **Arbitrary dbt commands** — type any `dbt …` command (from ⌘K or the project homepage) and it runs with your active profile and target, streams to the Run panel, and lands in run history
 - **Column-level lineage** (Pro) — click any column in the DAG to trace where its data comes from and where it goes, derived from each model's compiled SQL
 

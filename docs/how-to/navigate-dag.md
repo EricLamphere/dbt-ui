@@ -44,6 +44,8 @@ http://localhost:5173/projects/1/models?model=model.my_project.my_model
 
 The model will be pre-selected and the SidePane will open automatically.
 
+The URL tracks the selected node as you click around, so the header's back/forward arrows (⌘[ / ⌘]) step through the nodes you've selected.
+
 ## Using the filter bar
 
 The filter bar sits above the DAG. It has a text selector field and dropdown pills.

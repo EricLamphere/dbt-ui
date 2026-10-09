@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Header from './components/Header';
 import { SetupGate } from './components/setup/SetupGate';
+import { NavHistoryProvider } from './lib/navHistoryContext';
 import Home from './routes/Home';
 import Pricing from './routes/Pricing';
 import ProjectHome from './routes/Project/index';
@@ -18,30 +19,32 @@ import RunHistoryPage from './routes/Project/RunHistory';
 export default function App() {
   return (
     <BrowserRouter>
-      <SetupGate>
-        <div className="flex flex-col h-screen overflow-hidden">
-          <Header />
-          <main className="flex-1 overflow-hidden">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/pricing" element={<Pricing />} />
-              <Route path="/projects/:projectId" element={<ProjectLayout />}>
-                <Route index element={<ProjectHome />} />
-                <Route path="models" element={<ModelsPage />} />
-                <Route path="init" element={<InitScriptsPage />} />
-                <Route path="files" element={<FileExplorerPage />} />
-                <Route path="environment" element={<EnvironmentPage />} />
-                <Route path="docs" element={<DocsPage />} />
-                <Route path="git" element={<GitPage />} />
-                <Route path="workspace" element={<WorkspacePage />} />
-                <Route path="health" element={<HealthPage />} />
-                <Route path="runs" element={<RunHistoryPage />} />
-              </Route>
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
-          </main>
-        </div>
-      </SetupGate>
+      <NavHistoryProvider>
+        <SetupGate>
+          <div className="flex flex-col h-screen overflow-hidden">
+            <Header />
+            <main className="flex-1 overflow-hidden">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/pricing" element={<Pricing />} />
+                <Route path="/projects/:projectId" element={<ProjectLayout />}>
+                  <Route index element={<ProjectHome />} />
+                  <Route path="models" element={<ModelsPage />} />
+                  <Route path="init" element={<InitScriptsPage />} />
+                  <Route path="files" element={<FileExplorerPage />} />
+                  <Route path="environment" element={<EnvironmentPage />} />
+                  <Route path="docs" element={<DocsPage />} />
+                  <Route path="git" element={<GitPage />} />
+                  <Route path="workspace" element={<WorkspacePage />} />
+                  <Route path="health" element={<HealthPage />} />
+                  <Route path="runs" element={<RunHistoryPage />} />
+                </Route>
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </main>
+          </div>
+        </SetupGate>
+      </NavHistoryProvider>
     </BrowserRouter>
   );
 }

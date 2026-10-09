@@ -91,7 +91,7 @@ dbt-ui/
 │   │   │   ├── api.ts               # fetch wrappers + typed API helpers
 │   │   │   └── sse.ts               # useProjectEvents, useInitSessionEvents, useTerminalEvents
 │   │   ├── components/
-│   │   │   ├── Header.tsx           # Persistent nav; Profile + Target dropdowns on project pages (reads projectId from pathname)
+│   │   │   ├── Header.tsx           # Persistent nav; back/forward arrows (NavArrows.tsx); Profile + Target dropdowns on project pages (reads projectId from pathname)
 │   │   │   ├── HomeCommandPalette.tsx # ⌘K palette for Home.tsx — open project by name, new project, rescan, global settings
 │   │   │   └── StatusBadge.tsx      # Status color chip
 │   │   └── routes/
@@ -106,7 +106,7 @@ dbt-ui/
 │   │           ├── components/
 │   │           │   └── CommandPalette.tsx # VS Code-style palette (z-[60]); nav + project actions + model search
 │   │           ├── index.tsx            # Project home: tiles + tabbed README/dbt_project.yml/profiles.yml viewer
-│   │           ├── Models.tsx           # React Flow DAG with real-time run overlays; ?model= deep-link; SidePane; DagFilterBar
+│   │           ├── Models.tsx           # React Flow DAG with real-time run overlays; ?model= = selected node (in back/forward history); SidePane; DagFilterBar
 │   │           │                        #   DagFilterBar: text selector (+model, tag:x), Type/Materialization/Tag/Status dropdowns; optional Coverage overlay
 │   │           │                        #   Coverage: per-column test count heatmap; derives from GraphDto client-side; persists toggle state per-project
 │   │           ├── Docs.tsx             # Native docs browser (folder tree)
@@ -673,7 +673,7 @@ The Global Settings modal's "Subscription" tab (`components/SubscriptionSection.
 - Column names after `SELECT`, `WHERE`, `ON`, etc. — scoped to models referenced in the current SQL statement
 - Completions are prefix-filtered and ranked (exact match first, then alphabetical)
 
-**Cmd+click navigation** — `ref('model')` and `source('schema', 'table')` spans are underlined when Cmd/Ctrl is held. Clicking navigates to `/projects/:id/files?model=<unique_id>`, which the File Explorer deep-link handler resolves to the model's source file.
+**Cmd+click navigation** — `ref('model')` and `source('schema', 'table')` spans are underlined when Cmd/Ctrl is held. Clicking navigates to `/projects/:id/files?model=<unique_id>`, which the File Explorer resolves to the model's source file and rewrites (with replace) as `?path=<file>`. `?path=` is the File Explorer's open file, so opening files is part of the header's back/forward history.
 
 Session state (`sessionStorage`) persists open file path, expanded tree nodes, active tab, and last query results across navigation within a browser session.
 

@@ -96,6 +96,12 @@ useProjectEvents(projectId, useCallback((event) => {
 
 The hooks themselves use `handlerRef` internally (so the ref is always up to date), but the `useEffect` dep array only includes `projectId` — this is intentional.
 
+## In-Page Tabs — Keep Them in the URL
+
+Top-level tabs inside a page (Health, project home files, Docs browse/detail tabs) use `useUrlTab()` from `lib/useUrlTab.ts`, not `useState`, so switching tabs pushes a history entry the header back/forward arrows (`NavArrows`, `lib/navHistoryContext.tsx`) can step through. Tabs inside side/bottom panes stay local `useState` — they are deliberately excluded from navigation history. The same applies to in-page selections: the open file on Files (`?path=`), the selected DAG node (`?model=`) and the selected Docs node (`?node=`) live in the URL and push history entries.
+
+When updating search params on a page that has URL tabs, **merge** into the existing params (`setSearchParams((prev) => { const p = new URLSearchParams(prev); p.set(...); return p; })`) — passing a fresh object like `setSearchParams({ node })` wipes the tab params.
+
 ## DataTable — Always Use the Shared Component
 
 **Never render a `<table>` directly.** All tabular data goes through `DataTable` from `frontend/src/components/DataTable.tsx`. This ensures consistent font, spacing, selection, copy, and keyboard navigation across the entire app.
