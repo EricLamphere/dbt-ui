@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { BookOpen, Play, Hammer, FlaskConical, Layers, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, type ModelNode, type GraphDto, type RunOpts } from '../../../../lib/api';
 import { DocumentModelButton, canDocument } from './DocumentModelButton';
+import { ImpactSummary } from './ImpactSummary';
 
 type RunCommand = 'run' | 'build' | 'test';
 
@@ -282,7 +283,7 @@ export function PropertiesTab({
   };
 
   if (selectedModels.length > 1) {
-    return <MultiSelectionTab projectId={projectId} selectedModels={selectedModels} />;
+    return <MultiSelectionTab projectId={projectId} selectedModels={selectedModels} graph={graph} />;
   }
 
   if (!model) {
@@ -470,6 +471,8 @@ export function PropertiesTab({
         </Row>
       )}
 
+      {graph && <ImpactSummary projectId={projectId} nodes={[model]} graph={graph} />}
+
       <div className="border-t border-gray-800" />
 
       {/* Run controls */}
@@ -584,7 +587,11 @@ function effectiveCommand(cmd: RunCommand, type: string): 'run' | 'build' | 'tes
   return 'run';
 }
 
-function MultiSelectionTab({ projectId, selectedModels }: { projectId: number; selectedModels: ModelNode[] }) {
+function MultiSelectionTab({ projectId, selectedModels, graph }: {
+  projectId: number;
+  selectedModels: ModelNode[];
+  graph: GraphDto | null;
+}) {
   const [loading, setLoading] = useState<RunCommand | null>(null);
   const [runOpts, dispatchOpts] = useReducer(runOptionsReducer, undefined, runOptionsInitial);
 
@@ -656,6 +663,8 @@ function MultiSelectionTab({ projectId, selectedModels }: { projectId: number; s
           </div>
         ))}
       </div>
+
+      {graph && <ImpactSummary projectId={projectId} nodes={selectedModels} graph={graph} />}
 
       <div className="border-t border-gray-800" />
 

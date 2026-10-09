@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect } from 'react';
 
+const NO_IDS: readonly string[] = [];
+
 /**
  * The node (model/test/seed/…) currently selected on whichever project page is
  * open, lifted into ProjectLayout so the bottom pane's Node DAG tab can follow
@@ -20,4 +22,22 @@ export function useReportSelectedNode(uid: string | null): void {
     setSelected(uid);
   }, [uid, setSelected]);
   useEffect(() => () => setSelected(null), [setSelected]);
+}
+
+/**
+ * The full multi-selection (Cmd+click on the DAG), when more than one node is
+ * selected — empty otherwise. Kept apart from the single selection above
+ * because Node DAG follows one node while Impact can cover several.
+ */
+export const SelectedNodeIdsContext = createContext<readonly string[]>(NO_IDS);
+export const SetSelectedNodeIdsContext = createContext<(uids: readonly string[]) => void>(() => {});
+
+/** Publish this page's multi-selection; clears it again when the page unmounts. */
+export function useReportSelectedNodes(uids: readonly string[]): void {
+  const setSelected = useContext(SetSelectedNodeIdsContext);
+  const key = uids.join('|');
+  useEffect(() => {
+    setSelected(key ? key.split('|') : NO_IDS);
+  }, [key, setSelected]);
+  useEffect(() => () => setSelected(NO_IDS), [setSelected]);
 }

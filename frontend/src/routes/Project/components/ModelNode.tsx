@@ -3,6 +3,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { ModelNode } from '../../../lib/api';
 import { useColumnLineage } from '../lib/columnLineageContext';
 import { bucketFor, badgeClassesFor, COVERAGE_CLASS, type NodeCoverageData } from '../lib/testCoverage';
+import { typeIconFor } from '../lib/nodeTypeIcon';
 
 const STATUS_RING: Record<string, string> = {
   idle: 'ring-gray-700',
@@ -24,15 +25,6 @@ const STATUS_DOT: Record<string, string> = {
   warn: 'bg-yellow-400',
 };
 
-const TYPE_ICON: Record<string, string> = {
-  model: '▣',
-  source: '⬡',
-  seed: '⊡',
-  snapshot: '◈',
-  test: '⬤',
-  exposure: '◉',
-};
-
 interface Props extends NodeProps {
   data: {
     model: ModelNode;
@@ -50,7 +42,7 @@ function ModelNodeComponent({ data, selected }: Props) {
   // Selected nodes keep their status ring color; the sky selection ring only shows while idle.
   const selectedRing = model.status in STATUS_RING && model.status !== 'idle' ? ring : 'node-selected-ring';
   const dot = STATUS_DOT[model.status] ?? STATUS_DOT.idle;
-  const icon = TYPE_ICON[model.resource_type] ?? '▣';
+  const icon = typeIconFor(model.resource_type);
   const hasColumns = model.columns.length > 0;
 
   const uid = model.unique_id;

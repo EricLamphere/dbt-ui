@@ -31,6 +31,7 @@ task start
 - **Docs browser** — native dbt docs with searchable columns, cross-linked to the DAG and editor; macros include a live "Try It" compiler
 - **Health checks** — `dbt debug` as a structured pass/fail table, schema drift between your warehouse and `manifest.json`, and source freshness
 - **Documentation generator** — one click adds a model (or seed/snapshot) and its warehouse columns to the schema YAML in its folder, creating the file if needed; also from Schema Drift for warehouse-only columns. Existing YAML is left untouched apart from the added lines
+- **Impact analysis** — select a model to see everything downstream of it, grouped by depth, with test counts, column coverage, and risk flags (untested models, exposures, incremental models, failing or stale nodes); build the whole impacted slice or copy its selector in one click
 - **Column profiling & test coverage** — row counts, null %, distinct counts, min/max, and samples per column; an optional DAG overlay shows per-column test coverage
 - **Run history** — every dbt invocation with duration and per-node results, plus per-node trends across recent runs
 - **Environment control** — named env var profiles, dbt target switching, and an init pipeline (`pip install`, `dbt deps`, your own scripts) that runs when a project opens

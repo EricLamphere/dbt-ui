@@ -7,7 +7,12 @@ import { useModifierKeyClass } from '../../lib/useModifierKeyClass';
 import { BottomPane } from './components/BottomPane';
 import { CommandPalette } from './components/CommandPalette';
 import { CommandPaletteContext } from './lib/commandPaletteContext';
-import { SelectedNodeContext, SetSelectedNodeContext } from './lib/selectedNodeContext';
+import {
+  SelectedNodeContext,
+  SelectedNodeIdsContext,
+  SetSelectedNodeContext,
+  SetSelectedNodeIdsContext,
+} from './lib/selectedNodeContext';
 
 export default function ProjectLayout() {
   useModifierKeyClass();
@@ -29,6 +34,7 @@ export default function ProjectLayout() {
   });
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<readonly string[]>([]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteQuery, setPaletteQuery] = useState('');
 
@@ -69,6 +75,8 @@ export default function ProjectLayout() {
     <CommandPaletteContext.Provider value={ctxValue}>
       <SetSelectedNodeContext.Provider value={setSelectedNodeId}>
       <SelectedNodeContext.Provider value={selectedNodeId}>
+      <SetSelectedNodeIdsContext.Provider value={setSelectedNodeIds}>
+      <SelectedNodeIdsContext.Provider value={selectedNodeIds}>
       <div className="flex flex-col h-full overflow-hidden">
         <div className="flex-1 min-h-0 overflow-auto">
           <Outlet />
@@ -78,6 +86,7 @@ export default function ProjectLayout() {
           graph={graph ?? null}
           projectPath={project?.path ?? null}
           selectedNodeId={selectedNodeId}
+          selectedNodeIds={selectedNodeIds}
         />
         {paletteOpen && (
           <CommandPalette
@@ -89,6 +98,8 @@ export default function ProjectLayout() {
           />
         )}
       </div>
+      </SelectedNodeIdsContext.Provider>
+      </SetSelectedNodeIdsContext.Provider>
       </SelectedNodeContext.Provider>
       </SetSelectedNodeContext.Provider>
     </CommandPaletteContext.Provider>

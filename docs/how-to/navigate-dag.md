@@ -130,6 +130,17 @@ The **Node DAG** tab in the bottom pane shows the selected node's full upstream 
 - Click the crosshair button in the tab's header to re-center after panning.
 - Cmd/ctrl-click any node to open its file in the Files page.
 
+## Seeing what a change would affect
+
+The **Downstream impact** card in the SidePane summarizes what sits downstream of the selected node, e.g. `5 models · 5 exposures · 79 tests`, followed by risk flags:
+
+- **untested**: downstream models or snapshots with no data or unit tests, where a break would go unnoticed
+- **exposure**: dashboards or apps that read from the node's lineage
+- **incremental**: incremental models that may need `--full-refresh` if the schema changes
+- **failing** / **stale**: nodes whose last run errored or warned, or that are out of date
+
+**Build impacted** runs `dbt build --select <node>+`, which builds the node and everything downstream and runs their tests. **Show impact** opens the **Impact** tab in the bottom pane, which lists the selected node and then every downstream node grouped by depth (direct children first). Each row shows its type, materialization, data/unit test count, column test coverage, and flags. The tab follows your selection like the Node DAG tab does. With several nodes Cmd/ctrl-clicked on the DAG, the card (in the multi-selection panel) and the tab show their combined impact: each downstream node appears once, at its shortest distance from any selected node, and Build impacted selects `a+ b+ …`. Use **Copy selector** for the `--select` value, and Cmd/ctrl-click a name to open its file.
+
 ## Viewing model details in the SidePane
 
 With a model selected, the SidePane is persistent — it stays open as you click different nodes. Resize it by dragging the left edge. Collapse it by clicking the collapse arrow.

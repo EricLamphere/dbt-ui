@@ -29,7 +29,7 @@ import { type FilterState, defaultFilter, applyFilter, serializeFilter, deserial
 import { ColumnLineageContext, type ColumnLineageContextValue } from './lib/columnLineageContext';
 import { buildCoverageMap, getModelCoverageStats } from './lib/testCoverage';
 import CoverageLegend from './components/CoverageLegend';
-import { useReportSelectedNode } from './lib/selectedNodeContext';
+import { useReportSelectedNode, useReportSelectedNodes } from './lib/selectedNodeContext';
 import { useLiveRunStatuses, applyLiveStatuses } from './lib/useLiveRunStatuses';
 
 function FitViewOnFirstLoad({ trigger }: { trigger: unknown }) {
@@ -206,6 +206,11 @@ export default function ModelsPage() {
   }, [graph, modelParam]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useReportSelectedNode(selectedModel?.unique_id ?? null);
+  const multiSelectedIds = useMemo(
+    () => (selectedModels.length > 1 ? selectedModels.map((m) => m.unique_id) : []),
+    [selectedModels],
+  );
+  useReportSelectedNodes(multiSelectedIds);
 
   useEffect(() => {
     if (!graph || !selectedModel) return;

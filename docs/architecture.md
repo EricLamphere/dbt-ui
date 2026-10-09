@@ -104,7 +104,9 @@ dbt-ui/
 │   │           ├── lib/
 │   │           │   ├── commandPaletteContext.tsx # React context (CommandPaletteContext) + useCommandPalette() hook
 │   │           │   ├── selectedNodeContext.tsx   # Selected node lifted to ProjectLayout; useReportSelectedNode() (DAG + Files pages)
-│   │           │   └── nodeLineage.ts            # buildNodeLineageGraph() — +uid+ subgraph for the Node DAG tab
+│   │           │   ├── nodeLineage.ts            # buildNodeLineageGraph() — +uid+ subgraph for the Node DAG tab
+│   │           │   ├── impact.ts                 # computeImpact(graph, seedIds) — downstream nodes by depth, test counts, risk flags; buildImpactSelector()
+│   │           │   └── bottomPaneEvents.ts       # openBottomTab() window event so the SidePane can open a bottom pane tab
 │   │       │   └── testCoverage.ts # Test coverage utility; buildCoverageMap(), getModelCoverageStats(), bucketFor(), badgeClassesFor(); derives per-column test counts
 │   │           ├── components/
 │   │           │   └── CommandPalette.tsx # VS Code-style palette (z-[60]); nav + project actions + model search
@@ -124,6 +126,8 @@ dbt-ui/
 │   │               │   ├── index.tsx        # Drag-to-resize pane; tab management; terminal instances
 │   │               │   ├── RunPanel.tsx     # Execution DAG (real-time run_log parsing); shows full-run notice when no model selected
 │   │               │   ├── NodeDagPanel.tsx # Node DAG: +node+ lineage of the selected node (SelectedNodeContext), centered on it
+│   │               │   ├── ImpactPanel.tsx  # Impact: toolbar (selector, counts, flags, Build impacted / Copy selector) + ImpactTable
+│   │               │   ├── ImpactTable.tsx  # Impact list: sticky column + per-depth group headers; tests, column coverage bar, flags
 │   │               │   ├── TerminalPanel.tsx # xterm.js multi-instance terminal; only resizes PTY when dims change
 │   │               │   └── LogPanel.tsx     # Project and API logs
 │   │               ├── NavRail.tsx          # Collapsible left nav sidebar (persists collapsed state in localStorage; resizable when expanded)
@@ -566,6 +570,15 @@ The **Node DAG** tab shows the `+node+` lineage of whatever node is selected on 
 - The selection lives in `ProjectLayout` (`lib/selectedNodeContext.tsx`). The DAG page reports its selected node and the Files page reports the open file's model (or the active test in a YAML file) via `useReportSelectedNode()`; it clears when the page unmounts, so other pages show an empty state
 - `buildNodeLineageGraph()` walks all transitive ancestors and descendants; `filterNodeLineage()` then applies the tab's Type/Materialization/Status dropdowns (shared `FilterDropdown` + `matchesDropdownFilters()` with the main DAG, persisted in sessionStorage as `node-dag-filter-{id}`). Type defaults to seed/source/model/exposure (`defaultNodeDagFilter()`), so tests are hidden until picked or the filter is cleared; the selected node is always kept. Edges that skip hidden nodes are drawn dashed (`bridged`) so the view stays connected
 - The panel is mounted only while its tab is visible, and centers on the selected node at a zoom that keeps the whole lineage in view. It re-centers when the selection or the node set changes, not on status-only refreshes, so a run doesn't move the viewport
+
+### 6b. Impact analysis
+
+`lib/impact.ts` `computeImpact(graph, seedIds)` is a pure function over `GraphDto` (unit-tested in `impact.test.ts`):
+- A breadth-first walk from all seeds at once assigns each downstream node its shortest depth. Test nodes are not walked; they're counted per parent as `dataTests`, and `unit_tests` are matched to models by name as `unitTests`
+- Flags: `untested` (model/snapshot with no tests), `exposure`, `incremental`, `failing` (error/warn), `stale`. The summary counts downstream nodes by type, tests on seeds vs. tests only downstream, and flags across downstream nodes
+- `buildImpactSelector()` produces `<seed>+ …` (sources as `source:x.y`), which `useBuildImpacted()` sends to `POST /build` as `select`
+
+It's shown in two places: `SidePane/ImpactSummary.tsx` (a card in PropertiesTab, hidden for tests and exposures) and the bottom pane **Impact** tab (`ImpactPanel.tsx`, mounted only while visible). The card also appears in the multi-selection panel. The tab uses the DAG's multi-selection when there is one (`SelectedNodeIdsContext`, reported by Models.tsx via `useReportSelectedNodes()` and empty unless 2+ nodes are selected), otherwise `SelectedNodeContext`. The card's **Show impact** button calls `openBottomTab('impact')`, a `dbt-ui:open-bottom-tab` window event that BottomPane listens for. It takes a list of seeds so the planned git change-set mode (uncommitted / branch vs. base) can reuse it.
 
 ### 7. Integrated Terminal
 

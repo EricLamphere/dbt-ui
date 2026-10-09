@@ -5,12 +5,15 @@ import { RunPanel } from './RunPanel';
 import { LogPanel } from './LogPanel';
 import { SingleTerminal } from './TerminalPanel';
 import { NodeDagPanel } from './NodeDagPanel';
+import { ImpactPanel } from './ImpactPanel';
+import { OPEN_BOTTOM_TAB_EVENT, type BottomTabRequest } from '../../lib/bottomPaneEvents';
 
-export type PaneTabId = 'run' | 'node-dag' | 'project-logs' | 'api-logs' | 'terminal';
+export type PaneTabId = 'run' | 'node-dag' | 'impact' | 'project-logs' | 'api-logs' | 'terminal';
 
 const PANE_TABS: { id: PaneTabId; label: string }[] = [
   { id: 'run', label: 'Execution DAG' },
   { id: 'node-dag', label: 'Node DAG' },
+  { id: 'impact', label: 'Impact' },
   { id: 'terminal', label: 'Terminal' },
   { id: 'project-logs', label: 'Project Logs' },
   { id: 'api-logs', label: 'API Logs' },
@@ -26,6 +29,7 @@ interface BottomPaneProps {
   graph: GraphDto | null;
   projectPath: string | null;
   selectedNodeId: string | null;
+  selectedNodeIds: readonly string[];
 }
 
 const MIN_HEIGHT = 180;
@@ -51,7 +55,7 @@ function newTermTab(): TermTab {
   return { id: `term-${termIdCounter}`, label: 'bash' };
 }
 
-export function BottomPane({ projectId, graph, projectPath, selectedNodeId }: BottomPaneProps) {
+export function BottomPane({ projectId, graph, projectPath, selectedNodeId, selectedNodeIds }: BottomPaneProps) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<PaneTabId>('run');
   const [height, setHeight] = useState(readStoredHeight);
@@ -123,6 +127,17 @@ export function BottomPane({ projectId, graph, projectPath, selectedNodeId }: Bo
     }
     setRenamingId(null);
   }, [renamingId, renameValue]);
+
+  // Other components (e.g. the SidePane impact card) can ask for a tab
+  useEffect(() => {
+    const onOpenTab = (e: Event) => {
+      const tab = (e as CustomEvent<BottomTabRequest>).detail;
+      setActiveTab(tab);
+      setOpen(true);
+    };
+    window.addEventListener(OPEN_BOTTOM_TAB_EVENT, onOpenTab);
+    return () => window.removeEventListener(OPEN_BOTTOM_TAB_EVENT, onOpenTab);
+  }, []);
 
   // Close context menu on outside click
   useEffect(() => {
@@ -234,6 +249,17 @@ export function BottomPane({ projectId, graph, projectPath, selectedNodeId }: Bo
       {open && activeTab === 'node-dag' && (
         <div style={{ height }} className="overflow-hidden flex flex-col">
           <NodeDagPanel projectId={projectId} graph={graph} selectedNodeId={selectedNodeId} />
+        </div>
+      )}
+
+      {open && activeTab === 'impact' && (
+        <div style={{ height }} className="overflow-hidden flex flex-col">
+          <ImpactPanel
+            projectId={projectId}
+            graph={graph}
+            selectedNodeId={selectedNodeId}
+            selectedNodeIds={selectedNodeIds}
+          />
         </div>
       )}
 
