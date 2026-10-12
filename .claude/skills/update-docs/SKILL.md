@@ -61,7 +61,7 @@ Open `docs/architecture.md`. Update:
 ## Step 6: Update README.md
 
 Open `README.md`. Update:
-- **Features** list — add a bullet for any user-visible feature
+- **Features** list — add a bullet for any user-visible feature, then run the `sync-feature-lists` skill so `Pricing.tsx` and the lamphere-labs product page match (Base vs. Pro)
 
 The env var tables live in `CONTRIBUTING.md` → Configuration, not the README — add new variables there.
 
